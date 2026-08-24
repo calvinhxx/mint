@@ -62,6 +62,15 @@ string(FIND "${task_directory}" "${FIXTURE_DIR}" task_inside_workspace)
 if(NOT task_inside_workspace EQUAL -1)
     message(FATAL_ERROR "task state must remain outside the workspace: ${task_directory}")
 endif()
+file(READ "${task_directory}/session.json" demo_session)
+string(JSON demo_allow_write GET "${demo_session}" capabilities allow_write)
+string(JSON demo_write_path_count LENGTH "${demo_session}" capabilities allowed_write_paths)
+string(JSON demo_recipe_count LENGTH "${demo_session}" capabilities command_recipes)
+string(JSON demo_require_verification GET "${demo_session}" capabilities require_verification)
+if(demo_allow_write OR demo_write_path_count GREATER 0 OR demo_recipe_count GREATER 0 OR
+   demo_require_verification)
+    message(FATAL_ERROR "managed demo checkpoint must remain read-only: ${demo_session}")
+endif()
 
 execute_process(
     COMMAND "${AIAGENT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
