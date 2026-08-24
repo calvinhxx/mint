@@ -2213,13 +2213,16 @@ void test_model_retry_backoff() {
     return;
 #else
     RetryHttpServer server;
-    aiagent::ChatCompletionsClient client({.api_url = server.url(),
-                                           .model = "retry-test-model",
-                                           .connect_timeout_seconds = 2,
-                                           .request_timeout_seconds = 2,
-                                           .max_retries = 2,
-                                           .retry_initial_delay_ms = 1,
-                                           .max_completion_tokens = 321});
+    std::vector<aiagent::ModelProgress> progress;
+    aiagent::ChatCompletionsClient client(
+        {.api_url = server.url(),
+         .model = "retry-test-model",
+         .connect_timeout_seconds = 2,
+         .request_timeout_seconds = 2,
+         .max_retries = 2,
+         .retry_initial_delay_ms = 1,
+         .max_completion_tokens = 321,
+         .progress = [&](const aiagent::ModelProgress& event) { progress.push_back(event); }});
     const auto started = std::chrono::steady_clock::now();
     const auto reply =
         client.complete(aiagent::Json::array({{{"role", "system"}, {"content", "test"}},
@@ -2243,6 +2246,22 @@ void test_model_retry_backoff() {
                reply.metadata.retries == 2 && reply.metadata.http_status == 200 &&
                reply.metadata.duration_ms >= 50,
            "model client exposes adapter, retry and latency metadata");
+    expect(progress.size() == 6 &&
+               progress.at(0).kind == aiagent::ModelProgressKind::attempt_started &&
+               progress.at(1).kind == aiagent::ModelProgressKind::retry_scheduled &&
+               progress.at(1).http_status == 429 && progress.at(1).delay_ms >= 50 &&
+               progress.at(2).kind == aiagent::ModelProgressKind::attempt_started &&
+               progress.at(3).kind == aiagent::ModelProgressKind::retry_scheduled &&
+               progress.at(3).http_status == 503 &&
+               progress.at(4).kind == aiagent::ModelProgressKind::attempt_started &&
+               progress.at(5).kind == aiagent::ModelProgressKind::request_succeeded &&
+               progress.at(5).http_status == 200 && progress.at(5).attempt == 3 &&
+               progress.at(5).max_attempts == 3,
+           "model progress reports each attempt, retry delay and final response");
+    const auto progress_json = aiagent::model_progress_to_json(progress.at(1));
+    expect(progress_json.at("kind") == "retry_scheduled" && progress_json.at("attempt") == 1 &&
+               progress_json.at("http_status") == 429,
+           "model progress has a stable event-log JSON contract");
 #endif
 }
 
