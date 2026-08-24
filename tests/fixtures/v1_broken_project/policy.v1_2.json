@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "write_paths": ["src/calculator.cpp", "FIX_REPORT.md"],
+  "recipes": [
+    {
+      "name": "configure",
+      "description": "Configure the fixture build directory",
+      "program": "cmake",
+      "args": ["-S", ".", "-B", "build"],
+      "timeout_seconds": 120
+    },
+    {
+      "name": "build",
+      "description": "Build the fixture",
+      "program": "cmake",
+      "args": ["--build", "build"],
+      "timeout_seconds": 120
+    },
+    {
+      "name": "test",
+      "description": "Run the fixture regression test",
+      "program": "ctest",
+      "args": ["--test-dir", "build", "--output-on-failure"],
+      "timeout_seconds": 120,
+      "verification": true
+    }
+  ],
+  "require_verification": true,
+  "max_turns": 24,
+  "max_context_bytes": 131072,
+  "max_seconds": 600
+}

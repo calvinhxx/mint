@@ -69,3 +69,8 @@ aiagent_configure_target(aiagent)
 target_link_libraries(aiagent PRIVATE aiagent_core)
 
 include(cmake/DeveloperTools.cmake)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
