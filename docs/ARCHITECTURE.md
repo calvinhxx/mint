@@ -30,6 +30,7 @@ tests/
   aiagent_tests.cpp   既有单元/集成/安全回归
   v1_2/              v1.2 独立契约测试
   v1_3/              项目识别、状态隔离与 task policy 快照契约
+  v1_4/              provider 协议、SSE 与两轮 CLI 闭环契约
   fixtures/          可重复的端到端故障工程
 cmake/               编译告警、Sanitizer、格式化规则
 ```
@@ -59,7 +60,8 @@ CMake 按上述边界生成 `aiagent_domain`、`aiagent_runtime`、`aiagent_infr
 | `ProjectService` | 识别支持的工程并生成最小 policy 建议 | 持久化、信任决定、执行命令 |
 | `ProjectStore` | 工作区外 profile、task id、policy 快照和状态发现 | Agent 执行、跨进程锁、任务调度 |
 | `ModelClient` | 模型端口与标准 reply/usage/metadata | provider 配置加载 |
-| `ChatCompletionsClient` | HTTP 请求、错误分类、退避重试、响应解析、传输进度 | Agent 策略 |
+| `ModelProviderClient` | HTTP、退避重试、Chat/Responses adapter、SSE 与传输进度 | Agent 策略 |
+| `model_protocol` | 两种协议的请求翻译、响应归一化和分片 SSE 解码 | 网络、密钥、重试 |
 | `TaskPolicy` | 严格解析写范围、固定 recipe 和预算，生成能力指纹 | 自动信任仓库文件 |
 | `ToolRegistry` | 只暴露获授权工具，执行路径/参数/保护规则 | 自由 shell |
 | `ChangeSet` | 多文件预校验、diff 审批、事务提交、失败回滚 | 跨进程/跨机器事务 |
@@ -113,9 +115,12 @@ CMake 按上述边界生成 `aiagent_domain`、`aiagent_runtime`、`aiagent_infr
 
 ### 传输进度契约
 
-- Chat Completions 每次 attempt 开始、retry 安排、成功和终止失败都会产生 `ModelProgress`。
-- 进度只包含 attempt、HTTP status、等待和耗时，不包含密钥、prompt、响应正文或 provider 错误正文。
-- 文本 CLI 实时写 stderr；managed task 同时记录 `model_progress` JSONL 事件；`--json` 的 stdout 始终只保留最终机器结果。
+- `ModelAdapter` 只允许 `chat_completions` 或 `responses`；未配置时保持 v1.3 的非流式 Chat Completions 行为。
+- adapter 把两种外部协议归一化为同一个 `ModelReply`，Agent Loop 不分支判断 provider。
+- Responses 使用 `call_id` 关联 function call/output，并在未压缩历史中保留原始 output items；切换 adapter 或触发上下文压缩时回退到规范化消息。
+- 每次 attempt、stream 开始/结束、retry、成功和终止失败都会产生 `ModelProgress`。
+- 流式计数只包含事件数和增量字节数；JSONL 不记录密钥、prompt、响应正文或工具参数正文。
+- 文本 CLI 把 `output_text` 增量写到 stderr；`--json` 不输出增量，stdout 始终只保留最终机器结果。
 
 ## 代码风格
 
