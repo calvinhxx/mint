@@ -2183,6 +2183,8 @@ void test_json_config() {
     expect(config.max_retries == 4, "JSON config loads retry count");
     expect(config.retry_initial_delay_ms == 123, "JSON config loads retry delay");
     expect(config.max_completion_tokens == 777, "JSON config loads the completion token ceiling");
+    expect(config.adapter == aiagent::ModelAdapter::chat_completions && !config.stream,
+           "legacy JSON config keeps the Chat Completions non-streaming defaults");
 
     const auto invalid_path = temporary.path() / "invalid.json";
     write_text(invalid_path, R"({"api_url":"https://example.test","api_key":"x"})");

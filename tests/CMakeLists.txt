@@ -17,12 +17,19 @@ target_link_libraries(aiagent_v1_3_tests PRIVATE aiagent_core)
 add_test(NAME aiagent_v1_3_tests COMMAND aiagent_v1_3_tests)
 set_tests_properties(aiagent_v1_3_tests PROPERTIES LABELS "v1.3;contract")
 
+add_executable(aiagent_v1_4_tests v1_4/provider_contract_tests.cpp)
+aiagent_configure_target(aiagent_v1_4_tests)
+target_include_directories(aiagent_v1_4_tests PRIVATE ${PROJECT_SOURCE_DIR}/src/infrastructure)
+target_link_libraries(aiagent_v1_4_tests PRIVATE aiagent_core)
+add_test(NAME aiagent_v1_4_tests COMMAND aiagent_v1_4_tests $<TARGET_FILE:aiagent>)
+set_tests_properties(aiagent_v1_4_tests PROPERTIES LABELS "v1.4;contract;acceptance")
+
 add_test(NAME aiagent_cli_version COMMAND $<TARGET_FILE:aiagent> --version)
 set_tests_properties(
     aiagent_cli_version
     PROPERTIES
-        LABELS "v1.3;smoke"
-        PASS_REGULAR_EXPRESSION "aiagent 1\\.3\\.0"
+        LABELS "v1.4;smoke"
+        PASS_REGULAR_EXPRESSION "aiagent 1\\.4\\.0"
 )
 
 add_test(
