@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 - 2026-08-24
+
+- Added the `init`, `run`, `resume`, and `status` project workflow while preserving the legacy CLI; managed demos are read-only and non-resumable.
+- Added explicit CMake, Cargo, and npm policy suggestions with unsupported projects defaulting to read-only.
+- Added private project and task state outside the workspace, including immutable per-task policy snapshots.
+- Added task IDs, resumable-task discovery, completed-task rejection, and machine-readable status output.
+- Added real-time model attempt, retry-delay, success, and failure progress to the terminal and JSONL events.
+- Added v1.3 project-store contracts and an end-to-end managed CLI acceptance gate.
+
 ## 1.2.0 - 2026-08-24
 
 - Reorganized the project into application, domain, infrastructure, runtime, tools, and CLI layers.

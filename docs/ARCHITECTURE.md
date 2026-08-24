@@ -13,9 +13,9 @@
 
 ```text
 include/aiagent/
-  application/       Agent Loop、结果与执行摘要
+  application/       Agent Loop、结果摘要、项目能力建议
   domain/            模型端口、TaskPolicy、ChangeJournal
-  infrastructure/    模型网关、命令执行、配置、事件、会话存储
+  infrastructure/    模型网关、命令执行、配置、事件、项目/任务存储
   runtime/           取消与墙钟预算
   tools/             模型工具注册表与能力边界
   *.hpp              v1.0 公共头兼容转发层
@@ -29,6 +29,7 @@ src/
 tests/
   aiagent_tests.cpp   既有单元/集成/安全回归
   v1_2/              v1.2 独立契约测试
+  v1_3/              项目识别、状态隔离与 task policy 快照契约
   fixtures/          可重复的端到端故障工程
 cmake/               编译告警、Sanitizer、格式化规则
 ```
@@ -55,8 +56,10 @@ CMake 按上述边界生成 `aiagent_domain`、`aiagent_runtime`、`aiagent_infr
 | 模块 | 责任 | 不负责 |
 |---|---|---|
 | `Agent` | 模型/工具循环、上下文预算、验证门禁、检查点恢复、最终结果 | HTTP、文件系统写入、进程启动 |
+| `ProjectService` | 识别支持的工程并生成最小 policy 建议 | 持久化、信任决定、执行命令 |
+| `ProjectStore` | 工作区外 profile、task id、policy 快照和状态发现 | Agent 执行、跨进程锁、任务调度 |
 | `ModelClient` | 模型端口与标准 reply/usage/metadata | provider 配置加载 |
-| `ChatCompletionsClient` | HTTP 请求、错误分类、退避重试、响应解析 | Agent 策略 |
+| `ChatCompletionsClient` | HTTP 请求、错误分类、退避重试、响应解析、传输进度 | Agent 策略 |
 | `TaskPolicy` | 严格解析写范围、固定 recipe 和预算，生成能力指纹 | 自动信任仓库文件 |
 | `ToolRegistry` | 只暴露获授权工具，执行路径/参数/保护规则 | 自由 shell |
 | `ChangeSet` | 多文件预校验、diff 审批、事务提交、失败回滚 | 跨进程/跨机器事务 |
@@ -68,10 +71,21 @@ CMake 按上述边界生成 `aiagent_domain`、`aiagent_runtime`、`aiagent_infr
 
 ## 关键状态契约
 
+### 项目与任务契约
+
+- `init` 是采用工程建议的显式用户动作；运行时不会从仓库自动加载能力文件。
+- CMake、Cargo 和带 build/test scripts 的 npm 工程获得固定 recipe 建议；未知工程与无受支持脚本的 npm 工程保持只读。
+- 默认状态目录位于工作区外：macOS 使用 `~/Library/Application Support/aiagent`，Linux 使用 `$XDG_STATE_HOME/aiagent` 或 `~/.local/state/aiagent`，Windows 使用 `%LOCALAPPDATA%/aiagent`。
+- `--state-dir` 可以覆盖默认位置，但它与工作区不能互相包含；已有目录必须已经是当前用户私有目录，aiagent 不会替用户修改公共目录权限。
+- 每个项目使用稳定 workspace key；每个 task 独立保存 `task.json`、`policy.json`、`session.json` 和 `events.jsonl`。
+- task metadata 区分 `model` 与 `demo`；managed demo 强制只读且不可恢复，避免中断后切换成真实 provider 或初始化无用的命令后端。
+- task 创建时复制项目 policy；后续 `init --force` 只影响新任务，恢复旧任务仍使用原快照。
+- 新状态目录限制为当前用户访问；build manifest、状态层级、task 目录、metadata 和 policy 不接受符号链接替换。
+
 ### 能力契约
 
 - 默认只读；写和命令能力不会隐式开启。
-- `--policy` 必须由用户明确指定，避免仓库自行授予能力。
+- 兼容工作流中的 `--policy` 必须由用户明确指定；日常工作流只使用外部 ProjectStore 中的 project/task policy。
 - Recipe 的 program、argv、cwd、timeout 和 verification 标记在任务开始前固定。
 - Policy fingerprint 只用于恢复时检测能力漂移，不是密码学签名或信任来源。
 - 模型配置、policy、session、events 和仓库元数据进入保护路径，不可被模型读取或修改。
@@ -96,6 +110,12 @@ CMake 按上述边界生成 `aiagent_domain`、`aiagent_runtime`、`aiagent_infr
 - 工具结果入历史并保存后才清除 in-flight 标记。
 - 崩溃后只读工具可以安全自动重放；有副作用工具默认停止，只有用户检查状态后显式使用 `--retry-inflight` 才会重试。
 - schema v2 可迁移到 v3；残缺的 v3 快照不做猜测性修复。
+
+### 传输进度契约
+
+- Chat Completions 每次 attempt 开始、retry 安排、成功和终止失败都会产生 `ModelProgress`。
+- 进度只包含 attempt、HTTP status、等待和耗时，不包含密钥、prompt、响应正文或 provider 错误正文。
+- 文本 CLI 实时写 stderr；managed task 同时记录 `model_progress` JSONL 事件；`--json` 的 stdout 始终只保留最终机器结果。
 
 ## 代码风格
 

@@ -1,8 +1,8 @@
 # aiagent
 
-一个 C++20 本地 Coding Agent Harness。模型只能在你明确授予的范围内读文件、提交文本变更和运行固定命令；修改后的最终回答还可以由测试结果强制门禁。
+一个 C++20 本地 Coding Agent Harness。默认只读；写路径、固定命令和验证门禁都由用户明确授权。
 
-当前版本：`v1.2.0`（macOS arm64 参考实现）。
+当前版本：`v1.3.0`（macOS arm64 参考实现）。
 
 ## 快速开始
 
@@ -12,57 +12,44 @@
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
-./build/aiagent --demo "这个项目从哪里启动？"
+
+./build/aiagent init --root .
+./build/aiagent run --root . --demo "这个项目从哪里启动？"
+./build/aiagent status --root .
 ```
 
-离线演示使用固定脚本，不需要 API Key。
-
-## 使用真实模型
+离线 `--demo` 不需要 API Key。真实模型使用：
 
 ```bash
 cp config.example.json config.json
 # 编辑 config.json
-./build/aiagent --root . "说明这个项目的入口和核心模块"
+./build/aiagent run --root . "修复失败测试，验证通过后总结"
 ```
 
-接口需兼容 Chat Completions function tools。`config.json` 已被 Git 忽略，并在所有 Agent 文件工具和命令沙箱中受保护。
+真实模型任务中断后运行 `./build/aiagent resume --root .`；默认恢复最近一个可恢复任务，也可用 `--task ID` 指定。离线 demo 始终强制只读，且不会恢复成真实模型任务。
 
-编码任务推荐使用显式 policy，而不是每次拼一长串参数：
+`init` 是显式信任动作：它识别 CMake、Cargo 或 npm 工程，生成可检查的写路径和固定 recipes。项目 profile、任务 policy 快照、session 与 events 保存在工作区外；仓库文件不会在运行时静默扩大旧任务权限。
 
-```bash
-cp policy.example.json policy.json
-# 按目标仓库修改 write_paths 与 recipes
-./build/aiagent \
-  --config config.json \
-  --root /path/to/project \
-  --policy /path/to/policy.json \
-  "修复失败测试，验证通过后总结改动"
-```
+## 核心边界
 
-Policy 固定写路径、命令参数、验证命令和运行预算；它不会自动从仓库加载，必须通过 `--policy` 明确采用。需要人工复核多文件事务时，再加 `--approve-each-changeset`。
+- `apply_patch` 精确修改单文件；`apply_changeset` 原子提交多文件事务，失败回滚。
+- 模型只能选择 policy 中的 recipe 名称，不能临时改写 program/argv/cwd。
+- 最新写入后，必须由最新成功的 verification recipe 解除验证门禁。
+- schema v3 checkpoint 区分 pending 与 in-flight；有副作用的模糊操作默认不重放。
+- 模型请求尝试、重试等待和结果会实时显示并写入脱敏 JSONL 事件。
+- macOS 命令默认进入 Seatbelt；没有受支持安全后端时，CLI 默认拒绝命令执行。
 
-## v1.2 核心能力
-
-- 默认只读；写入、命令和路径范围均为显式授权。
-- `apply_patch` 处理单文件精确替换，`apply_changeset` 原子提交创建、替换、删除和移动，失败自动回滚。
-- Policy recipes 固定 program/argv/cwd/timeout；模型不能临时改写命令。
-- 最新写入之后，只有标记为 verification 的最新成功 recipe 才能解除验证门禁。
-- schema v3 检查点记录 pending 与 in-flight 工具；恢复时只读操作可重放，副作用默认阻断，需显式 `--retry-inflight`。
-- JSONL 事件与最终 JSON 包含调用、重试、耗时、token、命令和变更摘要，不记录密钥或大段敏感正文。
-- macOS 命令默认进入 Seatbelt；无受支持安全后端时 CLI 默认拒绝命令执行。
-
-查看完整 CLI：
+高级兼容模式仍支持显式 `--policy`、`--session` 和原始 capability flags，详见：
 
 ```bash
 ./build/aiagent --help
-./build/aiagent --version
 ```
 
 ## 文档
 
 - [工程结构与设计约束](docs/ARCHITECTURE.md)
 - [核心模块与完成进度](docs/PROGRESS.md)
-- [v1.2 验收记录](docs/V1_2_ACCEPTANCE.md)
-- [v1.0 历史验收记录](docs/V1_ACCEPTANCE.md)
+- [v1.3 验收记录](docs/V1_3_ACCEPTANCE.md)
+- [v1.2 外部模型验收记录](docs/V1_2_ACCEPTANCE.md)
 
-安全边界：这是受控执行 Harness，不是容器或完整 OS 沙箱。v1.2 的命令沙箱、确定性测试和当前配置 provider 的隔离闭环已在 macOS arm64 验收；该结果不代表所有 provider，Linux/Windows 原生安全后端尚未完成。
+安全边界：这是受控执行 Harness，不是容器。macOS 已有参考安全后端；Linux/Windows 原生命令隔离尚未完成。外部模型证据只代表验收时使用的具体 provider 配置。
