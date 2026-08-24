@@ -1,12 +1,16 @@
-#include "aiagent/infrastructure/chat_completions_client.hpp"
+#include "aiagent/infrastructure/model_provider_client.hpp"
 #include "aiagent/runtime/task_control.hpp"
 #include "aiagent/version.hpp"
+
+#include "model_protocol.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -52,6 +56,7 @@ using CurlHandle = std::unique_ptr<CURL, CurlDeleter>;
 using HeaderList = std::unique_ptr<curl_slist, HeaderDeleter>;
 
 struct ResponseHeaders {
+    long http_status = 0;
     long retry_after_ms = -1;
     long token_reset_ms = -1;
 };
@@ -68,11 +73,28 @@ long timeout_milliseconds(long seconds) {
     return seconds * 1000L;
 }
 
+struct ResponseSink {
+    std::string body;
+    std::unique_ptr<detail::ModelStreamDecoder> stream;
+    std::exception_ptr stream_error;
+    ResponseHeaders headers;
+};
+
 std::size_t append_response(char* data, std::size_t size, std::size_t count, void* user_data) {
     const auto bytes = size * count;
-    auto& response = *static_cast<std::string*>(user_data);
-    response.append(data, bytes);
-    return bytes;
+    auto& response = *static_cast<ResponseSink*>(user_data);
+    try {
+        response.body.append(data, bytes);
+        if (response.stream != nullptr &&
+            (response.headers.http_status == 0 ||
+             (response.headers.http_status >= 200 && response.headers.http_status < 300))) {
+            response.stream->feed(std::string_view(data, bytes));
+        }
+        return bytes;
+    } catch (...) {
+        response.stream_error = std::current_exception();
+        return 0;
+    }
 }
 
 std::string trim_ascii(std::string_view value) {
@@ -149,8 +171,21 @@ long parse_rate_limit_duration_ms(std::string text) noexcept {
 std::size_t capture_response_header(char* data, std::size_t size, std::size_t count,
                                     void* user_data) {
     const auto bytes = size * count;
-    auto& headers = *static_cast<ResponseHeaders*>(user_data);
+    auto& headers = static_cast<ResponseSink*>(user_data)->headers;
     const std::string_view line(data, bytes);
+    if (line.starts_with("HTTP/")) {
+        const auto separator = line.find(' ');
+        if (separator != std::string_view::npos) {
+            long status = 0;
+            const auto begin = line.data() + separator + 1;
+            const auto end = line.data() + line.size();
+            const auto parsed = std::from_chars(begin, end, status);
+            if (parsed.ec == std::errc{}) {
+                headers.http_status = status;
+            }
+        }
+        return bytes;
+    }
     const auto separator = line.find(':');
     if (separator == std::string_view::npos) {
         return bytes;
@@ -195,28 +230,6 @@ std::string response_error(const std::string& body, long status) {
            (shortened.empty() ? std::string{} : ": " + shortened);
 }
 
-std::string extract_text(const Json& content) {
-    if (content.is_null()) {
-        return {};
-    }
-    if (content.is_string()) {
-        return content.get<std::string>();
-    }
-    if (!content.is_array()) {
-        return content.dump();
-    }
-
-    std::string result;
-    for (const auto& part : content) {
-        if (part.is_string()) {
-            result += part.get<std::string>();
-        } else if (part.is_object() && part.contains("text") && part.at("text").is_string()) {
-            result += part.at("text").get<std::string>();
-        }
-    }
-    return result;
-}
-
 void truncate_utf8_at_boundary(std::string& value, std::size_t byte_limit) {
     if (value.size() <= byte_limit) {
         return;
@@ -228,102 +241,6 @@ void truncate_utf8_at_boundary(std::string& value, std::size_t byte_limit) {
     }
     value.resize(boundary);
     value += "...";
-}
-
-ModelReply parse_reply(const Json& response) {
-    if (!response.contains("choices") || !response.at("choices").is_array() ||
-        response.at("choices").empty()) {
-        throw std::runtime_error("模型响应缺少 choices[0]");
-    }
-
-    const auto& choice = response.at("choices").at(0);
-    if (!choice.contains("message") || !choice.at("message").is_object()) {
-        throw std::runtime_error("模型响应缺少 assistant message");
-    }
-
-    ModelReply reply;
-    reply.metadata.response_id = response.value("id", "");
-    reply.metadata.model = response.value("model", "");
-    reply.assistant_message = choice.at("message");
-    reply.assistant_message["role"] = "assistant";
-
-    if (reply.assistant_message.contains("content")) {
-        reply.text = extract_text(reply.assistant_message.at("content"));
-    }
-
-    if (response.contains("usage") && response.at("usage").is_object()) {
-        const auto& usage = response.at("usage");
-        const auto token_count = [&](const Json& object, const char* field) {
-            if (!object.contains(field) || !object.at(field).is_number_integer()) {
-                return std::size_t{0};
-            }
-            const auto value = object.at(field).get<long long>();
-            return value < 0 ? std::size_t{0} : static_cast<std::size_t>(value);
-        };
-
-        reply.usage.available = usage.contains("prompt_tokens") ||
-                                usage.contains("completion_tokens") ||
-                                usage.contains("total_tokens");
-        reply.usage.prompt_tokens = token_count(usage, "prompt_tokens");
-        reply.usage.completion_tokens = token_count(usage, "completion_tokens");
-        reply.usage.total_tokens = token_count(usage, "total_tokens");
-        if (reply.usage.total_tokens == 0 && reply.usage.available) {
-            reply.usage.total_tokens = reply.usage.prompt_tokens + reply.usage.completion_tokens;
-        }
-        if (usage.contains("prompt_tokens_details") &&
-            usage.at("prompt_tokens_details").is_object()) {
-            reply.usage.cached_tokens =
-                token_count(usage.at("prompt_tokens_details"), "cached_tokens");
-        }
-        reply.usage.cached_tokens = std::min(reply.usage.cached_tokens, reply.usage.prompt_tokens);
-    }
-
-    if (!reply.assistant_message.contains("tool_calls")) {
-        return reply;
-    }
-
-    const auto& raw_calls = reply.assistant_message.at("tool_calls");
-    if (!raw_calls.is_array()) {
-        throw std::runtime_error("模型响应中的 tool_calls 不是数组");
-    }
-
-    for (const auto& raw_call : raw_calls) {
-        if (!raw_call.is_object() || raw_call.value("type", "function") != "function" ||
-            !raw_call.contains("function") || !raw_call.at("function").is_object()) {
-            throw std::runtime_error("第一版只支持 function 类型的工具调用");
-        }
-
-        const auto& function = raw_call.at("function");
-        if (!raw_call.contains("id") || !raw_call.at("id").is_string() ||
-            !function.contains("name") || !function.at("name").is_string()) {
-            throw std::runtime_error("工具调用缺少 id 或 function.name");
-        }
-
-        ToolCall call;
-        call.id = raw_call.at("id").get<std::string>();
-        call.name = function.at("name").get<std::string>();
-
-        if (!function.contains("arguments") || function.at("arguments").is_null()) {
-            call.arguments = Json::object();
-        } else if (function.at("arguments").is_object()) {
-            call.arguments = function.at("arguments");
-        } else if (function.at("arguments").is_string()) {
-            try {
-                call.arguments = Json::parse(function.at("arguments").get<std::string>());
-            } catch (const Json::exception& error) {
-                throw std::runtime_error("工具参数不是有效 JSON: " + std::string(error.what()));
-            }
-        } else {
-            throw std::runtime_error("工具参数必须是 JSON 对象或 JSON 字符串");
-        }
-
-        if (!call.arguments.is_object()) {
-            throw std::runtime_error("工具参数的 JSON 顶层必须是对象");
-        }
-        reply.tool_calls.push_back(std::move(call));
-    }
-
-    return reply;
 }
 
 ModelReply demo_tool_call(std::string id, std::string name, Json arguments) {
@@ -340,10 +257,24 @@ ModelReply demo_tool_call(std::string id, std::string name, Json arguments) {
 
 } // namespace
 
+std::string_view model_adapter_name(ModelAdapter adapter) noexcept {
+    switch (adapter) {
+    case ModelAdapter::chat_completions:
+        return "chat_completions";
+    case ModelAdapter::responses:
+        return "responses";
+    }
+    return "unknown";
+}
+
 std::string_view model_progress_kind_name(ModelProgressKind kind) noexcept {
     switch (kind) {
     case ModelProgressKind::attempt_started:
         return "attempt_started";
+    case ModelProgressKind::stream_started:
+        return "stream_started";
+    case ModelProgressKind::stream_completed:
+        return "stream_completed";
     case ModelProgressKind::retry_scheduled:
         return "retry_scheduled";
     case ModelProgressKind::request_succeeded:
@@ -360,11 +291,12 @@ Json model_progress_to_json(const ModelProgress& progress) {
             {"max_attempts", progress.max_attempts},
             {"http_status", progress.http_status},
             {"delay_ms", progress.delay_ms},
-            {"elapsed_ms", progress.elapsed_ms}};
+            {"elapsed_ms", progress.elapsed_ms},
+            {"stream_events", progress.stream_events},
+            {"streamed_bytes", progress.streamed_bytes}};
 }
 
-ChatCompletionsClient::ChatCompletionsClient(ChatCompletionsConfig config)
-    : config_(std::move(config)) {
+ModelProviderClient::ModelProviderClient(ModelProviderConfig config) : config_(std::move(config)) {
     if (config_.api_url.empty()) {
         throw std::invalid_argument("模型接口地址不能为空");
     }
@@ -380,7 +312,7 @@ ChatCompletionsClient::ChatCompletionsClient(ChatCompletionsConfig config)
     ensure_curl_is_initialized();
 }
 
-ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& tools) {
+ModelReply ModelProviderClient::complete(const Json& messages, const Json& tools) {
     const auto request_started = std::chrono::steady_clock::now();
     const auto elapsed_ms = [&]() {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -394,25 +326,20 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
             config_.progress(progress);
         }
     };
-    Json request = {{"model", config_.model},
-                    {"messages", messages},
-                    {"max_completion_tokens", config_.max_completion_tokens}};
-    if (!tools.empty()) {
-        request["tools"] = tools;
-        request["tool_choice"] = "auto";
-    }
-
-    const auto request_body = request.dump();
+    const auto request_body = detail::build_provider_request(config_, messages, tools).dump();
     struct Attempt {
         CURLcode curl_result = CURLE_OK;
         long http_status = 0;
-        std::string body;
+        ResponseSink response;
         std::string curl_error;
-        ResponseHeaders headers;
     };
 
     const auto perform_attempt = [&]() {
         Attempt attempt;
+        if (config_.stream) {
+            attempt.response.stream =
+                std::make_unique<detail::ModelStreamDecoder>(config_.adapter, config_.stream_event);
+        }
         std::array<char, CURL_ERROR_SIZE> error_buffer{};
         CurlHandle handle(curl_easy_init());
         if (!handle) {
@@ -437,9 +364,9 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
         curl_easy_setopt(handle.get(), CURLOPT_POSTFIELDSIZE_LARGE,
                          static_cast<curl_off_t>(request_body.size()));
         curl_easy_setopt(handle.get(), CURLOPT_WRITEFUNCTION, append_response);
-        curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &attempt.body);
+        curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &attempt.response);
         curl_easy_setopt(handle.get(), CURLOPT_HEADERFUNCTION, capture_response_header);
-        curl_easy_setopt(handle.get(), CURLOPT_HEADERDATA, &attempt.headers);
+        curl_easy_setopt(handle.get(), CURLOPT_HEADERDATA, &attempt.response);
         auto connect_timeout_ms = timeout_milliseconds(config_.connect_timeout_seconds);
         auto request_timeout_ms = timeout_milliseconds(config_.request_timeout_seconds);
         if (config_.task_control != nullptr) {
@@ -499,6 +426,9 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
     for (long attempt_index = 0;; ++attempt_index) {
         const auto attempt_number = static_cast<std::size_t>(attempt_index + 1);
         emit_progress({.kind = ModelProgressKind::attempt_started, .attempt = attempt_number});
+        if (config_.stream) {
+            emit_progress({.kind = ModelProgressKind::stream_started, .attempt = attempt_number});
+        }
         Attempt attempt;
         try {
             attempt = perform_attempt();
@@ -506,11 +436,27 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
             emit_progress({.kind = ModelProgressKind::request_failed, .attempt = attempt_number});
             throw;
         }
+        if (attempt.response.stream_error != nullptr) {
+            emit_progress({.kind = ModelProgressKind::request_failed,
+                           .attempt = attempt_number,
+                           .http_status = attempt.http_status});
+            std::rethrow_exception(attempt.response.stream_error);
+        }
         if (attempt.curl_result == CURLE_OK && attempt.http_status >= 200 &&
             attempt.http_status < 300) {
             try {
-                auto reply = parse_reply(Json::parse(attempt.body));
-                reply.metadata.adapter = "chat_completions";
+                Json response;
+                std::size_t stream_events = 0;
+                std::size_t streamed_bytes = 0;
+                if (config_.stream) {
+                    response = attempt.response.stream->finish();
+                    stream_events = attempt.response.stream->event_count();
+                    streamed_bytes = attempt.response.stream->streamed_bytes();
+                } else {
+                    response = Json::parse(attempt.response.body);
+                }
+                auto reply = detail::parse_provider_response(config_.adapter, response);
+                reply.metadata.adapter = model_adapter_name(config_.adapter);
                 if (reply.metadata.model.empty()) {
                     reply.metadata.model = config_.model;
                 }
@@ -518,6 +464,16 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
                 reply.metadata.retries = static_cast<std::size_t>(attempt_index);
                 reply.metadata.http_status = attempt.http_status;
                 reply.metadata.duration_ms = elapsed_ms();
+                reply.metadata.streamed = config_.stream;
+                reply.metadata.stream_events = stream_events;
+                reply.metadata.streamed_bytes = streamed_bytes;
+                if (config_.stream) {
+                    emit_progress({.kind = ModelProgressKind::stream_completed,
+                                   .attempt = attempt_number,
+                                   .http_status = attempt.http_status,
+                                   .stream_events = stream_events,
+                                   .streamed_bytes = streamed_bytes});
+                }
                 emit_progress({.kind = ModelProgressKind::request_succeeded,
                                .attempt = attempt_number,
                                .http_status = attempt.http_status});
@@ -528,6 +484,11 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
                                .http_status = attempt.http_status});
                 throw std::runtime_error("模型返回的内容不是有效 JSON: " +
                                          std::string(error.what()));
+            } catch (...) {
+                emit_progress({.kind = ModelProgressKind::request_failed,
+                               .attempt = attempt_number,
+                               .http_status = attempt.http_status});
+                throw;
             }
         }
 
@@ -554,13 +515,13 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
                                          : attempt.curl_error;
                 throw std::runtime_error("请求模型失败: " + details);
             }
-            throw std::runtime_error(response_error(attempt.body, attempt.http_status));
+            throw std::runtime_error(response_error(attempt.response.body, attempt.http_status));
         }
 
         auto effective_delay_ms = delay_ms;
         if (attempt.http_status == 429) {
-            const auto server_delay_ms =
-                std::max(attempt.headers.retry_after_ms, attempt.headers.token_reset_ms);
+            const auto server_delay_ms = std::max(attempt.response.headers.retry_after_ms,
+                                                  attempt.response.headers.token_reset_ms);
             if (server_delay_ms >= 0) {
                 effective_delay_ms = std::max(effective_delay_ms, server_delay_ms + 50);
             }

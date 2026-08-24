@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(aiagent VERSION 1.3.0 LANGUAGES CXX)
+project(aiagent VERSION 1.4.0 LANGUAGES CXX)
 
 include(FetchContent)
 include(cmake/ProjectOptions.cmake)
@@ -34,6 +34,7 @@ add_library(aiagent_infrastructure STATIC
     src/infrastructure/config.cpp
     src/infrastructure/event_log.cpp
     src/infrastructure/model_client.cpp
+    src/infrastructure/model_protocol.cpp
     src/infrastructure/project_store.cpp
     src/infrastructure/session_store.cpp
 )

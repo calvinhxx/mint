@@ -32,6 +32,9 @@ struct ModelCallMetadata {
     std::size_t retries = 0;
     long http_status = 0;
     long long duration_ms = 0;
+    bool streamed = false;
+    std::size_t stream_events = 0;
+    std::size_t streamed_bytes = 0;
 };
 
 struct ModelReply {

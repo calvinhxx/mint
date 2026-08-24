@@ -60,6 +60,9 @@ struct ModelSummary {
     std::size_t completion_tokens = 0;
     std::size_t total_tokens = 0;
     std::size_t cached_tokens = 0;
+    std::size_t streamed_calls = 0;
+    std::size_t stream_events = 0;
+    std::size_t streamed_bytes = 0;
     long long duration_ms = 0;
     std::string adapter;
     std::string model;

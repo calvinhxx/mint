@@ -70,6 +70,10 @@ void compact_message_payload(Json& message, std::size_t string_limit) {
     if (!message.is_object()) {
         return;
     }
+    // Responses output items can contain large provider-specific state. Once a
+    // historical group is compacted, fall back to the canonical chat-shaped
+    // content/tool_calls instead of retaining a stale unbounded copy.
+    message.erase("_aiagent_provider_state");
     if (message.contains("content") && message.at("content").is_string()) {
         auto content = message.at("content").get<std::string>();
         if (message.value("role", "") == "tool") {
@@ -163,7 +167,10 @@ Json model_metadata_json(const ModelCallMetadata& metadata) {
         {"attempts", metadata.attempts},
         {"retries", metadata.retries},
         {"http_status", metadata.http_status},
-        {"duration_ms", metadata.duration_ms}};
+        {"duration_ms", metadata.duration_ms},
+        {"streamed", metadata.streamed},
+        {"stream_events", metadata.stream_events},
+        {"streamed_bytes", metadata.streamed_bytes}};
 }
 
 void record_model_call(ModelSummary& summary, const ModelReply& reply) {
@@ -171,6 +178,11 @@ void record_model_call(ModelSummary& summary, const ModelReply& reply) {
     summary.attempts += reply.metadata.attempts;
     summary.retries += reply.metadata.retries;
     summary.duration_ms += reply.metadata.duration_ms;
+    if (reply.metadata.streamed) {
+        ++summary.streamed_calls;
+        summary.stream_events += reply.metadata.stream_events;
+        summary.streamed_bytes += reply.metadata.streamed_bytes;
+    }
     if (!reply.metadata.adapter.empty()) {
         summary.adapter = reply.metadata.adapter;
     }
@@ -198,6 +210,9 @@ Json model_summary_to_json(const ModelSummary& summary) {
             {"completion_tokens", summary.completion_tokens},
             {"total_tokens", summary.total_tokens},
             {"cached_tokens", summary.cached_tokens},
+            {"streamed_calls", summary.streamed_calls},
+            {"stream_events", summary.stream_events},
+            {"streamed_bytes", summary.streamed_bytes},
             {"duration_ms", summary.duration_ms},
             {"adapter", summary.adapter},
             {"model", summary.model},
@@ -224,6 +239,18 @@ ModelSummary model_summary_from_json(const Json& value) {
     summary.completion_tokens = read_size("completion_tokens");
     summary.total_tokens = read_size("total_tokens");
     summary.cached_tokens = read_size("cached_tokens");
+    const auto read_optional_size = [&](const char* field) {
+        if (!value.contains(field)) {
+            return std::size_t{0};
+        }
+        if (!value.at(field).is_number_unsigned()) {
+            throw std::invalid_argument("会话模型摘要字段无效: " + std::string(field));
+        }
+        return value.at(field).get<std::size_t>();
+    };
+    summary.streamed_calls = read_optional_size("streamed_calls");
+    summary.stream_events = read_optional_size("stream_events");
+    summary.streamed_bytes = read_optional_size("streamed_bytes");
     if (!value.contains("duration_ms") || !value.at("duration_ms").is_number_integer() ||
         !value.contains("adapter") || !value.at("adapter").is_string() ||
         !value.contains("model") || !value.at("model").is_string()) {
@@ -239,7 +266,7 @@ ModelSummary model_summary_from_json(const Json& value) {
     }
     if (summary.attempts < summary.calls || summary.retries > summary.attempts ||
         summary.usage_reports > summary.calls || summary.duration_ms < 0 ||
-        summary.cached_tokens > summary.prompt_tokens) {
+        summary.cached_tokens > summary.prompt_tokens || summary.streamed_calls > summary.calls) {
         throw std::invalid_argument("会话模型摘要计数不一致");
     }
     return summary;

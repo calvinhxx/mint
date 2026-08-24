@@ -1,11 +1,15 @@
 #pragma once
 
-#include "aiagent/infrastructure/chat_completions_client.hpp"
+#include "aiagent/infrastructure/model_provider_client.hpp"
 
 #include <filesystem>
 
 namespace aiagent {
 
-ChatCompletionsConfig load_chat_completions_config(const std::filesystem::path& config_path);
+ModelProviderConfig load_model_provider_config(const std::filesystem::path& config_path);
+
+// v1.3 source compatibility. This loader now also understands the optional
+// adapter and stream fields.
+ModelProviderConfig load_chat_completions_config(const std::filesystem::path& config_path);
 
 } // namespace aiagent

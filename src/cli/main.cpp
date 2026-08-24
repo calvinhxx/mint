@@ -1,8 +1,8 @@
 #include "aiagent/application/agent.hpp"
 #include "aiagent/domain/task_policy.hpp"
-#include "aiagent/infrastructure/chat_completions_client.hpp"
 #include "aiagent/infrastructure/config.hpp"
 #include "aiagent/infrastructure/event_log.hpp"
+#include "aiagent/infrastructure/model_provider_client.hpp"
 #include "aiagent/infrastructure/project_store.hpp"
 #include "aiagent/infrastructure/session_store.hpp"
 #include "aiagent/runtime/task_control.hpp"
@@ -69,11 +69,48 @@ int exit_code_for(const aiagent::AgentResult& result) {
     return 2;
 }
 
-void print_model_progress(const aiagent::ModelProgress& progress) {
+struct ModelStreamPrinter {
+    bool text_line_open = false;
+
+    void close_text_line() {
+        if (text_line_open) {
+            std::cerr << '\n';
+            text_line_open = false;
+        }
+    }
+
+    void print(const aiagent::ModelStreamEvent& event) {
+        if (event.kind != aiagent::ModelStreamEventKind::text_delta || event.delta.empty()) {
+            return;
+        }
+        if (!text_line_open) {
+            std::cerr << "  [模型流] ";
+            text_line_open = true;
+        }
+        std::cerr << event.delta << std::flush;
+    }
+};
+
+void print_model_progress(const aiagent::ModelProgress& progress,
+                          ModelStreamPrinter* stream_printer) {
+    if (stream_printer != nullptr &&
+        (progress.kind == aiagent::ModelProgressKind::attempt_started ||
+         progress.kind == aiagent::ModelProgressKind::stream_completed ||
+         progress.kind == aiagent::ModelProgressKind::retry_scheduled ||
+         progress.kind == aiagent::ModelProgressKind::request_failed)) {
+        stream_printer->close_text_line();
+    }
     switch (progress.kind) {
     case aiagent::ModelProgressKind::attempt_started:
         std::cerr << "  [模型] 等待响应（尝试 " << progress.attempt << '/' << progress.max_attempts
                   << "）\n";
+        break;
+    case aiagent::ModelProgressKind::stream_started:
+        std::cerr << "  [模型] 已请求流式响应\n";
+        break;
+    case aiagent::ModelProgressKind::stream_completed:
+        std::cerr << "  [模型] 流结束（" << progress.stream_events << " 个事件，"
+                  << progress.streamed_bytes << " 字节增量）\n";
         break;
     case aiagent::ModelProgressKind::retry_scheduled:
         std::cerr << "  [模型] "
@@ -313,18 +350,24 @@ int main(int argc, char** argv) {
                 std::cout << "离线演示模式：这里的“模型决策”是固定脚本，用来观察循环。\n";
             }
         } else {
-            auto config = aiagent::load_chat_completions_config(command_line.config);
+            auto config = aiagent::load_model_provider_config(command_line.config);
             config.task_control = task_control;
+            const auto stream_printer = std::make_shared<ModelStreamPrinter>();
+            if (config.stream && !command_line.json_output) {
+                config.stream_event = [stream_printer](const aiagent::ModelStreamEvent& event) {
+                    stream_printer->print(event);
+                };
+            }
             if (event_log != nullptr || !command_line.json_output) {
                 config.progress = [progress_log = event_log.get(),
-                                   print_progress = !command_line.json_output](
-                                      const aiagent::ModelProgress& progress) {
+                                   print_progress = !command_line.json_output,
+                                   stream_printer](const aiagent::ModelProgress& progress) {
                     if (progress_log != nullptr) {
                         progress_log->emit("model_progress",
                                            aiagent::model_progress_to_json(progress));
                     }
                     if (print_progress) {
-                        print_model_progress(progress);
+                        print_model_progress(progress, stream_printer.get());
                     }
                 };
             }
@@ -335,9 +378,10 @@ int main(int argc, char** argv) {
                                  "可以这样运行。\n";
                 }
                 std::cout << "模型配置: " << command_line.config.generic_string() << "（"
-                          << config.model << "）\n";
+                          << aiagent::model_adapter_name(config.adapter) << " / " << config.model
+                          << " / " << (config.stream ? "stream" : "non-stream") << "）\n";
             }
-            model = std::make_unique<aiagent::ChatCompletionsClient>(std::move(config));
+            model = std::make_unique<aiagent::ModelProviderClient>(std::move(config));
         }
 
         if (!command_line.json_output) {

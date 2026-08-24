@@ -66,9 +66,21 @@ long optional_nonnegative_integer(const Json& document, const char* field, long 
     return static_cast<long>(parsed);
 }
 
+bool optional_boolean(const Json& document, const char* field, bool fallback,
+                      const std::filesystem::path& config_path) {
+    if (!document.contains(field)) {
+        return fallback;
+    }
+    if (!document.at(field).is_boolean()) {
+        throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
+                                 "\" 必须是布尔值");
+    }
+    return document.at(field).get<bool>();
+}
+
 } // namespace
 
-ChatCompletionsConfig load_chat_completions_config(const std::filesystem::path& config_path) {
+ModelProviderConfig load_model_provider_config(const std::filesystem::path& config_path) {
     std::ifstream input(config_path, std::ios::binary);
     if (!input) {
         throw std::runtime_error("找不到配置文件 " + config_path.string() +
@@ -87,7 +99,18 @@ ChatCompletionsConfig load_chat_completions_config(const std::filesystem::path& 
         throw std::runtime_error("配置文件 " + config_path.string() + " 的最外层必须是 JSON 对象");
     }
 
-    ChatCompletionsConfig config;
+    ModelProviderConfig config;
+    if (document.contains("adapter")) {
+        const auto adapter = required_string(document, "adapter", config_path);
+        if (adapter == "chat_completions") {
+            config.adapter = ModelAdapter::chat_completions;
+        } else if (adapter == "responses") {
+            config.adapter = ModelAdapter::responses;
+        } else {
+            throw std::runtime_error("配置文件 " + config_path.string() +
+                                     " 中的 \"adapter\" 只能是 chat_completions 或 responses");
+        }
+    }
     config.api_url = required_string(document, "api_url", config_path);
     config.api_key = optional_string(document, "api_key", config_path);
     config.model = required_string(document, "model", config_path);
@@ -109,7 +132,12 @@ ChatCompletionsConfig load_chat_completions_config(const std::filesystem::path& 
         throw std::runtime_error("配置文件 " + config_path.string() +
                                  " 中的 \"max_completion_tokens\" 不能超过 65536");
     }
+    config.stream = optional_boolean(document, "stream", config.stream, config_path);
     return config;
+}
+
+ModelProviderConfig load_chat_completions_config(const std::filesystem::path& config_path) {
+    return load_model_provider_config(config_path);
 }
 
 } // namespace aiagent
