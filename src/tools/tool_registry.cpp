@@ -59,8 +59,8 @@ bool is_inside(const std::filesystem::path& root, const std::filesystem::path& c
 }
 
 bool is_ignored_directory(const std::filesystem::path& path) {
-    static const std::unordered_set<std::string> ignored = {".git", ".cache", "build",
-                                                            "node_modules", "__pycache__"};
+    static const std::unordered_set<std::string> ignored = {
+        ".aiagent", ".git", ".cache", "build", "dist", "node_modules", "target", "__pycache__"};
     const auto name = path.filename().string();
     return ignored.contains(name) || name.starts_with("cmake-build-");
 }

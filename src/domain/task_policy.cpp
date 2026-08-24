@@ -12,6 +12,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace aiagent {
 namespace {
@@ -36,7 +37,10 @@ std::size_t optional_size(const Json& object, const char* key, std::size_t fallb
     if (!object.contains(key)) {
         return fallback;
     }
-    if (!object.at(key).is_number_unsigned()) {
+    if (!object.at(key).is_number_integer()) {
+        throw std::invalid_argument(std::string("policy 字段 ") + key + " 必须是非负整数");
+    }
+    if (!object.at(key).is_number_unsigned() && object.at(key).get<long long>() < 0) {
         throw std::invalid_argument(std::string("policy 字段 ") + key + " 必须是非负整数");
     }
     const auto value = object.at(key).get<std::size_t>();
@@ -174,6 +178,10 @@ TaskPolicy load_task_policy(const std::filesystem::path& path) {
         throw std::invalid_argument("task policy 不是有效 JSON: " +
                                     std::string(parse_error.what()));
     }
+    return parse_task_policy(document, resolved);
+}
+
+TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_path) {
     if (!document.is_object()) {
         throw std::invalid_argument("task policy 顶层必须是 JSON 对象");
     }
@@ -181,12 +189,14 @@ TaskPolicy load_task_policy(const std::filesystem::path& path) {
                           {"schema_version", "write_paths", "recipes", "require_verification",
                            "max_turns", "max_context_bytes", "max_seconds"},
                           "task policy");
-    if (document.value("schema_version", 0) != policy_schema_version) {
+    if (!document.contains("schema_version") ||
+        !document.at("schema_version").is_number_integer() ||
+        document.at("schema_version") != policy_schema_version) {
         throw std::invalid_argument("task policy schema_version 不受支持");
     }
 
     TaskPolicy policy;
-    policy.source_path = resolved;
+    policy.source_path = std::move(source_path);
     policy.max_turns = optional_size(document, "max_turns", policy.max_turns, 1, 50);
     policy.max_context_bytes = optional_size(document, "max_context_bytes",
                                              policy.max_context_bytes, 16 * 1024, 8 * 1024 * 1024);

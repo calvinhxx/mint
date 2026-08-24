@@ -1,5 +1,6 @@
 #include "aiagent/infrastructure/chat_completions_client.hpp"
 #include "aiagent/runtime/task_control.hpp"
+#include "aiagent/version.hpp"
 
 #include <algorithm>
 #include <array>
@@ -339,6 +340,29 @@ ModelReply demo_tool_call(std::string id, std::string name, Json arguments) {
 
 } // namespace
 
+std::string_view model_progress_kind_name(ModelProgressKind kind) noexcept {
+    switch (kind) {
+    case ModelProgressKind::attempt_started:
+        return "attempt_started";
+    case ModelProgressKind::retry_scheduled:
+        return "retry_scheduled";
+    case ModelProgressKind::request_succeeded:
+        return "request_succeeded";
+    case ModelProgressKind::request_failed:
+        return "request_failed";
+    }
+    return "unknown";
+}
+
+Json model_progress_to_json(const ModelProgress& progress) {
+    return {{"kind", model_progress_kind_name(progress.kind)},
+            {"attempt", progress.attempt},
+            {"max_attempts", progress.max_attempts},
+            {"http_status", progress.http_status},
+            {"delay_ms", progress.delay_ms},
+            {"elapsed_ms", progress.elapsed_ms}};
+}
+
 ChatCompletionsClient::ChatCompletionsClient(ChatCompletionsConfig config)
     : config_(std::move(config)) {
     if (config_.api_url.empty()) {
@@ -358,6 +382,18 @@ ChatCompletionsClient::ChatCompletionsClient(ChatCompletionsConfig config)
 
 ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& tools) {
     const auto request_started = std::chrono::steady_clock::now();
+    const auto elapsed_ms = [&]() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - request_started)
+            .count();
+    };
+    const auto emit_progress = [&](ModelProgress progress) {
+        if (config_.progress) {
+            progress.max_attempts = static_cast<std::size_t>(config_.max_retries + 1);
+            progress.elapsed_ms = elapsed_ms();
+            config_.progress(progress);
+        }
+    };
     Json request = {{"model", config_.model},
                     {"messages", messages},
                     {"max_completion_tokens", config_.max_completion_tokens}};
@@ -419,7 +455,8 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
         curl_easy_setopt(handle.get(), CURLOPT_TIMEOUT_MS, request_timeout_ms);
         curl_easy_setopt(handle.get(), CURLOPT_NOSIGNAL, 1L);
         curl_easy_setopt(handle.get(), CURLOPT_ACCEPT_ENCODING, "");
-        curl_easy_setopt(handle.get(), CURLOPT_USERAGENT, "aiagent/1.2");
+        const auto user_agent = "aiagent/" + std::string(version);
+        curl_easy_setopt(handle.get(), CURLOPT_USERAGENT, user_agent.c_str());
         curl_easy_setopt(handle.get(), CURLOPT_ERRORBUFFER, error_buffer.data());
         if (config_.task_control != nullptr) {
             curl_easy_setopt(handle.get(), CURLOPT_NOPROGRESS, 0L);
@@ -460,7 +497,15 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
 
     long delay_ms = config_.retry_initial_delay_ms;
     for (long attempt_index = 0;; ++attempt_index) {
-        auto attempt = perform_attempt();
+        const auto attempt_number = static_cast<std::size_t>(attempt_index + 1);
+        emit_progress({.kind = ModelProgressKind::attempt_started, .attempt = attempt_number});
+        Attempt attempt;
+        try {
+            attempt = perform_attempt();
+        } catch (...) {
+            emit_progress({.kind = ModelProgressKind::request_failed, .attempt = attempt_number});
+            throw;
+        }
         if (attempt.curl_result == CURLE_OK && attempt.http_status >= 200 &&
             attempt.http_status < 300) {
             try {
@@ -472,11 +517,15 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
                 reply.metadata.attempts = static_cast<std::size_t>(attempt_index + 1);
                 reply.metadata.retries = static_cast<std::size_t>(attempt_index);
                 reply.metadata.http_status = attempt.http_status;
-                reply.metadata.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                 std::chrono::steady_clock::now() - request_started)
-                                                 .count();
+                reply.metadata.duration_ms = elapsed_ms();
+                emit_progress({.kind = ModelProgressKind::request_succeeded,
+                               .attempt = attempt_number,
+                               .http_status = attempt.http_status});
                 return reply;
             } catch (const Json::exception& error) {
+                emit_progress({.kind = ModelProgressKind::request_failed,
+                               .attempt = attempt_number,
+                               .http_status = attempt.http_status});
                 throw std::runtime_error("模型返回的内容不是有效 JSON: " +
                                          std::string(error.what()));
             }
@@ -484,6 +533,9 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
 
         if (attempt.curl_result == CURLE_ABORTED_BY_CALLBACK && config_.task_control != nullptr &&
             config_.task_control->should_stop()) {
+            emit_progress({.kind = ModelProgressKind::request_failed,
+                           .attempt = attempt_number,
+                           .http_status = attempt.http_status});
             throw std::runtime_error(config_.task_control->cancellation_requested()
                                          ? "模型请求已取消"
                                          : "模型请求超过任务总时间预算");
@@ -493,6 +545,9 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
                                    ? transient_curl_error(attempt.curl_result)
                                    : transient_http_error(attempt.http_status);
         if (!retryable || attempt_index >= config_.max_retries) {
+            emit_progress({.kind = ModelProgressKind::request_failed,
+                           .attempt = attempt_number,
+                           .http_status = attempt.http_status});
             if (attempt.curl_result != CURLE_OK) {
                 const auto details = attempt.curl_error.empty()
                                          ? std::string(curl_easy_strerror(attempt.curl_result))
@@ -510,7 +565,18 @@ ModelReply ChatCompletionsClient::complete(const Json& messages, const Json& too
                 effective_delay_ms = std::max(effective_delay_ms, server_delay_ms + 50);
             }
         }
-        wait_before_retry(effective_delay_ms);
+        emit_progress({.kind = ModelProgressKind::retry_scheduled,
+                       .attempt = attempt_number,
+                       .http_status = attempt.http_status,
+                       .delay_ms = effective_delay_ms});
+        try {
+            wait_before_retry(effective_delay_ms);
+        } catch (...) {
+            emit_progress({.kind = ModelProgressKind::request_failed,
+                           .attempt = attempt_number,
+                           .http_status = attempt.http_status});
+            throw;
+        }
         delay_ms = std::min<long>(delay_ms * 2, 60000);
     }
 }

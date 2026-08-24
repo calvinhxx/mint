@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "aiagent/domain/model.hpp"
+
 namespace aiagent {
 
 struct CommandRecipe {
@@ -29,5 +31,7 @@ struct TaskPolicy {
 };
 
 [[nodiscard]] TaskPolicy load_task_policy(const std::filesystem::path& path);
+[[nodiscard]] TaskPolicy parse_task_policy(const Json& document,
+                                           std::filesystem::path source_path = {});
 
 } // namespace aiagent

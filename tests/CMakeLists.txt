@@ -15,8 +15,8 @@ add_test(NAME aiagent_cli_version COMMAND $<TARGET_FILE:aiagent> --version)
 set_tests_properties(
     aiagent_cli_version
     PROPERTIES
-        LABELS "v1.2;smoke"
-        PASS_REGULAR_EXPRESSION "aiagent 1\\.2\\.0"
+        LABELS "v1.3;smoke"
+        PASS_REGULAR_EXPRESSION "aiagent 1\\.3\\.0"
 )
 
 add_test(
