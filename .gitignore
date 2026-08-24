@@ -1,0 +1,8 @@
+/build/
+/cmake-build-*/
+/.cache/
+.DS_Store
+/config.json
+/config-*.json
+/.aiagent-session.json
+/.aiagent-events.jsonl

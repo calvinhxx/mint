@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "write_paths": ["src", "include", "tests", "README.md"],
+  "recipes": [
+    {
+      "name": "build",
+      "program": "cmake",
+      "args": ["--build", "build"],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "test",
+      "program": "ctest",
+      "args": ["--test-dir", "build", "--output-on-failure"],
+      "timeout_seconds": 300,
+      "verification": true
+    }
+  ],
+  "require_verification": true,
+  "max_turns": 24,
+  "max_context_bytes": 131072,
+  "max_seconds": 900
+}
