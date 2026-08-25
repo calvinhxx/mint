@@ -47,7 +47,9 @@ target_link_libraries(aiagent_infrastructure
 add_library(aiagent_tools STATIC
     src/tools/change_set.cpp
     src/tools/file_support.cpp
+    src/tools/tool_support.cpp
     src/tools/tool_registry.cpp
+    src/tools/workspace_tools.cpp
 )
 aiagent_configure_target(aiagent_tools)
 target_link_libraries(aiagent_tools
@@ -56,6 +58,9 @@ target_link_libraries(aiagent_tools
 
 add_library(aiagent_application STATIC
     src/application/agent.cpp
+    src/application/agent_context.cpp
+    src/application/agent_prompt.cpp
+    src/application/agent_state.cpp
     src/application/project_service.cpp
 )
 aiagent_configure_target(aiagent_application)
