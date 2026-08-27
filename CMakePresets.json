@@ -174,12 +174,12 @@
     {
       "name": "vcpkg-windows",
       "configurePreset": "vcpkg-windows",
-      "jobs": 4
+      "jobs": 2
     },
     {
       "name": "vcpkg-windows-arm64",
       "configurePreset": "vcpkg-windows-arm64",
-      "jobs": 4
+      "jobs": 2
     },
     {
       "name": "vcpkg-osx-x64",
