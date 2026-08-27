@@ -1,5 +1,7 @@
 # 架构说明
 
+[文档首页](../README.md) / 架构说明
+
 mint 是一个轻量的通用 Agent 内核。模型只能返回文字或工具请求，所有文件和进程操作都由本地代码执行。
 
 ## 一次任务怎么运行
@@ -55,23 +57,23 @@ flowchart TD
 
 | 文件 | 负责什么 |
 |---|---|
-| [`src/cli/agent_command.cpp`](../src/cli/agent_command.cpp) | 一次命令的主流程 |
-| [`src/cli/agent_command_config.cpp`](../src/cli/agent_command_config.cpp) | policy、路径和工具配置 |
-| [`src/cli/agent_command_io.cpp`](../src/cli/agent_command_io.cpp) | 审批、模型进度和运行信息 |
-| [`src/application/agent.cpp`](../src/application/agent.cpp) | 校验 Agent 参数并进入循环 |
-| [`src/application/agent_loop.cpp`](../src/application/agent_loop.cpp) | 循环推进、任务开始和结束 |
-| [`src/application/agent_cycle.cpp`](../src/application/agent_cycle.cpp) | 模型调用、工具执行和验证门禁 |
-| [`src/application/agent_checkpoint.cpp`](../src/application/agent_checkpoint.cpp) | checkpoint schema 校验与恢复 |
-| [`src/tools/tool_registry.cpp`](../src/tools/tool_registry.cpp) | 工具路由和执行前检查 |
-| [`src/infrastructure/model_client.cpp`](../src/infrastructure/model_client.cpp) | 模型客户端公共门面和配置校验 |
-| [`src/infrastructure/model_request.cpp`](../src/infrastructure/model_request.cpp) | 请求重试、进度事件和结果元数据 |
-| [`src/infrastructure/model_http_transport.cpp`](../src/infrastructure/model_http_transport.cpp) | 单次 libcurl 请求、响应头和 SSE 数据接收 |
-| [`src/infrastructure/model_protocol.cpp`](../src/infrastructure/model_protocol.cpp) | Chat Completions / Responses 格式转换 |
-| [`src/infrastructure/command_runner.cpp`](../src/infrastructure/command_runner.cpp) | 固定命令、超时和系统沙箱 |
-| [`src/infrastructure/session_store.cpp`](../src/infrastructure/session_store.cpp) | checkpoint 读写 |
-| [`src/tools/workspace_tools.cpp`](../src/tools/workspace_tools.cpp) | 工作区文件读取与修改 |
-| [`src/tools/change_set.cpp`](../src/tools/change_set.cpp) | 多文件变更、预检和回滚 |
-| [`src/infrastructure/diagnostic_log.cpp`](../src/infrastructure/diagnostic_log.cpp) | 不进入 stdout 的诊断日志 |
+| [`src/cli/agent_command.cpp`](../../src/cli/agent_command.cpp) | 一次命令的主流程 |
+| [`src/cli/agent_command_config.cpp`](../../src/cli/agent_command_config.cpp) | policy、路径和工具配置 |
+| [`src/cli/agent_command_io.cpp`](../../src/cli/agent_command_io.cpp) | 审批、模型进度和运行信息 |
+| [`src/application/agent.cpp`](../../src/application/agent.cpp) | 校验 Agent 参数并进入循环 |
+| [`src/application/agent_loop.cpp`](../../src/application/agent_loop.cpp) | 循环推进、任务开始和结束 |
+| [`src/application/agent_cycle.cpp`](../../src/application/agent_cycle.cpp) | 模型调用、工具执行和验证门禁 |
+| [`src/application/agent_checkpoint.cpp`](../../src/application/agent_checkpoint.cpp) | checkpoint schema 校验与恢复 |
+| [`src/tools/tool_registry.cpp`](../../src/tools/tool_registry.cpp) | 工具路由和执行前检查 |
+| [`src/infrastructure/model_client.cpp`](../../src/infrastructure/model_client.cpp) | 模型客户端公共门面和配置校验 |
+| [`src/infrastructure/model_request.cpp`](../../src/infrastructure/model_request.cpp) | 请求重试、进度事件和结果元数据 |
+| [`src/infrastructure/model_http_transport.cpp`](../../src/infrastructure/model_http_transport.cpp) | 单次 libcurl 请求、响应头和 SSE 数据接收 |
+| [`src/infrastructure/model_protocol.cpp`](../../src/infrastructure/model_protocol.cpp) | Chat Completions / Responses 格式转换 |
+| [`src/infrastructure/command_runner.cpp`](../../src/infrastructure/command_runner.cpp) | 固定命令、超时和系统沙箱 |
+| [`src/infrastructure/session_store.cpp`](../../src/infrastructure/session_store.cpp) | checkpoint 读写 |
+| [`src/tools/workspace_tools.cpp`](../../src/tools/workspace_tools.cpp) | 工作区文件读取与修改 |
+| [`src/tools/change_set.cpp`](../../src/tools/change_set.cpp) | 多文件变更、预检和回滚 |
+| [`src/infrastructure/diagnostic_log.cpp`](../../src/infrastructure/diagnostic_log.cpp) | 不进入 stdout 的诊断日志 |
 
 ## 从哪里开始读源码
 
@@ -89,4 +91,4 @@ main.cpp
 
 恢复逻辑集中在 `agent_checkpoint.cpp`。阅读循环时，在 `agent_run.hpp` 中先关注四个状态：`messages_` 是模型上下文，`pending_calls_` 是尚未执行的工具请求，`in_flight_call_` 是已经开始但结果未确认的请求，`result_` 保存轮数、工具记录、验证状态和最终回答。
 
-权限与恢复细节见 [安全与恢复](guides/SAFETY.md)，构建和测试命令见 [测试与验收](TESTING.md)。
+下一步阅读：[安全与恢复](../guides/safety-and-recovery.md)。构建和测试命令见 [测试与验收](../development/testing.md)。

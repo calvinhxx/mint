@@ -1,5 +1,7 @@
 # 测试与验收
 
+[文档首页](../README.md) / 测试与验收
+
 这份文档只记录当前代码怎么验证，以及这些结果能说明什么。
 
 ## 本地全量验证
@@ -40,7 +42,7 @@ ctest --preset vcpkg-sanitize
 | 故障 fixture | 失败基线、修改、写后重新验证 | 任意项目都能自动修好 |
 | 真实模型记录 | 当时端点和配置完成了隔离任务 | 当前版本或其他端点也通过 |
 
-当前 fixture 位于 [`tests/fixtures/v1_broken_project`](../tests/fixtures/v1_broken_project)。它先让 `calculator::add` 测试失败，再验证把减法修正为加法后 CTest 通过。
+当前 fixture 位于 [`tests/fixtures/v1_broken_project`](../../tests/fixtures/v1_broken_project)。它先让 `calculator::add` 测试失败，再验证把减法修正为加法后 CTest 通过。
 
 ## 历史真实模型记录
 
@@ -69,3 +71,5 @@ ctest --preset vcpkg-sanitize
 - Linux 和 Windows 尚无正式的安全命令后端；
 - 本地测试证明确定性行为，不替代真实 provider 回归；
 - checkpoint 保证从稳定点恢复，不承诺跨进程 exactly-once。
+
+下一步阅读：[项目路线图](../project/roadmap.md)。
