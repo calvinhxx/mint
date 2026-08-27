@@ -22,6 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -30,9 +31,11 @@
 
 #if !defined(_WIN32)
 #include <cerrno>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -106,11 +109,28 @@ int run_command_helper(int argc, char** argv) {
         output << "sandbox write probe\n";
         return output ? 0 : 12;
     }
-#if defined(__APPLE__)
+#if !defined(_WIN32)
+    if (mode == "descriptor") {
+        if (argc != 6) {
+            return 65;
+        }
+        const auto descriptor = std::stoi(argv[3]);
+        const auto expected_device = std::stoull(argv[4]);
+        const auto expected_inode = std::stoull(argv[5]);
+        struct stat metadata{};
+        errno = 0;
+        if (::fstat(descriptor, &metadata) < 0) {
+            return errno == EBADF ? 0 : 15;
+        }
+        const auto same_file =
+            static_cast<unsigned long long>(metadata.st_dev) == expected_device &&
+            static_cast<unsigned long long>(metadata.st_ino) == expected_inode;
+        return same_file ? 15 : 0;
+    }
     if (mode == "network") {
         const auto descriptor = ::socket(AF_INET, SOCK_STREAM, 0);
         if (descriptor < 0) {
-            return errno == EPERM ? 0 : 13;
+            return errno == EPERM || errno == EAFNOSUPPORT ? 0 : 13;
         }
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -120,7 +140,9 @@ int run_command_helper(int argc, char** argv) {
             ::connect(descriptor, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
         const auto result_errno = errno;
         ::close(descriptor);
-        return connected < 0 && result_errno == EPERM ? 0 : 14;
+        const bool isolated = result_errno == EPERM || result_errno == ENETDOWN ||
+                              result_errno == ENETUNREACH || result_errno == EHOSTUNREACH;
+        return connected < 0 && isolated ? 0 : 14;
     }
 #endif
     return 66;
@@ -1244,7 +1266,7 @@ TEST(ToolRegistryTest, ApplyChangeSet) {
 
 TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -1312,6 +1334,24 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
                     std::string::npos,
                 "unapproved environment values are not inherited");
 
+    const auto inherited_path = workspace / "inherited.txt";
+    write_text(inherited_path, "must not be inherited\n");
+    const auto inherited_descriptor = ::open(inherited_path.c_str(), O_RDONLY);
+    ASSERT_GE(inherited_descriptor, 3);
+    struct stat inherited_metadata{};
+    ASSERT_EQ(::fstat(inherited_descriptor, &inherited_metadata), 0);
+    const auto filtered_descriptor = mint::Json::parse(tools.execute(
+        {"command-descriptor",
+         "run_command",
+         {{"program", program},
+          {"args", mint::Json::array({"--command-helper", "descriptor",
+                                      std::to_string(inherited_descriptor),
+                                      std::to_string(inherited_metadata.st_dev),
+                                      std::to_string(inherited_metadata.st_ino)})}}}));
+    (void)::close(inherited_descriptor);
+    MINT_EXPECT(filtered_descriptor.at("exit_code") == 0,
+                "command child cannot inherit unrelated mint file descriptors");
+
     const auto timed_out = mint::Json::parse(
         tools.execute({"command-timeout",
                        "run_command",
@@ -1334,15 +1374,17 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
     MINT_EXPECT(!unapproved.at("ok").get<bool>(),
                 "run_command rejects programs not approved by the user");
 
-    bool blocked_launcher = false;
-    try {
-        mint::ToolRegistry blocked(workspace,
-                                   mint::ToolRegistryOptions{.allowed_programs = {"sh"}});
-    } catch (const std::invalid_argument& error) {
-        blocked_launcher = std::string(error.what()).find("不允许授权") != std::string::npos;
+    for (const std::string launcher : {"sh", "bwrap"}) {
+        bool blocked_launcher = false;
+        try {
+            mint::ToolRegistry blocked(workspace,
+                                       mint::ToolRegistryOptions{.allowed_programs = {launcher}});
+        } catch (const std::invalid_argument& error) {
+            blocked_launcher = std::string(error.what()).find("不允许授权") != std::string::npos;
+        }
+        MINT_EXPECT(blocked_launcher,
+                    "the command policy refuses shells and general-purpose launchers");
     }
-    MINT_EXPECT(blocked_launcher,
-                "the command policy refuses common shells and general-purpose launchers");
 #endif
 }
 
@@ -1362,7 +1404,7 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
         "task policy rejects unsafe tool budget values");
 
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
 
     TemporaryDirectory temporary;
@@ -1538,7 +1580,7 @@ TEST(ToolRegistryTest, EnforcesWritePathAllowlist) {
 
 TEST(CommandRunnerTest, EnforcesRuntimeControls) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -1602,8 +1644,8 @@ TEST(CommandRunnerTest, EnforcesRuntimeControls) {
 }
 
 TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
-#if !defined(__APPLE__)
-    return;
+#if defined(_WIN32)
+    GTEST_SKIP() << "a secure Windows command backend is not implemented yet";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -1616,8 +1658,13 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
                                                        .require_command_sandbox = true});
     MINT_EXPECT(tools.commands_are_os_sandboxed(),
                 "command registry reports OS sandbox enforcement");
-    MINT_EXPECT(tools.command_sandbox_backend() == "macos-seatbelt",
-                "macOS command sandbox backend is named in policy state");
+#if defined(__APPLE__)
+    constexpr std::string_view expected_backend = "macos-seatbelt";
+#else
+    constexpr std::string_view expected_backend = "linux-bubblewrap";
+#endif
+    MINT_EXPECT(tools.command_sandbox_backend() == expected_backend,
+                "the native command sandbox backend is named in policy state");
 
     std::error_code path_error;
     const auto inside = std::filesystem::weakly_canonical(workspace / "inside.txt", path_error);
@@ -1628,10 +1675,10 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
          {{"program", program},
           {"args", mint::Json::array({"--command-helper", "write", inside.generic_string()})}}}));
     MINT_EXPECT(allowed.at("sandboxed").get<bool>() &&
-                    allowed.at("sandbox_backend") == "macos-seatbelt",
+                    allowed.at("sandbox_backend") == expected_backend,
                 "command result carries auditable sandbox metadata");
     MINT_EXPECT(allowed.at("exit_code") == 0 && std::filesystem::exists(inside),
-                "sandbox permits writes inside the workspace");
+                "sandbox permits writes inside the workspace: " + allowed.dump());
 
     const auto outside =
         std::filesystem::weakly_canonical(temporary.path() / "outside.txt", path_error);
@@ -1658,7 +1705,8 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
          "run_command",
          {{"program", program}, {"args", mint::Json::array({"--command-helper", "network"})}}}));
     MINT_EXPECT(blocked_network.at("exit_code") == 0,
-                "sandbox blocks network socket access with EPERM");
+                "sandbox prevents the command from reaching the host network: " +
+                    blocked_network.dump());
 #endif
 }
 
@@ -1918,7 +1966,7 @@ TEST(AgentLoopTest, CompletesWriteTask) {
 
 TEST(AgentLoopTest, PatchesThenVerifies) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -1969,7 +2017,7 @@ TEST(AgentLoopTest, PatchesThenVerifies) {
 
 TEST(AgentLoopTest, FailedVerificationRequiresRepair) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -2017,7 +2065,7 @@ TEST(AgentLoopTest, FailedVerificationRequiresRepair) {
 
 TEST(AgentLoopTest, LatestCommandControlsVerificationStatus) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -2050,7 +2098,7 @@ TEST(AgentLoopTest, LatestCommandControlsVerificationStatus) {
 
 TEST(AgentLoopTest, DeniedCommandCannotSatisfyVerification) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -2083,7 +2131,7 @@ TEST(AgentLoopTest, DeniedCommandCannotSatisfyVerification) {
 
 TEST(AgentLoopTest, CancellationStopsRunningCommand) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -2125,7 +2173,7 @@ TEST(AgentLoopTest, CancellationStopsRunningCommand) {
 
 TEST(SessionTest, CheckpointsAndResumes) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
 #else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -2396,7 +2444,7 @@ TEST(ModelConfigTest, LoadsAndValidatesJson) {
 
 TEST(ModelClientTest, RetriesWithServerDirectedBackoff) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
 #else
     RetryHttpServer server;
     std::vector<mint::ModelProgress> progress;

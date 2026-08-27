@@ -17,6 +17,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
+
 extern char** environ;
 #endif
 
@@ -93,6 +97,20 @@ void append_output(std::string& output, const char* data, std::size_t size, std:
     truncated = truncated || accepted < size;
 }
 
+void close_inherited_descriptors() {
+#if defined(__linux__) && defined(SYS_close_range)
+    if (::syscall(SYS_close_range, 3U, ~0U, 0U) == 0) {
+        return;
+    }
+#endif
+
+    const auto descriptor_limit = ::sysconf(_SC_OPEN_MAX);
+    const auto last_descriptor = descriptor_limit > 0 ? descriptor_limit : 1024;
+    for (long descriptor = 3; descriptor < last_descriptor; ++descriptor) {
+        (void)::close(static_cast<int>(descriptor));
+    }
+}
+
 #endif
 
 } // namespace
@@ -142,6 +160,7 @@ ProcessResult execute_process(ProcessRequest request) {
         }
         ::close(output_pipe[0]);
         ::close(output_pipe[1]);
+        close_inherited_descriptors();
         ::execve(request.executable.c_str(), argv.data(), environment.data());
         constexpr char message[] = "mint: failed to execute approved command\n";
         (void)::write(STDERR_FILENO, message, sizeof(message) - 1);

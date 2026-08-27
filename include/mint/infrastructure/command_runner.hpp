@@ -65,8 +65,9 @@ class CommandRunner {
     std::shared_ptr<TaskControl> task_control_;
     CommandApproval approval_;
     std::filesystem::path sandbox_executable_;
-    std::string sandbox_profile_;
+    std::vector<std::string> sandbox_arguments_;
     std::string sandbox_backend_ = "none";
+    bool sandbox_sets_working_directory_ = false;
 };
 
 } // namespace mint

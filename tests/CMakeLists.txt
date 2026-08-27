@@ -54,19 +54,20 @@ add_test(
 set_tests_properties(architecture_console_boundary PROPERTIES LABELS "architecture;contract")
 
 add_test(NAME mint_cli_version COMMAND $<TARGET_FILE:mint> --version)
+string(REPLACE "." "\\." mint_version_regex "${PROJECT_VERSION}")
 set_tests_properties(
     mint_cli_version
     PROPERTIES
-        LABELS "v1.4;smoke"
-        PASS_REGULAR_EXPRESSION "mint 1\\.4\\.0"
+        LABELS "smoke"
+        PASS_REGULAR_EXPRESSION "mint ${mint_version_regex}"
 )
 
 add_test(NAME mint_cli_log_level COMMAND $<TARGET_FILE:mint> --log-level off --version)
 set_tests_properties(
     mint_cli_log_level
     PROPERTIES
-        LABELS "v1.4;smoke"
-        PASS_REGULAR_EXPRESSION "mint 1\\.4\\.0"
+        LABELS "smoke"
+        PASS_REGULAR_EXPRESSION "mint ${mint_version_regex}"
 )
 
 add_test(

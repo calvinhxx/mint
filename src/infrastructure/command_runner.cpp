@@ -203,15 +203,20 @@ Json process_result_json(const CommandInvocation& invocation, command_detail::Pr
 
 command_detail::ProcessRequest process_request(const CommandInvocation& invocation, bool sandboxed,
                                                const std::filesystem::path& sandbox_executable,
-                                               const std::string& sandbox_profile,
+                                               const std::vector<std::string>& sandbox_arguments,
+                                               bool sandbox_sets_working_directory,
                                                std::size_t max_output_bytes,
                                                const std::shared_ptr<TaskControl>& task_control) {
     command_detail::ProcessRequest request;
     request.executable = sandboxed ? sandbox_executable : invocation.executable;
-    request.argv.reserve(invocation.arguments.size() + (sandboxed ? 4 : 1));
+    request.argv.reserve(invocation.arguments.size() + sandbox_arguments.size() + 4);
     if (sandboxed) {
-        request.argv = {"sandbox-exec", "-p", sandbox_profile,
-                        invocation.executable.generic_string()};
+        request.argv = sandbox_arguments;
+        if (sandbox_sets_working_directory) {
+            request.argv.insert(request.argv.end(),
+                                {"--chdir", invocation.cwd.generic_string(), "--"});
+        }
+        request.argv.push_back(invocation.executable.generic_string());
     } else {
         request.argv.push_back(invocation.program);
     }
@@ -304,8 +309,9 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
         command_detail::build_sandbox_config(options.require_os_sandbox, root_, resolved_programs_,
                                              std::move(options.denied_read_paths));
     sandbox_executable_ = std::move(sandbox.executable);
-    sandbox_profile_ = std::move(sandbox.profile);
+    sandbox_arguments_ = std::move(sandbox.arguments);
     sandbox_backend_ = std::move(sandbox.backend);
+    sandbox_sets_working_directory_ = sandbox.sets_working_directory;
 #endif
 }
 
@@ -452,8 +458,9 @@ Json CommandRunner::run_command(const Json& arguments) const {
         return *stopped;
     }
 
-    auto request = process_request(invocation, is_os_sandboxed(), sandbox_executable_,
-                                   sandbox_profile_, max_output_bytes_, task_control_);
+    auto request =
+        process_request(invocation, is_os_sandboxed(), sandbox_executable_, sandbox_arguments_,
+                        sandbox_sets_working_directory_, max_output_bytes_, task_control_);
     auto process = command_detail::execute_process(std::move(request));
     diagnostics::emit(diagnostics::Level::debug, "command.completed",
                       {{"program", invocation.program},

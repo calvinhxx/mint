@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_set>
@@ -13,6 +14,8 @@
 
 namespace mint::command_detail {
 namespace {
+
+#if !defined(_WIN32)
 
 bool contains_nul(std::string_view value) {
     return value.find('\0') != std::string_view::npos;
@@ -34,16 +37,15 @@ bool is_blocked_launcher(std::string name) {
         return static_cast<char>(std::tolower(character));
     });
     static const std::unordered_set<std::string> blocked = {
-        "sh",         "bash",           "zsh",     "fish",     "dash", "cmd",   "cmd.exe",
-        "powershell", "powershell.exe", "pwsh",    "pwsh.exe", "env",  "xargs", "find",
-        "git",        "sudo",           "doas",    "ssh",      "scp",  "curl",  "wget",
-        "osascript",  "open",           "busybox", "deno",     "bun"};
+        "sh",         "bash",           "zsh",     "fish",        "dash",   "cmd",   "cmd.exe",
+        "powershell", "powershell.exe", "pwsh",    "pwsh.exe",    "env",    "xargs", "find",
+        "git",        "sudo",           "doas",    "ssh",         "scp",    "curl",  "wget",
+        "osascript",  "open",           "busybox", "deno",        "bun",    "bwrap", "sandbox-exec",
+        "unshare",    "nsenter",        "chroot",  "systemd-run", "docker", "podman"};
     return blocked.contains(name) || name.starts_with("python") || name.starts_with("pypy") ||
            name.starts_with("node") || name.starts_with("perl") || name.starts_with("ruby") ||
            name.starts_with("lua") || name.starts_with("php");
 }
-
-#if !defined(_WIN32)
 
 bool is_executable_file(const std::filesystem::path& path) {
     std::error_code error;
@@ -51,60 +53,20 @@ bool is_executable_file(const std::filesystem::path& path) {
            ::access(path.c_str(), X_OK) == 0;
 }
 
-#endif
-
-std::string sandbox_string(std::string_view value) {
-    std::string result;
-    result.reserve(value.size() + 8);
-    for (const char character : value) {
-        switch (character) {
-        case '\\':
-            result += "\\\\";
-            break;
-        case '"':
-            result += "\\\"";
-            break;
-        case '\n':
-            result += "\\n";
-            break;
-        case '\r':
-            result += "\\r";
-            break;
-        case '\t':
-            result += "\\t";
-            break;
-        default:
-            result += character;
-            break;
-        }
-    }
-    return result;
-}
-
-} // namespace
-
-std::filesystem::path resolve_program(const std::string& requested) {
-#if defined(_WIN32)
-    (void)requested;
-    throw std::invalid_argument("当前受控命令执行暂未支持 Windows");
-#else
+std::filesystem::path find_executable(const std::string& requested) {
     if (requested.empty() || contains_nul(requested)) {
-        throw std::invalid_argument("授权程序名称不能为空或包含 NUL");
+        throw std::invalid_argument("程序名称不能为空或包含 NUL");
     }
 
     const std::filesystem::path input(requested);
-    if (is_blocked_launcher(input.filename().string())) {
-        throw std::invalid_argument("当前版本不允许授权 shell、解释器、git 或通用命令启动器: " +
-                                    requested);
-    }
     if (input.has_parent_path()) {
         if (!input.is_absolute()) {
-            throw std::invalid_argument("带路径的授权程序必须使用绝对路径: " + requested);
+            throw std::invalid_argument("带路径的程序必须使用绝对路径: " + requested);
         }
         std::error_code error;
         const auto resolved = std::filesystem::weakly_canonical(input, error);
         if (error || !is_executable_file(resolved)) {
-            throw std::invalid_argument("授权程序不存在或不可执行: " + requested);
+            throw std::invalid_argument("程序不存在或不可执行: " + requested);
         }
         return resolved;
     }
@@ -113,7 +75,7 @@ std::filesystem::path resolve_program(const std::string& requested) {
         const auto value = static_cast<unsigned char>(character);
         if (!std::isalnum(value) && character != '_' && character != '-' && character != '+' &&
             character != '.') {
-            throw std::invalid_argument("授权程序名称包含不支持的字符: " + requested);
+            throw std::invalid_argument("程序名称包含不支持的字符: " + requested);
         }
     }
 
@@ -141,7 +103,230 @@ std::filesystem::path resolve_program(const std::string& requested) {
         }
         begin = end + 1;
     }
-    throw std::invalid_argument("在 PATH 中找不到授权程序: " + requested);
+    throw std::invalid_argument("在 PATH 中找不到程序: " + requested);
+}
+
+#if defined(__APPLE__)
+std::string sandbox_string(std::string_view value) {
+    std::string result;
+    result.reserve(value.size() + 8);
+    for (const char character : value) {
+        switch (character) {
+        case '\\':
+            result += "\\\\";
+            break;
+        case '"':
+            result += "\\\"";
+            break;
+        case '\n':
+            result += "\\n";
+            break;
+        case '\r':
+            result += "\\r";
+            break;
+        case '\t':
+            result += "\\t";
+            break;
+        default:
+            result += character;
+            break;
+        }
+    }
+    return result;
+}
+#endif
+
+#endif
+
+#if defined(__linux__)
+
+void append_option(std::vector<std::string>& arguments, std::string option,
+                   const std::filesystem::path& value) {
+    arguments.push_back(std::move(option));
+    arguments.push_back(value.generic_string());
+}
+
+void append_bind(std::vector<std::string>& arguments, std::string option,
+                 const std::filesystem::path& source, const std::filesystem::path& destination) {
+    arguments.push_back(std::move(option));
+    arguments.push_back(source.generic_string());
+    arguments.push_back(destination.generic_string());
+}
+
+std::optional<std::filesystem::path> normalized_existing_path(std::string_view value) {
+    if (value.empty() || contains_nul(value)) {
+        return std::nullopt;
+    }
+    std::filesystem::path path(value);
+    if (!path.is_absolute()) {
+        return std::nullopt;
+    }
+    std::error_code error;
+    path = std::filesystem::weakly_canonical(std::move(path), error);
+    if (error || path.empty() || !std::filesystem::exists(path, error) || error) {
+        return std::nullopt;
+    }
+    return path;
+}
+
+void append_path_list(std::vector<std::filesystem::path>& paths, const char* name) {
+    const char* raw_value = std::getenv(name);
+    if (raw_value == nullptr) {
+        return;
+    }
+    const std::string value(raw_value);
+    std::size_t begin = 0;
+    while (begin <= value.size()) {
+        const auto end = value.find_first_of(":;", begin);
+        const auto length = end == std::string::npos ? value.size() - begin : end - begin;
+        if (const auto path =
+                normalized_existing_path(std::string_view(value).substr(begin, length))) {
+            paths.push_back(*path);
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        begin = end + 1;
+    }
+}
+
+void append_single_path(std::vector<std::filesystem::path>& paths, const char* name) {
+    const char* value = std::getenv(name);
+    if (value == nullptr) {
+        return;
+    }
+    if (const auto path = normalized_existing_path(value)) {
+        paths.push_back(*path);
+    }
+}
+
+bool is_covered_by(const std::vector<std::filesystem::path>& roots,
+                   const std::filesystem::path& candidate) {
+    return std::any_of(roots.begin(), roots.end(),
+                       [&](const auto& root) { return is_inside(root, candidate); });
+}
+
+std::filesystem::path bubblewrap_executable() {
+    if (const char* override_path = std::getenv("MINT_BWRAP_PATH");
+        override_path != nullptr && *override_path != '\0') {
+        return find_executable(override_path);
+    }
+    try {
+        return find_executable("bwrap");
+    } catch (const std::invalid_argument&) {
+        throw std::invalid_argument(
+            "Linux 安全命令执行需要 bubblewrap；请安装 bwrap，或显式设置 MINT_BWRAP_PATH");
+    }
+}
+
+std::vector<std::filesystem::path> sandbox_tool_paths(
+    const std::unordered_map<std::string, std::filesystem::path>& resolved_programs) {
+    std::vector<std::filesystem::path> paths;
+    paths.reserve(resolved_programs.size() + 16);
+    for (const auto& [label, executable] : resolved_programs) {
+        (void)label;
+        paths.push_back(executable);
+    }
+
+    append_path_list(paths, "PATH");
+    append_path_list(paths, "CMAKE_PREFIX_PATH");
+    append_path_list(paths, "PKG_CONFIG_PATH");
+    append_single_path(paths, "VCPKG_ROOT");
+    append_single_path(paths, "CMAKE_TOOLCHAIN_FILE");
+    append_single_path(paths, "SDKROOT");
+    append_single_path(paths, "DEVELOPER_DIR");
+    append_single_path(paths, "CC");
+    append_single_path(paths, "CXX");
+
+    std::sort(paths.begin(), paths.end());
+    paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+    return paths;
+}
+
+SandboxConfig linux_sandbox_config(
+    const std::filesystem::path& root,
+    const std::unordered_map<std::string, std::filesystem::path>& resolved_programs,
+    std::vector<std::filesystem::path> denied_read_paths) {
+    SandboxConfig config{.executable = bubblewrap_executable(),
+                         .arguments = {"bwrap", "--die-with-parent", "--new-session",
+                                       "--unshare-user", "--unshare-ipc", "--unshare-pid",
+                                       "--unshare-net", "--unshare-uts", "--unshare-cgroup-try",
+                                       "--cap-drop", "ALL", "--ro-bind", "/", "/"},
+                         .backend = "linux-bubblewrap",
+                         .sets_working_directory = true};
+
+    append_option(config.arguments, "--dev", "/dev");
+    append_option(config.arguments, "--proc", "/proc");
+
+    std::vector<std::filesystem::path> masked_roots;
+    for (const auto& path : {std::filesystem::path("/tmp"), std::filesystem::path("/run")}) {
+        std::error_code error;
+        if (std::filesystem::is_directory(path, error) && !error) {
+            append_option(config.arguments, "--tmpfs", path);
+            masked_roots.push_back(path);
+        }
+    }
+
+    if (const char* home_value = std::getenv("HOME"); home_value != nullptr) {
+        if (const auto home = normalized_existing_path(home_value);
+            home.has_value() && std::filesystem::is_directory(*home) && !is_inside(root, *home) &&
+            !is_covered_by(masked_roots, *home)) {
+            append_option(config.arguments, "--tmpfs", *home);
+            masked_roots.push_back(*home);
+        }
+    }
+
+    for (const auto& path : sandbox_tool_paths(resolved_programs)) {
+        if (is_inside(root, path) || !is_covered_by(masked_roots, path)) {
+            continue;
+        }
+        append_bind(config.arguments, "--ro-bind", path, path);
+    }
+
+    append_bind(config.arguments, "--bind", root, root);
+
+    for (auto& denied : denied_read_paths) {
+        std::error_code error;
+        denied = std::filesystem::weakly_canonical(std::move(denied), error);
+        if (error || denied.empty() || !std::filesystem::exists(denied, error) || error) {
+            continue;
+        }
+        if (is_inside(denied, root)) {
+            throw std::invalid_argument("命令保护路径不能包含整个工作区: " +
+                                        denied.generic_string());
+        }
+        if (std::filesystem::is_directory(denied, error) && !error) {
+            append_option(config.arguments, "--tmpfs", denied);
+        } else {
+            append_bind(config.arguments, "--ro-bind", "/dev/null", denied);
+        }
+    }
+
+    config.arguments.insert(config.arguments.end(),
+                            {"--setenv", "TMPDIR", "/tmp", "--setenv", "TMP", "/tmp", "--setenv",
+                             "TEMP", "/tmp", "--hostname", "mint"});
+    return config;
+}
+
+#endif
+
+} // namespace
+
+std::filesystem::path resolve_program(const std::string& requested) {
+#if defined(_WIN32)
+    (void)requested;
+    throw std::invalid_argument("当前受控命令执行暂未支持 Windows");
+#else
+    if (requested.empty() || contains_nul(requested)) {
+        throw std::invalid_argument("授权程序名称不能为空或包含 NUL");
+    }
+
+    const std::filesystem::path input(requested);
+    if (is_blocked_launcher(input.filename().string())) {
+        throw std::invalid_argument("当前版本不允许授权 shell、解释器、git 或通用命令启动器: " +
+                                    requested);
+    }
+    return find_executable(requested);
 #endif
 }
 
@@ -160,27 +345,27 @@ SandboxConfig build_sandbox_config(
     }
 
     const auto escaped_root = sandbox_string(root.generic_string());
-    config.profile = "(version 1) "
-                     "(allow default) "
-                     "(deny network*) "
-                     "(deny file-write* (require-not (subpath \"" +
-                     escaped_root + "\")))";
+    std::string profile = "(version 1) "
+                          "(allow default) "
+                          "(deny network*) "
+                          "(deny file-write* (require-not (subpath \"" +
+                          escaped_root + "\")))";
 
     if (const char* home_value = std::getenv("HOME"); home_value != nullptr) {
         std::error_code error;
         const auto home = std::filesystem::weakly_canonical(home_value, error);
         if (!error && home.is_absolute() && home != root) {
-            config.profile += " (deny file-read* (require-all (subpath \"" +
-                              sandbox_string(home.generic_string()) +
-                              "\") (require-not (subpath \"" + escaped_root + "\"))";
+            profile += " (deny file-read* (require-all (subpath \"" +
+                       sandbox_string(home.generic_string()) + "\") (require-not (subpath \"" +
+                       escaped_root + "\"))";
             for (const auto& [label, executable] : resolved_programs) {
                 (void)label;
                 if (is_inside(home, executable) && !is_inside(root, executable)) {
-                    config.profile += " (require-not (literal \"" +
-                                      sandbox_string(executable.generic_string()) + "\"))";
+                    profile += " (require-not (literal \"" +
+                               sandbox_string(executable.generic_string()) + "\"))";
                 }
             }
-            config.profile += "))";
+            profile += "))";
         }
     }
 
@@ -191,11 +376,14 @@ SandboxConfig build_sandbox_config(
             continue;
         }
         const bool directory = std::filesystem::is_directory(denied, error) && !error;
-        config.profile += " (deny file-read* file-write* (" +
-                          std::string(directory ? "subpath" : "literal") + " \"" +
-                          sandbox_string(denied.generic_string()) + "\"))";
+        profile += " (deny file-read* file-write* (" +
+                   std::string(directory ? "subpath" : "literal") + " \"" +
+                   sandbox_string(denied.generic_string()) + "\"))";
     }
+    config.arguments = {"sandbox-exec", "-p", std::move(profile)};
     return config;
+#elif defined(__linux__)
+    return linux_sandbox_config(root, resolved_programs, std::move(denied_read_paths));
 #else
     (void)root;
     (void)resolved_programs;

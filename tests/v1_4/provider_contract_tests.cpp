@@ -587,7 +587,7 @@ TEST(ProviderProtocolContractTest, DecodesResponsesStream) {
 
 TEST(ProviderTransportContractTest, StreamsHttpResponses) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
 #else
     const mint::Json completed_response = {
         {"id", "resp_http"},
@@ -664,7 +664,7 @@ TEST(ProviderTransportContractTest, StreamsHttpResponses) {
 
 TEST(ProviderTransportContractTest, RetriesStreamingHttpFailures) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
 #else
     const auto rate_limit_stream =
         sse({{"type", "error"}, {"message", "transient stream rate limit"}});
@@ -713,7 +713,7 @@ TEST(ProviderTransportContractTest, RetriesStreamingHttpFailures) {
 
 TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
 #if defined(_WIN32)
-    return;
+    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
 #else
     if (mint_executable.empty()) {
         GTEST_SKIP() << "mint executable was not supplied";
