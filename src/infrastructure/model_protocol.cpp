@@ -390,6 +390,9 @@ ModelReply parse_provider_response(ModelAdapter adapter, const Json& response) {
 }
 
 struct ModelStreamDecoder::State {
+    State(ModelAdapter selected_adapter, ModelStreamCallback event_callback)
+        : adapter(selected_adapter), callback(std::move(event_callback)) {}
+
     ModelAdapter adapter;
     ModelStreamCallback callback;
     std::string line_buffer;
@@ -558,7 +561,7 @@ struct ModelStreamDecoder::State {
 };
 
 ModelStreamDecoder::ModelStreamDecoder(ModelAdapter adapter, ModelStreamCallback callback)
-    : state_(std::make_unique<State>(State{.adapter = adapter, .callback = std::move(callback)})) {}
+    : state_(std::make_unique<State>(adapter, std::move(callback))) {}
 
 ModelStreamDecoder::~ModelStreamDecoder() = default;
 
