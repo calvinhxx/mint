@@ -14,13 +14,15 @@ constexpr std::array<std::size_t, 3> payload_limits = {2048, 512, 128};
 constexpr std::size_t summary_reserve = 512;
 constexpr std::size_t compacted_text_limit = 256;
 
-constexpr std::array<std::string_view, 13> retained_tool_fields = {"ok",
+constexpr std::array<std::string_view, 15> retained_tool_fields = {"ok",
                                                                    "status",
                                                                    "exit_code",
                                                                    "signal",
                                                                    "timed_out",
                                                                    "task_timed_out",
                                                                    "cancelled",
+                                                                   "resource_limited",
+                                                                   "resource_limit",
                                                                    "verification_eligible",
                                                                    "recipe",
                                                                    "program",
@@ -142,6 +144,10 @@ Json compacted_tool_result(const Json& message) {
         }
         for (const auto field : retained_tool_fields) {
             retain_scalar_field(original, summary, field);
+        }
+        if (const auto limits = original.find("resource_limits");
+            limits != original.end() && limits->is_object() && limits->dump().size() <= 512) {
+            summary["resource_limits"] = *limits;
         }
         if (const auto error = original.find("error");
             error != original.end() && error->is_string()) {

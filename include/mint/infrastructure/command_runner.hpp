@@ -31,6 +31,7 @@ struct CommandRunnerOptions {
     long default_timeout_seconds = runtime_defaults::command_timeout_seconds;
     long max_timeout_seconds = runtime_defaults::max_command_timeout_seconds;
     std::size_t max_output_bytes = runtime_defaults::command_output_bytes;
+    CommandResourceLimits resource_limits{};
     std::shared_ptr<TaskControl> task_control{};
     CommandApproval approval{};
     bool require_os_sandbox = false;
@@ -62,6 +63,7 @@ class CommandRunner {
     long default_timeout_seconds_ = runtime_defaults::command_timeout_seconds;
     long max_timeout_seconds_ = runtime_defaults::max_command_timeout_seconds;
     std::size_t max_output_bytes_ = runtime_defaults::command_output_bytes;
+    CommandResourceLimits resource_limits_{};
     std::shared_ptr<TaskControl> task_control_;
     CommandApproval approval_;
     std::filesystem::path sandbox_executable_;

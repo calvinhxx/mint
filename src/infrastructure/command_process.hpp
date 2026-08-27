@@ -1,5 +1,7 @@
 #pragma once
 
+#include "mint/domain/runtime_settings.hpp"
+
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -19,6 +21,7 @@ struct ProcessRequest {
     std::filesystem::path cwd;
     long timeout_seconds = 0;
     std::size_t max_output_bytes = 0;
+    CommandResourceLimits resource_limits{};
     std::shared_ptr<TaskControl> task_control;
 };
 
@@ -30,6 +33,8 @@ struct ProcessResult {
     bool timed_out = false;
     bool task_timed_out = false;
     bool cancelled = false;
+    bool resource_limited = false;
+    std::string resource_limit;
     bool output_truncated = false;
     std::string output;
 };

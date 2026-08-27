@@ -51,6 +51,7 @@ struct CommandInvocation {
     std::filesystem::path cwd;
     std::string cwd_label;
     long timeout_seconds = 0;
+    CommandResourceLimits resource_limits{};
 };
 
 std::vector<std::string> command_arguments(const Json& arguments) {
@@ -116,7 +117,8 @@ long command_timeout(const Json& arguments, long default_timeout, long max_timeo
 CommandInvocation
 parse_invocation(const Json& arguments, const std::filesystem::path& root,
                  const std::unordered_map<std::string, std::filesystem::path>& resolved_programs,
-                 long default_timeout, long max_timeout) {
+                 long default_timeout, long max_timeout,
+                 const CommandResourceLimits& resource_limits) {
     if (!arguments.is_object()) {
         throw std::invalid_argument("run_command 参数必须是 JSON 对象");
     }
@@ -132,6 +134,7 @@ parse_invocation(const Json& arguments, const std::filesystem::path& root,
     invocation.cwd = command_cwd(arguments, root);
     invocation.cwd_label = display_path(root, invocation.cwd);
     invocation.timeout_seconds = command_timeout(arguments, default_timeout, max_timeout);
+    invocation.resource_limits = resource_limits;
     return invocation;
 }
 
@@ -140,7 +143,8 @@ Json command_result_base(const CommandInvocation& invocation, bool sandboxed,
     return {{"program", invocation.program},
             {"cwd", invocation.cwd_label},
             {"sandboxed", sandboxed},
-            {"sandbox_backend", sandbox_backend}};
+            {"sandbox_backend", sandbox_backend},
+            {"resource_limits", command_resource_limits_to_json(invocation.resource_limits)}};
 }
 
 enum class UnstartedOutcome { cancelled, task_timed_out, denied };
@@ -196,6 +200,9 @@ Json process_result_json(const CommandInvocation& invocation, command_detail::Pr
          {"timed_out", process.timed_out || process.task_timed_out},
          {"task_timed_out", process.task_timed_out},
          {"cancelled", process.cancelled},
+         {"resource_limited", process.resource_limited},
+         {"resource_limit",
+          process.resource_limit.empty() ? Json(nullptr) : Json(process.resource_limit)},
          {"output_truncated", process.output_truncated},
          {"output", std::move(process.output)}});
     return result;
@@ -225,6 +232,7 @@ command_detail::ProcessRequest process_request(const CommandInvocation& invocati
     request.cwd = invocation.cwd;
     request.timeout_seconds = invocation.timeout_seconds;
     request.max_output_bytes = max_output_bytes;
+    request.resource_limits = invocation.resource_limits;
     request.task_control = task_control;
     return request;
 }
@@ -274,8 +282,8 @@ CommandCatalog build_command_catalog(CommandRunnerOptions& options, long max_tim
 CommandRunner::CommandRunner(CommandRunnerOptions options)
     : default_timeout_seconds_(options.default_timeout_seconds),
       max_timeout_seconds_(options.max_timeout_seconds),
-      max_output_bytes_(options.max_output_bytes), task_control_(std::move(options.task_control)),
-      approval_(std::move(options.approval)) {
+      max_output_bytes_(options.max_output_bytes), resource_limits_(options.resource_limits),
+      task_control_(std::move(options.task_control)), approval_(std::move(options.approval)) {
     std::error_code error;
     root_ = std::filesystem::weakly_canonical(std::move(options.root), error);
     if (error || root_.empty() || !std::filesystem::is_directory(root_)) {
@@ -288,6 +296,7 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
     if (max_output_bytes_ == 0 || max_output_bytes_ > runtime_bounds::max_command_output_bytes) {
         throw std::invalid_argument("命令输出上限必须在 1 字节到 1 MiB 之间");
     }
+    validate_command_resource_limits(resource_limits_, "CommandRunner resource_limits");
     if (!options.allowed_programs.empty() && !options.recipes.empty()) {
         throw std::invalid_argument("原始程序授权与固定命令 recipe 不能同时启用");
     }
@@ -433,14 +442,17 @@ Json CommandRunner::run_command(const Json& arguments) const {
     (void)arguments;
     throw std::runtime_error("当前受控命令执行暂未支持 Windows");
 #else
-    const auto invocation = parse_invocation(arguments, root_, resolved_programs_,
-                                             default_timeout_seconds_, max_timeout_seconds_);
-    diagnostics::emit(diagnostics::Level::debug, "command.prepared",
-                      {{"program", invocation.program},
-                       {"cwd", invocation.cwd_label},
-                       {"argument_count", invocation.arguments.size()},
-                       {"timeout_seconds", invocation.timeout_seconds},
-                       {"sandbox", sandbox_backend_}});
+    const auto invocation =
+        parse_invocation(arguments, root_, resolved_programs_, default_timeout_seconds_,
+                         max_timeout_seconds_, resource_limits_);
+    diagnostics::emit(
+        diagnostics::Level::debug, "command.prepared",
+        {{"program", invocation.program},
+         {"cwd", invocation.cwd_label},
+         {"argument_count", invocation.arguments.size()},
+         {"timeout_seconds", invocation.timeout_seconds},
+         {"resource_limits", command_resource_limits_to_json(invocation.resource_limits)},
+         {"sandbox", sandbox_backend_}});
     if (const auto stopped =
             stopped_result(invocation, task_control_, is_os_sandboxed(), sandbox_backend_)) {
         return *stopped;

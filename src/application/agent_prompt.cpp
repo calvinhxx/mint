@@ -71,7 +71,8 @@ std::string Agent::system_prompt() const {
                        "and reads from the user's home are limited to the workspace and approved "
                        "executables. "
                  : "Commands are not protected by an OS sandbox. ") +
-            "Inspect status, exit_code, timed_out, cancelled, and output. "
+            "Inspect status, exit_code, timed_out, cancelled, resource_limited, resource_limit, "
+            "and output. "
             "Never claim a command or verification passed unless its returned result proves it. ";
     } else {
         prompt += "Command execution is disabled. Do not claim that you ran commands or tests. ";

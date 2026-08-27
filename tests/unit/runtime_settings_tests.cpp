@@ -14,6 +14,7 @@ TEST(RuntimeSettings, DefaultsStayWithinHardBounds) {
     EXPECT_LE(settings.read_file_bytes, mint::runtime_bounds::max_read_file_bytes);
     EXPECT_LE(settings.search_file_bytes, mint::runtime_bounds::max_search_file_bytes);
     EXPECT_LE(settings.command_output_bytes, mint::runtime_bounds::max_command_output_bytes);
+    EXPECT_EQ(settings.command_resources, mint::CommandResourceLimits{});
 }
 
 TEST(RuntimeSettings, ParsesPartialOverridesAndKeepsOtherDefaults) {
@@ -24,6 +25,7 @@ TEST(RuntimeSettings, ParsesPartialOverridesAndKeepsOtherDefaults) {
     EXPECT_EQ(settings.search_max_hits, 25U);
     EXPECT_EQ(settings.list_max_entries, mint::runtime_defaults::list_max_entries);
     EXPECT_EQ(settings.command_output_bytes, mint::runtime_defaults::command_output_bytes);
+    EXPECT_EQ(settings.command_resources, mint::CommandResourceLimits{});
 }
 
 TEST(RuntimeSettings, JsonRoundTripPreservesEveryField) {
@@ -34,6 +36,10 @@ TEST(RuntimeSettings, JsonRoundTripPreservesEveryField) {
     expected.search_max_hits = 20;
     expected.search_max_files = 400;
     expected.command_output_bytes = 4096;
+    expected.command_resources = {.cpu_seconds = 30,
+                                  .memory_bytes = 512 * 1024 * 1024,
+                                  .max_processes = 64,
+                                  .file_size_bytes = 8 * 1024 * 1024};
 
     const auto actual =
         mint::parse_tool_runtime_settings(mint::tool_runtime_settings_to_json(expected));
@@ -48,6 +54,12 @@ TEST(RuntimeSettings, RejectsUnknownAndOutOfRangeValues) {
     EXPECT_THROW((void)mint::parse_tool_runtime_settings(
                      {{"read_file_bytes", mint::runtime_bounds::max_read_file_bytes + 1}}),
                  std::invalid_argument);
+    EXPECT_THROW(
+        (void)mint::parse_tool_runtime_settings({{"command_resources", {{"memory_bytes", 1024}}}}),
+        std::invalid_argument);
+    EXPECT_THROW(
+        (void)mint::parse_tool_runtime_settings({{"command_resources", {{"unexpected", 1}}}}),
+        std::invalid_argument);
 }
 
 } // namespace

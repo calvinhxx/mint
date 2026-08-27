@@ -116,6 +116,7 @@ ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions optio
                                  .default_timeout_seconds = options.default_command_timeout_seconds,
                                  .max_timeout_seconds = max_timeout_seconds,
                                  .max_output_bytes = options.max_command_output_bytes,
+                                 .resource_limits = runtime_.command_resources,
                                  .task_control = std::move(options.task_control),
                                  .approval = std::move(options.command_approval),
                                  .require_os_sandbox = options.require_command_sandbox,

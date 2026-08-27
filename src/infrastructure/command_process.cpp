@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_set>
 
 #if !defined(_WIN32)
@@ -14,8 +15,13 @@
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#if defined(__APPLE__)
+#include <libproc.h>
+#endif
 
 #if defined(__linux__)
 #include <sys/syscall.h>
@@ -111,6 +117,97 @@ void close_inherited_descriptors() {
     }
 }
 
+bool set_resource_limit(int resource, std::size_t value) noexcept {
+    if (value == 0) {
+        return true;
+    }
+    const auto limit = static_cast<rlim_t>(value);
+    const struct rlimit bounds{limit, limit};
+    return ::setrlimit(resource, &bounds) == 0;
+}
+
+bool set_cpu_limit(std::size_t seconds) noexcept {
+    if (seconds == 0) {
+        return true;
+    }
+    const auto soft = static_cast<rlim_t>(seconds);
+    const auto hard = static_cast<rlim_t>(seconds + 1);
+    const struct rlimit bounds{soft, hard};
+    return ::setrlimit(RLIMIT_CPU, &bounds) == 0;
+}
+
+enum class ResourceLimitError { none, cpu, memory, processes, file_size };
+
+ResourceLimitError apply_resource_limits(const CommandResourceLimits& limits) noexcept {
+    if (!set_cpu_limit(limits.cpu_seconds)) {
+        return ResourceLimitError::cpu;
+    }
+    if (!set_resource_limit(RLIMIT_FSIZE, limits.file_size_bytes)) {
+        return ResourceLimitError::file_size;
+    }
+#if defined(__linux__) && defined(RLIMIT_AS)
+    if (!set_resource_limit(RLIMIT_AS, limits.memory_bytes)) {
+        return ResourceLimitError::memory;
+    }
+#elif defined(__APPLE__)
+    // macOS rejects finite RLIMIT_AS values. The parent process enforces
+    // resident memory with proc_pid_rusage instead.
+    (void)limits.memory_bytes;
+#else
+    if (limits.memory_bytes != 0) {
+        return ResourceLimitError::memory;
+    }
+#endif
+#if defined(RLIMIT_NPROC)
+    if (!set_resource_limit(RLIMIT_NPROC, limits.max_processes)) {
+        return ResourceLimitError::processes;
+    }
+#else
+    if (limits.max_processes != 0) {
+        return ResourceLimitError::processes;
+    }
+#endif
+    return ResourceLimitError::none;
+}
+
+std::string_view resource_limit_error_message(ResourceLimitError error) noexcept {
+    switch (error) {
+    case ResourceLimitError::cpu:
+        return "mint: failed to apply cpu resource limit\n";
+    case ResourceLimitError::memory:
+        return "mint: failed to apply memory resource limit\n";
+    case ResourceLimitError::processes:
+        return "mint: failed to apply process resource limit\n";
+    case ResourceLimitError::file_size:
+        return "mint: failed to apply file-size resource limit\n";
+    case ResourceLimitError::none:
+        break;
+    }
+    return {};
+}
+
+void reset_resource_signals() noexcept {
+    for (const auto signal : {SIGPIPE, SIGXCPU, SIGXFSZ}) {
+        struct sigaction action{};
+        action.sa_handler = SIG_DFL;
+        (void)sigemptyset(&action.sa_mask);
+        (void)::sigaction(signal, &action, nullptr);
+    }
+}
+
+std::optional<std::size_t> resident_memory_bytes(pid_t process) noexcept {
+#if defined(__APPLE__)
+    struct rusage_info_v2 usage{};
+    if (::proc_pid_rusage(process, RUSAGE_INFO_V2, reinterpret_cast<rusage_info_t*>(&usage)) != 0) {
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(usage.ri_resident_size);
+#else
+    (void)process;
+    return std::nullopt;
+#endif
+}
+
 #endif
 
 } // namespace
@@ -156,6 +253,13 @@ ProcessResult execute_process(ProcessRequest request) {
             ::dup2(output_pipe[1], STDERR_FILENO) < 0) {
             constexpr char message[] = "mint: failed to prepare approved command\n";
             (void)::write(output_pipe[1], message, sizeof(message) - 1);
+            ::_exit(126);
+        }
+        reset_resource_signals();
+        const auto limit_error = apply_resource_limits(request.resource_limits);
+        if (limit_error != ResourceLimitError::none) {
+            const auto message = resource_limit_error_message(limit_error);
+            (void)::write(STDERR_FILENO, message.data(), message.size());
             ::_exit(126);
         }
         ::close(output_pipe[0]);
@@ -239,6 +343,15 @@ ProcessResult execute_process(ProcessRequest request) {
             terminate_process();
             break;
         }
+        if (request.resource_limits.memory_bytes != 0) {
+            const auto resident = resident_memory_bytes(process);
+            if (resident.has_value() && *resident > request.resource_limits.memory_bytes) {
+                result.resource_limited = true;
+                result.resource_limit = "memory";
+                terminate_process();
+                break;
+            }
+        }
         if (std::chrono::steady_clock::now() >= deadline) {
             result.timed_out = true;
             terminate_process();
@@ -255,12 +368,26 @@ ProcessResult execute_process(ProcessRequest request) {
                              std::chrono::steady_clock::now() - started_at)
                              .count();
 
+    if (!result.cancelled && !result.task_timed_out && !result.timed_out &&
+        !result.resource_limited && WIFSIGNALED(wait_status)) {
+        const auto signal = WTERMSIG(wait_status);
+        if (signal == SIGXCPU) {
+            result.resource_limited = true;
+            result.resource_limit = "cpu";
+        } else if (signal == SIGXFSZ) {
+            result.resource_limited = true;
+            result.resource_limit = "file_size";
+        }
+    }
+
     if (result.cancelled) {
         result.status = "cancelled";
     } else if (result.task_timed_out) {
         result.status = "task_timed_out";
     } else if (result.timed_out) {
         result.status = "timed_out";
+    } else if (result.resource_limited) {
+        result.status = "resource_limited";
     } else if (WIFEXITED(wait_status)) {
         result.status = "exited";
         result.exit_code = WEXITSTATUS(wait_status);

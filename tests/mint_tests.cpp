@@ -29,11 +29,24 @@
 
 #include <gtest/gtest.h>
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define MINT_TEST_ADDRESS_SANITIZED 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) && !defined(MINT_TEST_ADDRESS_SANITIZED)
+#define MINT_TEST_ADDRESS_SANITIZED 1
+#endif
+#if !defined(MINT_TEST_ADDRESS_SANITIZED)
+#define MINT_TEST_ADDRESS_SANITIZED 0
+#endif
+
 #if !defined(_WIN32)
 #include <cerrno>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -65,6 +78,12 @@ int run_command_helper(int argc, char** argv) {
     if (mode == "sleep") {
         std::this_thread::sleep_for(std::chrono::seconds(2));
         std::cout << "sleep completed\n";
+        return 0;
+    }
+    if (mode == "spin") {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < deadline) {
+        }
         return 0;
     }
     if (mode == "flood") {
@@ -109,7 +128,45 @@ int run_command_helper(int argc, char** argv) {
         output << "sandbox write probe\n";
         return output ? 0 : 12;
     }
+    if (mode == "write-large") {
+        if (argc != 4) {
+            return 65;
+        }
+        std::ofstream output(argv[3], std::ios::binary);
+        output << std::string(4096, 'x');
+        return output ? 0 : 12;
+    }
+    if (mode == "allocate") {
+        if (argc != 4) {
+            return 65;
+        }
+        const auto bytes = static_cast<std::size_t>(std::stoull(argv[3]));
+        std::vector<unsigned char> memory(bytes);
+        for (std::size_t offset = 0; offset < memory.size(); offset += 4096) {
+            memory[offset] = 1;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        return memory.empty() ? 17 : 0;
+    }
 #if !defined(_WIN32)
+    if (mode == "limits") {
+        const auto print_limit = [](std::string_view name, int resource) {
+            struct rlimit limit{};
+            if (::getrlimit(resource, &limit) != 0) {
+                return false;
+            }
+            std::cout << name << '=' << static_cast<unsigned long long>(limit.rlim_cur) << '\n';
+            return true;
+        };
+        const bool common = print_limit("cpu", RLIMIT_CPU) &&
+                            print_limit("processes", RLIMIT_NPROC) &&
+                            print_limit("file", RLIMIT_FSIZE);
+#if defined(RLIMIT_AS)
+        return common && print_limit("memory", RLIMIT_AS) ? 0 : 16;
+#else
+        return common ? 0 : 16;
+#endif
+    }
     if (mode == "descriptor") {
         if (argc != 6) {
             return 65;
@@ -1388,6 +1445,88 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
 #endif
 }
 
+TEST(CommandRunnerTest, EnforcesResourceLimits) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
+#else
+    TemporaryDirectory temporary;
+    const auto workspace = temporary.path() / "workspace";
+    const auto program = test_executable.generic_string();
+
+    mint::ToolRuntimeSettings runtime;
+    runtime.command_resources = {
+        .cpu_seconds = 10,
+        .memory_bytes = MINT_TEST_ADDRESS_SANITIZED ? 0 : std::size_t{128} * 1024 * 1024,
+        .max_processes = 128,
+        .file_size_bytes = 1024};
+    mint::ToolRegistry tools(
+        workspace, mint::ToolRegistryOptions{.allowed_programs = {program}, .runtime = runtime});
+
+    const auto reported = mint::Json::parse(tools.execute(
+        {"command-limits",
+         "run_command",
+         {{"program", program}, {"args", mint::Json::array({"--command-helper", "limits"})}}}));
+    EXPECT_EQ(reported.at("exit_code"), 0) << reported.dump(2);
+    EXPECT_EQ(reported.at("resource_limits"),
+              mint::command_resource_limits_to_json(runtime.command_resources));
+    const auto output = reported.at("output").get<std::string>();
+    EXPECT_NE(output.find("cpu=10\n"), std::string::npos);
+    EXPECT_NE(output.find("processes=128\n"), std::string::npos);
+    EXPECT_NE(output.find("file=1024\n"), std::string::npos);
+#if defined(__linux__)
+    if (runtime.command_resources.memory_bytes != 0) {
+        EXPECT_NE(output.find("memory=134217728\n"), std::string::npos);
+    }
+#endif
+
+    const auto limited_path = workspace / "limited.bin";
+    const auto limited = mint::Json::parse(
+        tools.execute({"command-file-limit",
+                       "run_command",
+                       {{"program", program},
+                        {"args", mint::Json::array({"--command-helper", "write-large",
+                                                    limited_path.filename().string()})}}}));
+    std::error_code error;
+    const auto written = std::filesystem::file_size(limited_path, error);
+    EXPECT_FALSE(error);
+    EXPECT_LE(written, runtime.command_resources.file_size_bytes);
+    EXPECT_EQ(limited.at("status"), "resource_limited");
+    EXPECT_EQ(limited.at("resource_limit"), "file_size");
+
+    if (runtime.command_resources.memory_bytes != 0) {
+        const auto memory_limited = mint::Json::parse(
+            tools.execute({"command-memory-limit",
+                           "run_command",
+                           {{"program", program},
+                            {"args", mint::Json::array({"--command-helper", "allocate",
+                                                        std::to_string(256 * 1024 * 1024)})},
+                            {"timeout_seconds", 5}}}));
+        EXPECT_FALSE(memory_limited.at("timed_out").get<bool>());
+#if defined(__APPLE__)
+        EXPECT_TRUE(memory_limited.at("resource_limited").get<bool>()) << memory_limited.dump(2);
+        EXPECT_EQ(memory_limited.at("resource_limit"), "memory");
+#else
+        EXPECT_TRUE(memory_limited.at("resource_limited").get<bool>() ||
+                    memory_limited.at("status") == "signaled" ||
+                    memory_limited.value("exit_code", 0) != 0);
+#endif
+    }
+
+    mint::ToolRuntimeSettings cpu_runtime;
+    cpu_runtime.command_resources.cpu_seconds = 1;
+    mint::ToolRegistry cpu_tools(workspace, mint::ToolRegistryOptions{.allowed_programs = {program},
+                                                                      .runtime = cpu_runtime});
+    const auto cpu_limited = mint::Json::parse(
+        cpu_tools.execute({"command-cpu-limit",
+                           "run_command",
+                           {{"program", program},
+                            {"args", mint::Json::array({"--command-helper", "spin"})},
+                            {"timeout_seconds", 5}}}));
+    EXPECT_EQ(cpu_limited.at("status"), "resource_limited");
+    EXPECT_EQ(cpu_limited.at("resource_limit"), "cpu");
+#endif
+}
+
 TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
     const auto legacy_defaults = mint::parse_task_policy({{"schema_version", 1}});
     MINT_EXPECT(legacy_defaults.fingerprint == "1fbaf1adbf33a12d",
@@ -1434,7 +1573,12 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
               {"search_file_bytes", 524288},
               {"search_max_hits", 25},
               {"search_max_files", 500},
-              {"command_output_bytes", 4096}}}}
+              {"command_output_bytes", 4096},
+              {"command_resources",
+               {{"cpu_seconds", 30},
+                {"memory_bytes", 0},
+                {"max_processes", 256},
+                {"file_size_bytes", 1048576}}}}}}
             .dump(2));
 
     const auto policy = mint::load_task_policy(policy_path);
@@ -1449,7 +1593,11 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
                     policy.tool_limits.search_file_bytes == 524288 &&
                     policy.tool_limits.search_max_hits == 25 &&
                     policy.tool_limits.search_max_files == 500 &&
-                    policy.tool_limits.command_output_bytes == 4096,
+                    policy.tool_limits.command_output_bytes == 4096 &&
+                    policy.tool_limits.command_resources.cpu_seconds == 30 &&
+                    policy.tool_limits.command_resources.memory_bytes == 0 &&
+                    policy.tool_limits.command_resources.max_processes == 256 &&
+                    policy.tool_limits.command_resources.file_size_bytes == 1048576,
                 "task policy loads configurable tool performance budgets");
     const auto second_load = mint::load_task_policy(policy_path);
     MINT_EXPECT(second_load.fingerprint == policy.fingerprint,
@@ -1766,6 +1914,9 @@ TEST(AgentLoopTest, ContextCompactionPreservesFailureEvidence) {
     const mint::Json failed_result = {{"ok", false},
                                       {"status", "failed"},
                                       {"error", "compile failed"},
+                                      {"resource_limited", true},
+                                      {"resource_limit", "memory"},
+                                      {"resource_limits", {{"memory_bytes", 134217728}}},
                                       {"diagnostics", std::move(large_diagnostics)}};
     const mint::Json messages = mint::Json::array(
         {{{"role", "system"}, {"content", "system"}},
@@ -1785,6 +1936,9 @@ TEST(AgentLoopTest, ContextCompactionPreservesFailureEvidence) {
     const auto retained = mint::Json::parse(tool_message->at("content").get<std::string>());
     MINT_EXPECT(retained.at("context_compacted").get<bool>() && !retained.at("ok").get<bool>() &&
                     retained.at("status") == "failed" && retained.at("error") == "compile failed" &&
+                    retained.at("resource_limited").get<bool>() &&
+                    retained.at("resource_limit") == "memory" &&
+                    retained.at("resource_limits").at("memory_bytes") == 134217728 &&
                     !retained.contains("diagnostics"),
                 "compaction omits bulk payload without changing failed evidence into success");
 }

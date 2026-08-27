@@ -25,6 +25,10 @@ inline constexpr std::size_t search_file_bytes = 1024 * 1024;
 inline constexpr std::size_t search_max_hits = 100;
 inline constexpr std::size_t search_max_files = 2000;
 inline constexpr std::size_t command_output_bytes = 128 * 1024;
+inline constexpr std::size_t command_cpu_seconds = 0;
+inline constexpr std::size_t command_memory_bytes = 0;
+inline constexpr std::size_t command_max_processes = 0;
+inline constexpr std::size_t command_file_size_bytes = 0;
 
 } // namespace runtime_defaults
 
@@ -46,8 +50,24 @@ inline constexpr std::size_t max_search_file_bytes = 16 * 1024 * 1024;
 inline constexpr std::size_t max_search_hits = 1000;
 inline constexpr std::size_t max_search_files = 20000;
 inline constexpr std::size_t max_command_output_bytes = 1024 * 1024;
+inline constexpr std::size_t max_command_cpu_seconds = 3600;
+inline constexpr std::size_t min_command_memory_bytes = 64 * 1024 * 1024;
+inline constexpr std::size_t max_command_memory_bytes = std::size_t{64} * 1024 * 1024 * 1024;
+inline constexpr std::size_t max_command_processes = 1024;
+inline constexpr std::size_t min_command_file_size_bytes = 1024;
+inline constexpr std::size_t max_command_file_size_bytes = std::size_t{8} * 1024 * 1024 * 1024;
 
 } // namespace runtime_bounds
+
+struct CommandResourceLimits {
+    // Zero keeps the corresponding operating-system limit disabled.
+    std::size_t cpu_seconds = runtime_defaults::command_cpu_seconds;
+    std::size_t memory_bytes = runtime_defaults::command_memory_bytes;
+    std::size_t max_processes = runtime_defaults::command_max_processes;
+    std::size_t file_size_bytes = runtime_defaults::command_file_size_bytes;
+
+    bool operator==(const CommandResourceLimits&) const = default;
+};
 
 struct ToolRuntimeSettings {
     std::size_t read_file_bytes = runtime_defaults::read_file_bytes;
@@ -56,14 +76,18 @@ struct ToolRuntimeSettings {
     std::size_t search_max_hits = runtime_defaults::search_max_hits;
     std::size_t search_max_files = runtime_defaults::search_max_files;
     std::size_t command_output_bytes = runtime_defaults::command_output_bytes;
+    CommandResourceLimits command_resources{};
 
     bool operator==(const ToolRuntimeSettings&) const = default;
 };
 
+void validate_command_resource_limits(const CommandResourceLimits& limits,
+                                      std::string_view context = "command_resources");
 void validate_tool_runtime_settings(const ToolRuntimeSettings& settings,
                                     std::string_view context = "tool_limits");
 [[nodiscard]] ToolRuntimeSettings
 parse_tool_runtime_settings(const Json& document, std::string_view context = "tool_limits");
+[[nodiscard]] Json command_resource_limits_to_json(const CommandResourceLimits& limits);
 [[nodiscard]] Json tool_runtime_settings_to_json(const ToolRuntimeSettings& settings);
 
 } // namespace mint
