@@ -43,6 +43,8 @@ ctest --preset PRESET
 
 Linux 沙箱测试会真实检查四件事：工作区内可以写、工作区外不能写、受保护文件不能读、命令不能访问宿主网络。Bubblewrap 不可用时不会静默降级；只有用户显式传入 `--unsafe-no-command-sandbox` 才能关闭这层保护。
 
+资源限制测试会让真实子进程读取当前限制，并分别触发 CPU、内存和单文件大小上限。进程数通过子进程读取到的内核值验证。macOS 的内存用父进程监控，Linux 使用 `RLIMIT_AS`；Sanitizer 构建不启用内存上限，避免把 Sanitizer 的大虚拟地址空间误判为业务内存。这组测试验证进程级限制，不把它描述成完整进程树配额。
+
 ## 本地全量验证
 
 需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。
@@ -74,13 +76,13 @@ ctest --preset vcpkg-sanitize
 
 2026-08-27 在 macOS arm64、AppleClang 17 上的结果：
 
-- Debug：50/50 tests passed；
-- ASan + UBSan：50/50 tests passed；
+- Debug：51/51 tests passed；
+- ASan + UBSan：51/51 tests passed；
 - Release：构建通过，且未安装 GoogleTest；
 - clang-format：通过；
 - [GitHub Actions 发布门禁](https://github.com/calvinhxx/mint/actions/runs/33058098444)：通过。
 
-50 个测试包括 11 个单元测试、23 个集成测试、12 个契约测试、2 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
+51 个测试包括 11 个单元测试、24 个集成测试、12 个契约测试、2 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
 
 ## 测试覆盖到哪里
 

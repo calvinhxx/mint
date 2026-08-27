@@ -15,7 +15,7 @@
 | 模型接口 | Chat Completions、Responses、可选 SSE |
 | 构建矩阵 | Windows / macOS / Linux × x64 / ARM64 |
 | 完整功能验证平台 | macOS arm64；Linux 等待原生 CI 验收 |
-| 本地测试 | Debug 和 Sanitizer CTest 50/50 |
+| 本地测试 | Debug 和 Sanitizer CTest 51/51 |
 | 持续集成 | 六组合原生构建矩阵；macOS ARM64 深度门禁 |
 | 最近真实模型验收 | v1.4 Chat Completions 隔离修复任务 |
 
@@ -35,6 +35,7 @@
 - vcpkg 依赖、spdlog 诊断日志和 GoogleTest 单元测试；
 - Windows、macOS、Linux 的 x64 / ARM64 CMake preset、原生 CI runner 和矩阵一致性校验；
 - Linux Bubblewrap 安全命令后端，隔离宿主写入、用户目录、运行时套接字、网络和继承文件描述符；
+- policy 可配置的命令 CPU、内存、进程数和单文件大小上限，超限结果会保留到模型上下文；
 - 本地与 GitHub Actions 共用一条发布检查，覆盖版本、格式、Debug、Release、Sanitizer、CTest 和离线 CLI；
 - v1.4 真实 Chat Completions 回归，包含工具调用、限流等待、修改、验证和独立复测；
 - 文本输出、JSON 输出和诊断信息分流。
@@ -54,7 +55,7 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 | 方向 | 缺口 |
 |---|---|
 | 平台运行时 | Linux 后端已实现、等待原生 CI 验收；Windows 仍缺安全命令后端 |
-| 资源限制 | 缺少 CPU、内存、进程数和磁盘配额 |
+| 资源限制 | POSIX 进程级限制已完成；还缺进程树总量、工作区总磁盘配额和 Windows Job Object |
 | 恢复 | 多文件修改缺少跨进程事务日志 |
 | 模型兼容 | Responses、SSE 和更多 provider 尚未做真实回归 |
 | 交互 | 没有持续聊天、多任务 GUI 和多 Agent 编排 |
@@ -63,7 +64,7 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 
 1. 在 Linux x64 / ARM64 runner 验收 Bubblewrap 后端；
 2. 实现 Windows 安全命令后端；
-3. 增加资源配额和更强的事务恢复；
+3. 把资源配额扩展到完整进程树和工作区总量，并增加更强的事务恢复；
 4. 增加 provider 能力识别和固定回归配置；
 5. 内核稳定后再增加持续聊天和 GUI。
 

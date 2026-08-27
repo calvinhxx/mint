@@ -26,7 +26,7 @@ build     -> cmake --build build
 test      -> ctest --test-dir build --output-on-failure
 ~~~
 
-运行时只能选择已经登记且被 policy 允许的 recipe。`CommandRunner` 还负责超时、输出限制和平台沙箱。
+运行时只能选择已经登记且被 policy 允许的 recipe。`CommandRunner` 还负责超时、输出限制、资源上限和平台沙箱。
 
 | 系统 | 默认命令保护 |
 |---|---|
@@ -35,6 +35,27 @@ test      -> ctest --test-dir build --output-on-failure
 | Windows | 暂未开放安全命令执行 |
 
 Linux 缺少 `bwrap` 时会直接拒绝命令，不会自动退回到无沙箱模式。非标准安装位置可以用 `MINT_BWRAP_PATH=/absolute/path/to/bwrap` 指定。需要排查特殊工具兼容问题时，用户可以显式传入 `--unsafe-no-command-sandbox`，但这表示接受该命令直接接触宿主系统。
+
+## 命令资源上限
+
+资源上限写在任务 policy 的 `tool_limits.command_resources` 中：
+
+~~~json
+{
+  "tool_limits": {
+    "command_resources": {
+      "cpu_seconds": 60,
+      "memory_bytes": 1073741824,
+      "max_processes": 128,
+      "file_size_bytes": 67108864
+    }
+  }
+}
+~~~
+
+数值为 `0` 表示不启用该项；旧 policy 没有这些字段时保持原行为。`cpu_seconds` 是单进程 CPU 时间，`max_processes` 是命令进程继承的用户级进程上限，`file_size_bytes` 是单文件上限。Linux 的 `memory_bytes` 限制单进程地址空间；macOS 不接受有限地址空间上限，因此由 mint 监控命令主进程的常驻内存并终止超限进程组。
+
+这些值都不是整个进程树的总量。CPU、单文件和 macOS 内存超限会在命令结果中标出具体原因；Linux 内存分配或进程创建被内核拒绝时，程序也可能只返回非零退出码。完整进程树总内存、总进程数和工作区磁盘配额仍属于后续增强范围。
 
 ## 修改后的验证
 
@@ -64,6 +85,6 @@ Agent 会在工具执行前后保存 checkpoint。恢复时按动作是否有副
 - macOS arm64 是目前完整验证的平台；
 - Linux Bubblewrap 后端已经实现，仍需在 x64 / ARM64 原生 CI 完成验收；
 - Windows 还不能安全运行项目命令；
-- CPU、内存、进程数和磁盘配额仍待补充。
+- Windows Job Object、进程树总内存和工作区总磁盘配额仍待补充。
 
 这些限制属于当前实现范围，不应由提示词代替。
