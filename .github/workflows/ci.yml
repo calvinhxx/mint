@@ -67,6 +67,12 @@ jobs:
           "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
 
+      - name: Activate MSVC
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch == 'arm64' && 'amd64_arm64' || 'amd64' }}
+
       - name: Cache vcpkg packages
         uses: actions/cache@v5
         with:
@@ -82,6 +88,16 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --no-install-recommends ${{ join(matrix.system_packages, ' ') }}
+
+      - name: Allow Bubblewrap user namespaces
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          restriction=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -r "$restriction" && "$(<"$restriction")" == "1" ]]; then
+            sudo apparmor_parser --replace .github/apparmor/mint-bwrap
+          fi
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
