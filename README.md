@@ -1,51 +1,49 @@
-# aiagent
+# mint
 
-一个运行在本地项目里的命令行编程助手：读代码、改文件、运行构建和测试。
+mint 是一个轻量的通用 AI Agent 工具。它提供模型循环、工具调用、权限控制、任务恢复和结果验证，既可以直接使用 CLI，也可以作为 C++ 内核扩展。
 
-## 快速开始
+当前自带文件读取、搜索、编辑和固定命令工具，适合本地工程与目录自动化。一次 `run` 只处理一个任务：模型决定下一步，本地工具执行操作。
 
-需要 CMake 3.24+、C++20 编译器和 libcurl。
+## 编译
 
-```bash
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
+需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。
 
-./build/aiagent init --root .
-./build/aiagent run --root . --demo "这个项目从哪里启动？"
-```
+~~~bash
+export VCPKG_ROOT=/path/to/vcpkg
+cmake --preset vcpkg-release
+cmake --build --preset vcpkg-release
+~~~
 
-`--demo` 不需要 API Key，也不会修改文件。
+## 先试一下
 
-## 使用模型
+~~~bash
+./build/vcpkg-release/mint init --root .
+./build/vcpkg-release/mint run --root . --demo "总结这个目录"
+~~~
 
-```bash
+`--demo` 不需要 API Key，并且不会修改文件或运行项目命令。
+
+## 配置模型
+
+~~~bash
 cp config.example.json config.json
-# 填写 api_key、base_url 和 model
-./build/aiagent run --root . "修复失败的测试，然后告诉我改了什么"
-```
+# 在 config.json 中填写 api_key、api_url 和 model
+./build/vcpkg-release/mint run --root . "修复失败的测试，改完重新跑测试"
+~~~
 
-Responses API 使用 `config.responses.example.json`。不要提交包含密钥的 `config.json`。
+Responses API 可从 `config.responses.example.json` 开始配置。不要提交包含密钥的 `config.json`。
 
 ## 常用命令
 
-```bash
-./build/aiagent run --root . "任务" # 开始任务
-./build/aiagent resume --root .    # 继续中断的任务
-./build/aiagent status --root .    # 查看任务状态
-./build/aiagent --help             # 查看全部选项
-```
+~~~bash
+./build/vcpkg-release/mint init --root .        # 初始化项目权限和命令
+./build/vcpkg-release/mint run --root . "任务"  # 开始新任务
+./build/vcpkg-release/mint resume --root .      # 继续中断的任务
+./build/vcpkg-release/mint status --root .      # 查看任务状态
+~~~
 
-## 安全原则
+模型不能执行任意 shell，只能选择 `init` 登记的命令。文件访问受项目根目录和任务权限限制，任务记录保存在项目之外；需要其他能力时，可以新增工具或模型适配器，不必修改 Agent Loop。
 
-- 默认只读；写入和命令执行需要明确开启。
-- 模型只能运行项目初始化时记录的命令，不能自由执行 shell。
-- 多文件修改失败时自动恢复；也可以要求测试通过后才结束任务。
-- 任务记录保存在项目之外，API Key 不会提供给模型工具。
+目前完整验证的平台是 macOS arm64。Linux 和 Windows 的安全命令执行后端尚未完成。
 
-## 文档
-
-- [架构图与代码导读](docs/ARCHITECTURE.md)
-- [当前完成进度](docs/PROGRESS.md)
-
-目前完整支持 macOS arm64；Linux 和 Windows 的安全命令执行仍在开发中。
+工作原理见 [架构说明](docs/ARCHITECTURE.md)，当前完成度见 [项目进度](docs/PROGRESS.md)，其他文档见 [docs](docs/README.md)。

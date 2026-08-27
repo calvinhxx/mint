@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0 - Unreleased
+
+- Renamed the project, executable, C++ namespace, public headers, CMake targets, and state paths to `mint`; positioned it as a lightweight general AI agent toolkit.
+- Added a unified model-provider layer for Chat Completions and Responses, including optional SSE streaming, normalized tool calls, usage statistics, and server-directed retries.
+- Preserved the v1.3 Chat Completions configuration and public aliases while adding explicit provider adapters.
+- Fixed context compaction so failed tool evidence cannot be rewritten as a successful result.
+- Split the Agent loop, model transport/retry path, command execution, tool routing, file editing, and CLI composition into smaller responsibility-focused modules without changing checkpoint compatibility.
+- Added a vcpkg manifest and CMake presets for Debug, Release, and ASan/UBSan builds; GoogleTest is installed only through the test feature.
+- Added an internal spdlog diagnostics facade with structured task, model, tool, and command events that remain separate from machine-readable stdout.
+- Replaced the hand-written test harness with independently discoverable GoogleTest unit, integration, and contract cases.
+- Added an injectable CLI Console boundary and an architecture test that prevents direct process I/O from spreading into production modules.
+- Consolidated duplicate versioned acceptance notes and source-reading guidance into the current testing and architecture docs.
+
 ## 1.3.0 - 2026-08-24
 
 - Added the `init`, `run`, `resume`, and `status` project workflow while preserving the legacy CLI; managed demos are read-only and non-resumable.
