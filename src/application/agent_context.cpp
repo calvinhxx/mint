@@ -151,9 +151,9 @@ Json compacted_tool_result(const Json& message) {
         }
         if (const auto error = original.find("error");
             error != original.end() && error->is_string()) {
-            auto message = error->get<std::string>();
-            truncate_utf8(message, compacted_text_limit);
-            summary["error"] = std::move(message);
+            auto error_text = error->get<std::string>();
+            truncate_utf8(error_text, compacted_text_limit);
+            summary["error"] = std::move(error_text);
         }
     } catch (const Json::exception&) {
         summary["detail"] = "Tool payload omitted; original result was not valid JSON.";
