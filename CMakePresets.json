@@ -34,7 +34,8 @@
     },
     {
       "name": "vcpkg-dev",
-      "displayName": "vcpkg Debug",
+      "displayName": "Native Debug",
+      "description": "Debug build for the current host and its native architecture.",
       "inherits": "vcpkg-test-base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
@@ -42,7 +43,8 @@
     },
     {
       "name": "vcpkg-release",
-      "displayName": "vcpkg Release",
+      "displayName": "Native Release",
+      "description": "Release CLI build for the current host and its native architecture.",
       "inherits": "vcpkg-base",
       "cacheVariables": {
         "BUILD_TESTING": false,
@@ -52,11 +54,104 @@
     },
     {
       "name": "vcpkg-sanitize",
-      "displayName": "vcpkg ASan + UBSan",
+      "displayName": "Native ASan + UBSan",
+      "description": "Debug tests with AddressSanitizer and UndefinedBehaviorSanitizer.",
       "inherits": "vcpkg-dev",
       "binaryDir": "${sourceDir}/build/vcpkg-sanitize",
       "cacheVariables": {
         "MINT_ENABLE_SANITIZERS": true
+      }
+    },
+    {
+      "name": "vcpkg-windows",
+      "displayName": "Windows x64 Debug",
+      "description": "Native Windows x64 build and test configuration.",
+      "inherits": "vcpkg-test-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+    },
+    {
+      "name": "vcpkg-windows-arm64",
+      "displayName": "Windows ARM64 Debug",
+      "description": "Native Windows ARM64 build and test configuration.",
+      "inherits": "vcpkg-test-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "arm64-windows"
+      }
+    },
+    {
+      "name": "vcpkg-osx-x64",
+      "displayName": "macOS x64 Debug",
+      "description": "Native Intel macOS build and test configuration.",
+      "inherits": "vcpkg-test-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_ARCHITECTURES": "x86_64",
+        "VCPKG_TARGET_TRIPLET": "x64-osx"
+      }
+    },
+    {
+      "name": "vcpkg-osx",
+      "displayName": "macOS ARM64 Debug",
+      "description": "Native Apple Silicon build and test configuration.",
+      "inherits": "vcpkg-test-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx"
+      }
+    },
+    {
+      "name": "vcpkg-linux",
+      "displayName": "Linux x64 Debug",
+      "description": "Native Linux x64 build and test configuration.",
+      "inherits": "vcpkg-test-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
+    },
+    {
+      "name": "vcpkg-linux-arm64",
+      "displayName": "Linux ARM64 Debug",
+      "description": "Native Linux ARM64 build and test configuration.",
+      "inherits": "vcpkg-test-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "arm64-linux"
       }
     }
   ],
@@ -75,6 +170,36 @@
       "name": "vcpkg-sanitize",
       "configurePreset": "vcpkg-sanitize",
       "jobs": 4
+    },
+    {
+      "name": "vcpkg-windows",
+      "configurePreset": "vcpkg-windows",
+      "jobs": 4
+    },
+    {
+      "name": "vcpkg-windows-arm64",
+      "configurePreset": "vcpkg-windows-arm64",
+      "jobs": 4
+    },
+    {
+      "name": "vcpkg-osx-x64",
+      "configurePreset": "vcpkg-osx-x64",
+      "jobs": 4
+    },
+    {
+      "name": "vcpkg-osx",
+      "configurePreset": "vcpkg-osx",
+      "jobs": 4
+    },
+    {
+      "name": "vcpkg-linux",
+      "configurePreset": "vcpkg-linux",
+      "jobs": 4
+    },
+    {
+      "name": "vcpkg-linux-arm64",
+      "configurePreset": "vcpkg-linux-arm64",
+      "jobs": 4
     }
   ],
   "testPresets": [
@@ -91,6 +216,66 @@
     {
       "name": "vcpkg-sanitize",
       "configurePreset": "vcpkg-sanitize",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
+      }
+    },
+    {
+      "name": "vcpkg-windows",
+      "configurePreset": "vcpkg-windows",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
+      }
+    },
+    {
+      "name": "vcpkg-windows-arm64",
+      "configurePreset": "vcpkg-windows-arm64",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
+      }
+    },
+    {
+      "name": "vcpkg-osx-x64",
+      "configurePreset": "vcpkg-osx-x64",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
+      }
+    },
+    {
+      "name": "vcpkg-osx",
+      "configurePreset": "vcpkg-osx",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
+      }
+    },
+    {
+      "name": "vcpkg-linux",
+      "configurePreset": "vcpkg-linux",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
+      }
+    },
+    {
+      "name": "vcpkg-linux-arm64",
+      "configurePreset": "vcpkg-linux-arm64",
       "output": {
         "outputOnFailure": true
       },

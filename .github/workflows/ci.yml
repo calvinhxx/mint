@@ -14,8 +14,86 @@ permissions:
   contents: read
 
 jobs:
-  release-check:
-    name: macOS release checks
+  build-plan:
+    name: Build matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate build matrix
+        run: python3 .github/scripts/validate-build-matrix.py
+
+      - name: Export build matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "matrix=$(jq -c '.matrix' .github/build-matrix.json)" >> "$GITHUB_OUTPUT"
+
+  platform-build:
+    name: ${{ matrix.name }}
+    needs: build-plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build-plan.outputs.matrix) }}
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-binary-cache,readwrite"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Prepare native toolchain
+        shell: pwsh
+        run: |
+          if ("${{ runner.arch }}" -ne "${{ matrix.runner_arch }}") {
+            throw "Expected runner architecture ${{ matrix.runner_arch }}, got ${{ runner.arch }}"
+          }
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            throw "VCPKG_INSTALLATION_ROOT is not available on this runner"
+          }
+          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
+        with:
+          path: .vcpkg-binary-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install platform runtime dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends ${{ join(matrix.system_packages, ' ') }}
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  quality:
+    name: macOS ARM64 quality gates
     runs-on: macos-15
     timeout-minutes: 45
     env:

@@ -26,6 +26,7 @@ if ! grep -Eq "^## $project_version - (Unreleased|[0-9]{4}-[0-9]{2}-[0-9]{2})$" 
 fi
 
 git diff --check
+python3 .github/scripts/validate-build-matrix.py
 
 cmake --preset vcpkg-dev
 cmake --build --preset vcpkg-dev
