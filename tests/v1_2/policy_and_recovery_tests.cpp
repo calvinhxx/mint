@@ -153,6 +153,9 @@ class FinalizeAfterReadModel final : public mint::ModelClient {
 };
 
 TEST(PolicyContractTest, VerificationRecipeGate) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "a secure Windows command backend is not implemented yet";
+#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     write_text(workspace / "README.md", "# Broken\n");
@@ -184,6 +187,7 @@ TEST(PolicyContractTest, VerificationRecipeGate) {
     MINT_EXPECT(result.execution.recipe_calls == 2 && result.execution.verification_commands == 1 &&
                     result.verification_status == "passed",
                 "only verification-marked recipes satisfy the post-write gate");
+#endif
 }
 
 TEST(RecoveryContractTest, ReadOnlyInflightAutomaticallyReplays) {

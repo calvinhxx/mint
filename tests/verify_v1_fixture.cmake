@@ -17,7 +17,7 @@ if(NOT configure_result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" --build "${WORK_DIR}/project/build" --clean-first
+    COMMAND "${CMAKE_COMMAND}" --build "${WORK_DIR}/project/build" --config Debug --clean-first
     RESULT_VARIABLE build_result
     OUTPUT_VARIABLE build_output
     ERROR_VARIABLE build_error
@@ -27,7 +27,7 @@ if(NOT build_result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CTEST_COMMAND}" --test-dir "${WORK_DIR}/project/build" --output-on-failure
+    COMMAND "${CTEST_COMMAND}" --test-dir "${WORK_DIR}/project/build" -C Debug --output-on-failure
     RESULT_VARIABLE failing_test_result
     OUTPUT_VARIABLE failing_test_output
     ERROR_VARIABLE failing_test_error
@@ -48,7 +48,7 @@ endif()
 file(WRITE "${implementation}" "${repaired}")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" --build "${WORK_DIR}/project/build" --clean-first
+    COMMAND "${CMAKE_COMMAND}" --build "${WORK_DIR}/project/build" --config Debug --clean-first
     RESULT_VARIABLE rebuild_result
     OUTPUT_VARIABLE rebuild_output
     ERROR_VARIABLE rebuild_error
@@ -58,7 +58,7 @@ if(NOT rebuild_result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CTEST_COMMAND}" --test-dir "${WORK_DIR}/project/build" --output-on-failure
+    COMMAND "${CTEST_COMMAND}" --test-dir "${WORK_DIR}/project/build" -C Debug --output-on-failure
     RESULT_VARIABLE passing_test_result
     OUTPUT_VARIABLE passing_test_output
     ERROR_VARIABLE passing_test_error
