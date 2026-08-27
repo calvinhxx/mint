@@ -1,6 +1,6 @@
 # 架构说明
 
-[文档首页](../README.md) / 架构说明
+[← 返回 README 文档树](../../README.md)
 
 mint 是一个轻量的通用 Agent 内核。模型只能返回文字或工具请求，所有文件和进程操作都由本地代码执行。
 
@@ -90,5 +90,3 @@ main.cpp
 ~~~
 
 恢复逻辑集中在 `agent_checkpoint.cpp`。阅读循环时，在 `agent_run.hpp` 中先关注四个状态：`messages_` 是模型上下文，`pending_calls_` 是尚未执行的工具请求，`in_flight_call_` 是已经开始但结果未确认的请求，`result_` 保存轮数、工具记录、验证状态和最终回答。
-
-下一步阅读：[安全与恢复](../guides/safety-and-recovery.md)。构建和测试命令见 [测试与验收](../development/testing.md)。

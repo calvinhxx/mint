@@ -1,6 +1,6 @@
 # 测试与验收
 
-[文档首页](../README.md) / 测试与验收
+[← 返回 README 文档树](../../README.md)
 
 这份文档只记录当前代码怎么验证，以及这些结果能说明什么。
 
@@ -71,5 +71,3 @@ ctest --preset vcpkg-sanitize
 - Linux 和 Windows 尚无正式的安全命令后端；
 - 本地测试证明确定性行为，不替代真实 provider 回归；
 - checkpoint 保证从稳定点恢复，不承诺跨进程 exactly-once。
-
-下一步阅读：[项目路线图](../project/roadmap.md)。

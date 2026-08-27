@@ -1,6 +1,6 @@
-# 开始使用
+# 开始使用 mint
 
-[文档首页](../README.md) / 开始使用
+[← 返回 README 文档树](../../README.md)
 
 ## 准备环境
 
@@ -53,5 +53,3 @@ cp config.responses.example.json config.json
 ~~~
 
 模型不能执行任意 shell，只能选择 `init` 登记的命令。文件访问受项目根目录和任务 policy 限制，任务记录保存在项目之外。
-
-下一步阅读：[mint 如何运行一次任务](../concepts/architecture.md)。
