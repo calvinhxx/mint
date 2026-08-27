@@ -31,6 +31,7 @@ function(mint_configure_cpp_target target)
     endif()
 
     if(MSVC)
+        target_compile_definitions("${target}" PRIVATE _CRT_SECURE_NO_WARNINGS)
         target_compile_options("${target}" PRIVATE /utf-8)
     endif()
 endfunction()
