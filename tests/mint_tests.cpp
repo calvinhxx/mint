@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -185,21 +186,21 @@ int run_command_helper(int argc, char** argv) {
         return same_file ? 15 : 0;
     }
     if (mode == "network") {
+        if (argc != 4) {
+            return 65;
+        }
         const auto descriptor = ::socket(AF_INET, SOCK_STREAM, 0);
         if (descriptor < 0) {
             return errno == EPERM || errno == EAFNOSUPPORT ? 0 : 13;
         }
         sockaddr_in address{};
         address.sin_family = AF_INET;
-        address.sin_port = htons(9);
+        address.sin_port = htons(static_cast<std::uint16_t>(std::stoul(argv[3])));
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         const auto connected =
             ::connect(descriptor, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
-        const auto result_errno = errno;
         ::close(descriptor);
-        const bool isolated = result_errno == EPERM || result_errno == ENETDOWN ||
-                              result_errno == ENETUNREACH || result_errno == EHOSTUNREACH;
-        return connected < 0 && isolated ? 0 : 14;
+        return connected < 0 ? 0 : 14;
     }
 #endif
     return 66;
@@ -227,6 +228,47 @@ class TemporaryDirectory final {
 };
 
 #if !defined(_WIN32)
+class LoopbackListener final {
+  public:
+    LoopbackListener() {
+        descriptor_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (descriptor_ < 0) {
+            throw std::runtime_error("sandbox test could not create loopback listener");
+        }
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        address.sin_port = 0;
+        if (::bind(descriptor_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) !=
+                0 ||
+            ::listen(descriptor_, 1) != 0) {
+            ::close(descriptor_);
+            throw std::runtime_error("sandbox test could not bind loopback listener");
+        }
+        socklen_t length = sizeof(address);
+        if (::getsockname(descriptor_, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+            ::close(descriptor_);
+            throw std::runtime_error("sandbox test could not inspect loopback listener");
+        }
+        port_ = ntohs(address.sin_port);
+    }
+
+    ~LoopbackListener() {
+        ::close(descriptor_);
+    }
+
+    LoopbackListener(const LoopbackListener&) = delete;
+    LoopbackListener& operator=(const LoopbackListener&) = delete;
+
+    [[nodiscard]] std::uint16_t port() const noexcept {
+        return port_;
+    }
+
+  private:
+    int descriptor_ = -1;
+    std::uint16_t port_ = 0;
+};
+
 class RetryHttpServer final {
   public:
     RetryHttpServer() {
@@ -1828,16 +1870,22 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
     MINT_EXPECT(allowed.at("exit_code") == 0 && std::filesystem::exists(inside),
                 "sandbox permits writes inside the workspace: " + allowed.dump());
 
-    const auto outside =
-        std::filesystem::weakly_canonical(temporary.path() / "outside.txt", path_error);
+    const auto outside = std::filesystem::weakly_canonical(
+        test_executable.parent_path() /
+            ("sandbox-outside-" + temporary.path().filename().string() + ".txt"),
+        path_error);
     MINT_EXPECT(!path_error, "sandbox test resolves outside path");
     const auto blocked_write = mint::Json::parse(tools.execute(
         {"sandbox-outside",
          "run_command",
          {{"program", program},
           {"args", mint::Json::array({"--command-helper", "write", outside.generic_string()})}}}));
-    MINT_EXPECT(blocked_write.at("exit_code") != 0 && !std::filesystem::exists(outside),
-                "sandbox blocks writes outside the workspace");
+    const bool wrote_to_host = std::filesystem::exists(outside);
+    std::error_code cleanup_error;
+    (void)std::filesystem::remove(outside, cleanup_error);
+    MINT_EXPECT(blocked_write.at("exit_code") != 0 && !wrote_to_host,
+                "sandbox blocks writes to host paths outside the workspace: " +
+                    blocked_write.dump());
 
     const auto blocked_read = mint::Json::parse(tools.execute(
         {"sandbox-protected-read",
@@ -1848,10 +1896,13 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
     MINT_EXPECT(blocked_read.at("exit_code") != 0,
                 "sandbox blocks command reads of protected runtime files");
 
-    const auto blocked_network = mint::Json::parse(tools.execute(
-        {"sandbox-network",
-         "run_command",
-         {{"program", program}, {"args", mint::Json::array({"--command-helper", "network"})}}}));
+    LoopbackListener host_listener;
+    const auto blocked_network = mint::Json::parse(
+        tools.execute({"sandbox-network",
+                       "run_command",
+                       {{"program", program},
+                        {"args", mint::Json::array({"--command-helper", "network",
+                                                    std::to_string(host_listener.port())})}}}));
     MINT_EXPECT(blocked_network.at("exit_code") == 0,
                 "sandbox prevents the command from reaching the host network: " +
                     blocked_network.dump());
