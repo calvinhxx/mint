@@ -41,7 +41,7 @@ ctest --preset PRESET
 
 这里的“支持”表示代码能够在目标系统编译并运行该系统适用的自动测试。不适用的系统测试会明确显示为 `Skipped`，不会冒充通过。macOS 命令使用 Seatbelt；Linux 使用 Bubblewrap，并由矩阵安装 `bubblewrap` 包；Windows 安全命令后端仍在 roadmap 中。
 
-Linux 沙箱测试会真实检查四件事：工作区内可以写、工作区外不能写、受保护文件不能读、命令不能访问宿主网络。Bubblewrap 不可用时不会静默降级；只有用户显式传入 `--unsafe-no-command-sandbox` 才能关闭这层保护。
+Linux 沙箱测试会真实检查四件事：工作区内可以写、工作区外不能写、受保护文件不能读、命令不能访问宿主网络。Bubblewrap 不可用时不会静默降级；只有用户显式传入 `--unsafe-no-command-sandbox` 才能关闭这层保护。Ubuntu hosted runner 默认用 AppArmor 限制 user namespace，CI 因此只为 `/usr/bin/bwrap` 加载临时 `userns` profile，不关闭系统级限制。
 
 资源限制测试会让真实子进程读取当前限制，并分别触发 CPU、内存和单文件大小上限。进程数通过子进程读取到的内核值验证。macOS 的内存用父进程监控，Linux 使用 `RLIMIT_AS`；Sanitizer 构建不启用内存上限，避免把 Sanitizer 的大虚拟地址空间误判为业务内存。这组测试验证进程级限制，不把它描述成完整进程树配额。
 
