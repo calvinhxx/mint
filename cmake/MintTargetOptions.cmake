@@ -23,6 +23,13 @@ function(mint_configure_cpp_target target)
         CXX_STANDARD_REQUIRED ON
     )
 
+    if(WIN32)
+        target_compile_definitions("${target}" PRIVATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+        )
+    endif()
+
     if(MSVC)
         target_compile_options("${target}" PRIVATE /utf-8)
     endif()
