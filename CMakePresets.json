@@ -11,9 +11,14 @@
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "BUILD_TESTING": false,
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "MINT_BUILD_CLI": true,
+        "MINT_BUILD_TESTS": false,
+        "MINT_ENABLE_DEVELOPER_TOOLS": true,
+        "MINT_ENABLE_WARNINGS": true,
         "MINT_WARNINGS_AS_ERRORS": true
       }
     },
@@ -23,6 +28,7 @@
       "inherits": "vcpkg-base",
       "cacheVariables": {
         "BUILD_TESTING": true,
+        "MINT_BUILD_TESTS": true,
         "VCPKG_MANIFEST_FEATURES": "tests"
       }
     },
@@ -40,7 +46,8 @@
       "inherits": "vcpkg-base",
       "cacheVariables": {
         "BUILD_TESTING": false,
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "MINT_BUILD_TESTS": false
       }
     },
     {

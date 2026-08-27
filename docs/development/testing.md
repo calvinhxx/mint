@@ -4,6 +4,21 @@
 
 这份文档只记录当前代码怎么验证，以及这些结果能说明什么。
 
+## CMake 结构
+
+根 `CMakeLists.txt` 只声明选项、查找依赖和进入子目录。每个目标的源码与依赖写在对应目录中：
+
+| 位置 | 职责 |
+|---|---|
+| `src/*/CMakeLists.txt` | 定义 domain、runtime、infrastructure、tools、application 和 CLI 目标 |
+| `cmake/MintTargetOptions.cmake` | C++20、头文件路径、警告选项 |
+| `cmake/MintSanitizers.cmake` | ASan 和 UBSan |
+| `cmake/MintDeveloperTools.cmake` | `format` 与 `format-check` |
+| `cmake/MintTesting.cmake` | GoogleTest 目标和 CTest 标签 |
+| `tests/CMakeLists.txt` | 选择测试源码并注册验收流程 |
+
+库目标同时提供 `mint::domain`、`mint::runtime`、`mint::infrastructure`、`mint::tools`、`mint::application` 和 `mint::core` 别名。新增源码时，只修改所属目录的 `CMakeLists.txt`。
+
 ## 本地全量验证
 
 需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。
