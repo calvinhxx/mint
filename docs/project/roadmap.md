@@ -15,6 +15,7 @@
 | 模型接口 | Chat Completions、Responses、可选 SSE |
 | 完整验证平台 | macOS arm64 |
 | 本地测试 | Debug 和 Sanitizer CTest 50/50 |
+| 持续集成 | GitHub Actions macOS 发布门禁已通过 |
 | 最近真实模型验收 | v1.2 Chat Completions 隔离任务 |
 
 主流程已经覆盖项目初始化、读取、修改、验证、状态查询和中断恢复。当前重点是稳定 CLI 和可扩展内核，不包含 IDE 或 GUI。
@@ -31,6 +32,7 @@
 - 普通响应、SSE、限流重试和请求统计；
 - HTTP 传输、重试编排和模型协议相互独立，成功 SSE 不重复缓存完整响应体；
 - vcpkg 依赖、spdlog 诊断日志和 GoogleTest 单元测试；
+- 本地与 GitHub Actions 共用一条发布检查，覆盖版本、格式、Debug、Release、Sanitizer、CTest 和离线 CLI；
 - 文本输出、JSON 输出和诊断信息分流。
 
 ## 证据范围
@@ -47,7 +49,7 @@ v1.4 本轮没有重新调用外部模型。具体命令、结果和历史真实
 
 | 方向 | 缺口 |
 |---|---|
-| 发布 | 没有 CI，也没有 `v1.4.0` tag |
+| 发布 | CI 已接入，尚未创建 `v1.4.0` tag |
 | 平台 | Linux / Windows 缺少正式安全命令后端 |
 | 资源限制 | 缺少 CPU、内存、进程数和磁盘配额 |
 | 恢复 | 多文件修改缺少跨进程事务日志 |
@@ -56,11 +58,11 @@ v1.4 本轮没有重新调用外部模型。具体命令、结果和历史真实
 
 ## 下一步
 
-1. 把 Debug、Release、格式、CTest 和 Sanitizer 门禁接入 CI；
+1. 用当前版本完成一次隔离的真实 provider 回归；
 2. 完成发布检查并创建 `v1.4.0` tag；
 3. 实现 Linux 安全命令后端，再处理 Windows；
 4. 增加资源配额和更强的事务恢复；
-5. 固定少量真实 provider 配置做回归；
+5. 增加 provider 能力识别和固定回归配置；
 6. 内核稳定后再增加持续聊天和 GUI。
 
 历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议、流式传输和工程基础设施。

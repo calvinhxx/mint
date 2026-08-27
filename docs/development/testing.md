@@ -54,7 +54,8 @@ ctest --preset vcpkg-sanitize
 - Debug：50/50 tests passed；
 - ASan + UBSan：50/50 tests passed；
 - Release：构建通过，且未安装 GoogleTest；
-- clang-format：通过。
+- clang-format：通过；
+- [GitHub Actions 发布门禁](https://github.com/calvinhxx/mint/actions/runs/33058098444)：通过。
 
 50 个测试包括 11 个单元测试、23 个集成测试、12 个契约测试、2 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
 
