@@ -3,9 +3,11 @@
 ## 1.5.0 - Unreleased
 
 - Added native Windows, macOS, and Linux build/test lanes for x64 and ARM64, backed by matching vcpkg presets and a checked matrix catalog.
+- Validated all six native platform lanes; Windows runs the applicable tests while its secure command backend remains unavailable.
 - Added a Linux command sandbox backed by Bubblewrap: the workspace is the only writable host path, the user home and runtime directories are masked, protected files stay hidden, capabilities are dropped, and the host network is isolated.
 - Closed inherited file descriptors before approved commands start, preventing an otherwise isolated child from reusing process resources opened by mint.
 - Added policy-configurable CPU, memory, process-count, and per-file size limits for POSIX commands, with resource-limit evidence retained through context compaction.
+- Fixed Windows file replacement and multi-config fixture handling exposed by the native test lanes.
 - Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
 
 ## 1.4.0 - 2026-08-27

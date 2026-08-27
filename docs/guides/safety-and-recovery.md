@@ -82,8 +82,8 @@ Agent 会在工具执行前后保存 checkpoint。恢复时按动作是否有副
 
 ## 当前边界
 
-- macOS arm64 是目前完整验证的平台；
-- Linux Bubblewrap 后端已经实现，仍需在 x64 / ARM64 原生 CI 完成验收；
+- macOS 和 Linux 已在 x64 / ARM64 原生 CI 完成适用测试；
+- Linux Bubblewrap 后端已在两种架构完成沙箱边界验收；
 - Windows 还不能安全运行项目命令；
 - Windows Job Object、进程树总内存和工作区总磁盘配额仍待补充。
 
