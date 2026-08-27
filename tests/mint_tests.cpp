@@ -208,9 +208,10 @@ int run_command_helper(int argc, char** argv) {
 
 class TemporaryDirectory final {
   public:
-    TemporaryDirectory() {
+    explicit TemporaryDirectory(
+        std::filesystem::path base = std::filesystem::temp_directory_path()) {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::filesystem::temp_directory_path() / ("mint-tests-" + std::to_string(stamp));
+        path_ = std::move(base) / ("mint-tests-" + std::to_string(stamp));
         std::filesystem::create_directories(path_ / "workspace" / "src");
     }
 
@@ -1837,7 +1838,7 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
 #if defined(_WIN32)
     GTEST_SKIP() << "a secure Windows command backend is not implemented yet";
 #else
-    TemporaryDirectory temporary;
+    TemporaryDirectory temporary(std::filesystem::path{"/var/tmp"});
     const auto workspace = temporary.path() / "workspace";
     const auto program = test_executable.generic_string();
     const auto protected_secret = temporary.path() / "protected-secret.txt";
@@ -1870,10 +1871,8 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
     MINT_EXPECT(allowed.at("exit_code") == 0 && std::filesystem::exists(inside),
                 "sandbox permits writes inside the workspace: " + allowed.dump());
 
-    const auto outside = std::filesystem::weakly_canonical(
-        test_executable.parent_path() /
-            ("sandbox-outside-" + temporary.path().filename().string() + ".txt"),
-        path_error);
+    const auto outside =
+        std::filesystem::weakly_canonical(temporary.path() / "outside.txt", path_error);
     MINT_EXPECT(!path_error, "sandbox test resolves outside path");
     const auto blocked_write = mint::Json::parse(tools.execute(
         {"sandbox-outside",
