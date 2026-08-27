@@ -20,7 +20,7 @@ struct AgentOptions {
     std::size_t max_turns = runtime_defaults::max_turns;
     std::size_t max_context_bytes = runtime_defaults::max_context_bytes;
     bool require_verification_after_write = false;
-    std::shared_ptr<TaskControl> task_control;
+    std::shared_ptr<TaskControl> task_control{};
     EventLog* event_log = nullptr;
     SessionStore* session_store = nullptr;
     bool resume_session = false;
