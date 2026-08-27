@@ -118,6 +118,7 @@ Json ToolRegistry::apply_patch(const Json& arguments) const {
     if (!input_stream.eof() && input_stream.fail()) {
         return error_result("读取待修改文件失败: " + requested);
     }
+    input_stream.close();
     if (contains_nul(original) || !is_valid_utf8(original)) {
         return error_result("apply_patch 拒绝修改二进制或非 UTF-8 文件: " + requested);
     }
