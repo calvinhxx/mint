@@ -234,11 +234,8 @@ void test_project_and_task_store(const std::filesystem::path& root) {
     expect_private_permissions(store.project_policy_path(), "project policy is private");
     expect_failure([&] { store.initialize(suggestion.project_kind, suggestion.policy); },
                    "reinitialization requires explicit force");
-    expect_failure(
-        [&] {
-            (void)store.create_task(std::string{"\xC3\x28", 2});
-        },
-        "managed task text must be valid UTF-8 before JSON persistence");
+    expect_failure([&] { (void)store.create_task(std::string{"\xC3\x28", 2}); },
+                   "managed task text must be valid UTF-8 before JSON persistence");
 
     const auto original_policy = mint::load_task_policy(store.project_policy_path());
     const auto task = store.create_task("repair the fixture");

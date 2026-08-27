@@ -34,7 +34,6 @@ jobs:
           set -euo pipefail
           test -n "${VCPKG_INSTALLATION_ROOT:-}"
           echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
-          echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
 
       - name: Cache vcpkg packages
