@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <system_error>
 
-namespace aiagent::tools::detail {
+namespace mint::tools::detail {
 namespace {
 
 std::atomic_uint64_t temporary_file_sequence{0};
@@ -16,8 +16,8 @@ std::filesystem::path unique_sibling_path(const std::filesystem::path& target,
     for (int attempt = 0; attempt < 100; ++attempt) {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         const auto sequence = temporary_file_sequence.fetch_add(1);
-        const auto name = "." + target.filename().string() + ".aiagent-" + std::string(label) +
-                          "-" + std::to_string(stamp) + "-" + std::to_string(sequence);
+        const auto name = "." + target.filename().string() + ".mint-" + std::string(label) + "-" +
+                          std::to_string(stamp) + "-" + std::to_string(sequence);
         const auto candidate = target.parent_path() / name;
 
         std::error_code error;
@@ -164,4 +164,4 @@ void remove_file_safely(const std::filesystem::path& target) {
     }
 }
 
-} // namespace aiagent::tools::detail
+} // namespace mint::tools::detail

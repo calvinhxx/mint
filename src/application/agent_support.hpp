@@ -1,12 +1,12 @@
 #pragma once
 
-#include "aiagent/application/agent.hpp"
+#include "mint/application/agent.hpp"
 
 #include <cstddef>
 #include <ostream>
 #include <string>
 
-namespace aiagent::agent_detail {
+namespace mint::agent_detail {
 
 struct CompactedContext {
     Json messages;
@@ -46,4 +46,9 @@ void print_final_state(std::ostream& output, const AgentResult& result);
 [[nodiscard]] Json safe_tool_result(const std::string& raw_result);
 [[nodiscard]] Json event_arguments_summary(const ToolRegistry& tools, const ToolCall& call);
 
-} // namespace aiagent::agent_detail
+[[nodiscard]] AgentResult run_agent_loop(ModelClient& model, ToolRegistry& tools,
+                                         std::ostream& output, const AgentOptions& options,
+                                         const std::string& requested_task,
+                                         std::string system_prompt);
+
+} // namespace mint::agent_detail

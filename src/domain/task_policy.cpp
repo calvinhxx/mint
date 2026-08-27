@@ -1,7 +1,7 @@
-#include "aiagent/domain/task_policy.hpp"
+#include "mint/domain/task_policy.hpp"
 
-#include "aiagent/domain/model.hpp"
-#include "aiagent/version.hpp"
+#include "mint/domain/model.hpp"
+#include "mint/version.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -14,13 +14,11 @@
 #include <string_view>
 #include <utility>
 
-namespace aiagent {
+namespace mint {
 namespace {
 
 constexpr std::size_t max_policy_bytes = 256 * 1024;
 constexpr std::size_t max_recipe_count = 32;
-constexpr std::size_t max_argument_count = 64;
-constexpr std::size_t max_argument_bytes = 32 * 1024;
 
 void reject_unknown_fields(const Json& object, const std::set<std::string>& allowed,
                            std::string_view context) {
@@ -119,8 +117,9 @@ CommandRecipe parse_recipe(const Json& value, std::size_t index) {
         }
     }
     if (value.contains("args")) {
-        if (!value.at("args").is_array() || value.at("args").size() > max_argument_count) {
-            throw std::invalid_argument(context + " 的 args 必须是最多 64 项的字符串数组");
+        if (!value.at("args").is_array() ||
+            value.at("args").size() > runtime_bounds::max_command_arguments) {
+            throw std::invalid_argument(context + " 的 args 项数超过允许上限");
         }
         std::size_t total_bytes = 0;
         for (const auto& argument : value.at("args")) {
@@ -129,8 +128,9 @@ CommandRecipe parse_recipe(const Json& value, std::size_t index) {
             }
             auto text = argument.get<std::string>();
             total_bytes += text.size();
-            if (text.find('\0') != std::string::npos || total_bytes > max_argument_bytes) {
-                throw std::invalid_argument(context + " 的 args 包含 NUL 或总长度超过 32 KiB");
+            if (text.find('\0') != std::string::npos ||
+                total_bytes > runtime_bounds::max_command_argument_bytes) {
+                throw std::invalid_argument(context + " 的 args 包含 NUL 或总长度超过允许上限");
             }
             recipe.args.push_back(std::move(text));
         }
@@ -142,7 +142,9 @@ CommandRecipe parse_recipe(const Json& value, std::size_t index) {
             throw std::invalid_argument(context + " 的 cwd 必须是工作区内的相对路径");
         }
     }
-    recipe.timeout_seconds = optional_long(value, "timeout_seconds", 60, 1, 3600);
+    recipe.timeout_seconds =
+        optional_long(value, "timeout_seconds", runtime_defaults::command_timeout_seconds, 1,
+                      runtime_bounds::max_recipe_timeout_seconds);
     if (value.contains("verification")) {
         if (!value.at("verification").is_boolean()) {
             throw std::invalid_argument(context + " 的 verification 必须是布尔值");
@@ -187,7 +189,7 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
     }
     reject_unknown_fields(document,
                           {"schema_version", "write_paths", "recipes", "require_verification",
-                           "max_turns", "max_context_bytes", "max_seconds"},
+                           "max_turns", "max_context_bytes", "max_seconds", "tool_limits"},
                           "task policy");
     if (!document.contains("schema_version") ||
         !document.at("schema_version").is_number_integer() ||
@@ -197,10 +199,17 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
 
     TaskPolicy policy;
     policy.source_path = std::move(source_path);
-    policy.max_turns = optional_size(document, "max_turns", policy.max_turns, 1, 50);
-    policy.max_context_bytes = optional_size(document, "max_context_bytes",
-                                             policy.max_context_bytes, 16 * 1024, 8 * 1024 * 1024);
-    policy.max_seconds = optional_long(document, "max_seconds", policy.max_seconds, 0, 86400);
+    policy.max_turns = optional_size(document, "max_turns", policy.max_turns,
+                                     runtime_bounds::min_turns, runtime_bounds::max_turns);
+    policy.max_context_bytes =
+        optional_size(document, "max_context_bytes", policy.max_context_bytes,
+                      runtime_bounds::min_context_bytes, runtime_bounds::max_context_bytes);
+    policy.max_seconds =
+        optional_long(document, "max_seconds", policy.max_seconds, 0, runtime_bounds::max_seconds);
+    if (document.contains("tool_limits")) {
+        policy.tool_limits =
+            parse_tool_runtime_settings(document.at("tool_limits"), "policy tool_limits");
+    }
     if (document.contains("require_verification")) {
         if (!document.at("require_verification").is_boolean()) {
             throw std::invalid_argument("policy require_verification 必须是布尔值");
@@ -268,6 +277,9 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
                        {"max_turns", policy.max_turns},
                        {"max_context_bytes", policy.max_context_bytes},
                        {"max_seconds", policy.max_seconds}};
+    if (policy.tool_limits != ToolRuntimeSettings{}) {
+        normalized["tool_limits"] = tool_runtime_settings_to_json(policy.tool_limits);
+    }
     for (const auto& write_path : policy.write_paths) {
         normalized["write_paths"].push_back(write_path.generic_string());
     }
@@ -284,4 +296,4 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
     return policy;
 }
 
-} // namespace aiagent
+} // namespace mint

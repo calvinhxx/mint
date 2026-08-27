@@ -5,17 +5,14 @@
 #include <string>
 #include <vector>
 
-#include "aiagent/domain/task_policy.hpp"
+#include "mint/domain/runtime_settings.hpp"
+#include "mint/domain/task_policy.hpp"
 
-namespace aiagent::cli {
+namespace mint::cli {
 
-enum class CommandMode {
-    legacy,
-    init,
-    run,
-    resume,
-    status
-};
+class Console;
+
+enum class CommandMode { legacy, init, run, resume, status };
 
 struct CommandLine {
     CommandMode mode = CommandMode::legacy;
@@ -44,9 +41,11 @@ struct CommandLine {
     std::vector<std::string> allowed_programs;
     std::vector<CommandRecipe> command_recipes;
     std::string policy_fingerprint;
-    std::size_t max_turns = 12;
-    std::size_t max_context_bytes = 24 * 1024;
-    long max_seconds = 0;
+    std::string log_level;
+    std::size_t max_turns = runtime_defaults::max_turns;
+    std::size_t max_context_bytes = runtime_defaults::max_context_bytes;
+    long max_seconds = runtime_defaults::max_seconds;
+    ToolRuntimeSettings tool_limits;
     std::string question;
 };
 
@@ -54,6 +53,6 @@ struct CommandLine {
 [[nodiscard]] std::filesystem::path normalized_path(std::filesystem::path path);
 [[nodiscard]] bool requested_json_output(int argc, char** argv);
 [[nodiscard]] bool is_managed_mode(CommandMode mode) noexcept;
-void print_help(const char* program);
+void print_help(Console& console, const char* program);
 
-} // namespace aiagent::cli
+} // namespace mint::cli

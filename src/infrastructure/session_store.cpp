@@ -1,4 +1,6 @@
-#include "aiagent/infrastructure/session_store.hpp"
+#include "mint/infrastructure/session_store.hpp"
+
+#include "output_path.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -7,32 +9,11 @@
 #include <stdexcept>
 #include <string>
 
-namespace aiagent {
+namespace mint {
 namespace {
 
 constexpr std::uintmax_t max_snapshot_bytes = 16 * 1024 * 1024;
 std::atomic_uint64_t snapshot_sequence{0};
-
-std::filesystem::path resolve_output_path(std::filesystem::path path) {
-    if (path.empty() || path.filename().empty()) {
-        throw std::invalid_argument("会话快照路径不能为空且必须包含文件名");
-    }
-    std::error_code error;
-    auto parent = path.has_parent_path() ? path.parent_path() : std::filesystem::current_path();
-    parent = std::filesystem::weakly_canonical(parent, error);
-    if (error || !std::filesystem::is_directory(parent)) {
-        throw std::invalid_argument("会话快照父目录不存在或不是目录");
-    }
-    const auto resolved = parent / path.filename();
-    const auto status = std::filesystem::symlink_status(resolved, error);
-    if (!error && std::filesystem::is_symlink(status)) {
-        throw std::invalid_argument("会话快照路径不能是符号链接");
-    }
-    if (!error && std::filesystem::exists(status) && !std::filesystem::is_regular_file(status)) {
-        throw std::invalid_argument("会话快照已有路径必须是普通文件");
-    }
-    return resolved;
-}
 
 std::filesystem::path temporary_path(const std::filesystem::path& target) {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -44,7 +25,8 @@ std::filesystem::path temporary_path(const std::filesystem::path& target) {
 } // namespace
 
 SessionStore::SessionStore(std::filesystem::path path)
-    : path_(resolve_output_path(std::move(path))) {}
+    : path_(infrastructure_detail::validated_output_path(
+          std::move(path), "会话快照", infrastructure_detail::HardLinkPolicy::allow)) {}
 
 const std::filesystem::path& SessionStore::path() const noexcept {
     return path_;
@@ -120,4 +102,4 @@ void SessionStore::save(const Json& snapshot) const {
     }
 }
 
-} // namespace aiagent
+} // namespace mint

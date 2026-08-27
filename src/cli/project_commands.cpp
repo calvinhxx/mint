@@ -1,14 +1,13 @@
 #include "project_commands.hpp"
 
-#include "aiagent/application/project_service.hpp"
+#include "mint/application/project_service.hpp"
 
 #include <cctype>
-#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-namespace aiagent::cli {
+namespace mint::cli {
 namespace {
 
 std::string status_question(std::string question) {
@@ -31,8 +30,8 @@ std::string status_question(std::string question) {
 
 } // namespace
 
-int handle_init_command(const CommandLine& command_line, ProjectStore& store,
-                        std::ostream& output) {
+int handle_init_command(const CommandLine& command_line, ProjectStore& store, Console& console) {
+    auto& output = console.output_stream();
     const auto suggestion = suggest_project_policy(store.workspace_root());
     store.initialize(suggestion.project_kind, suggestion.policy, command_line.force);
     const Json result = {{"schema_version", 1},
@@ -74,13 +73,13 @@ int handle_init_command(const CommandLine& command_line, ProjectStore& store,
     if (suggestion.policy.at("recipes").empty()) {
         output << " 无";
     }
-    output << "\n\n下一步: aiagent run --root \"" << store.workspace_root().generic_string()
+    output << "\n\n下一步: mint run --root \"" << store.workspace_root().generic_string()
            << "\" \"你的任务\"\n";
     return 0;
 }
 
-int handle_status_command(const CommandLine& command_line, ProjectStore& store,
-                          std::ostream& output) {
+int handle_status_command(const CommandLine& command_line, ProjectStore& store, Console& console) {
+    auto& output = console.output_stream();
     const auto profile = store.load_profile();
     std::vector<ManagedTaskSummary> summaries;
     if (!command_line.task_id.empty()) {
@@ -125,4 +124,4 @@ int handle_status_command(const CommandLine& command_line, ProjectStore& store,
     return 0;
 }
 
-} // namespace aiagent::cli
+} // namespace mint::cli

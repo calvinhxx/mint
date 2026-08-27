@@ -1,6 +1,6 @@
-#include "aiagent/infrastructure/chat_completions_client.hpp"
-#include "aiagent/infrastructure/config.hpp"
-#include "aiagent/infrastructure/model_provider_client.hpp"
+#include "mint/infrastructure/chat_completions_client.hpp"
+#include "mint/infrastructure/config.hpp"
+#include "mint/infrastructure/model_provider_client.hpp"
 
 #include "model_protocol.hpp"
 
@@ -14,9 +14,12 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #if !defined(_WIN32)
 #include <netinet/in.h>
@@ -28,12 +31,16 @@
 
 namespace {
 
+#define MINT_EXPECT(condition, message) EXPECT_TRUE(condition) << (message)
+
+std::string mint_executable;
+
 class TemporaryDirectory final {
   public:
     TemporaryDirectory() {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::filesystem::temp_directory_path() /
-                ("aiagent-v1-4-tests-" + std::to_string(stamp));
+        path_ =
+            std::filesystem::temp_directory_path() / ("mint-v1-4-tests-" + std::to_string(stamp));
         std::filesystem::create_directories(path_);
     }
 
@@ -50,12 +57,6 @@ class TemporaryDirectory final {
     std::filesystem::path path_;
 };
 
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error("FAILED: " + message);
-    }
-}
-
 void write_text(const std::filesystem::path& path, const std::string& text) {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output) {
@@ -64,11 +65,11 @@ void write_text(const std::filesystem::path& path, const std::string& text) {
     output << text;
 }
 
-std::string sse(const aiagent::Json& event) {
+std::string sse(const mint::Json& event) {
     return "data: " + event.dump() + "\n\n";
 }
 
-void feed_fragmented(aiagent::detail::ModelStreamDecoder& decoder, const std::string& stream) {
+void feed_fragmented(mint::detail::ModelStreamDecoder& decoder, const std::string& stream) {
     constexpr std::size_t fragment_sizes[] = {1, 7, 2, 19, 3, 5, 11};
     std::size_t offset = 0;
     std::size_t fragment = 0;
@@ -81,16 +82,16 @@ void feed_fragmented(aiagent::detail::ModelStreamDecoder& decoder, const std::st
     }
 }
 
-aiagent::Json tool_definitions() {
-    return aiagent::Json::array({{{"type", "function"},
-                                  {"function",
-                                   {{"name", "read_file"},
-                                    {"description", "Read one file"},
-                                    {"parameters",
-                                     {{"type", "object"},
-                                      {"properties", {{"path", {{"type", "string"}}}}},
-                                      {"required", aiagent::Json::array({"path"})},
-                                      {"additionalProperties", false}}}}}}});
+mint::Json tool_definitions() {
+    return mint::Json::array({{{"type", "function"},
+                               {"function",
+                                {{"name", "read_file"},
+                                 {"description", "Read one file"},
+                                 {"parameters",
+                                  {{"type", "object"},
+                                   {"properties", {{"path", {{"type", "string"}}}}},
+                                   {"required", mint::Json::array({"path"})},
+                                   {"additionalProperties", false}}}}}}});
 }
 
 #if !defined(_WIN32)
@@ -296,115 +297,111 @@ std::pair<int, std::string> run_process(const std::vector<std::string>& argument
 }
 #endif
 
-void test_config_compatibility() {
-    const aiagent::ChatCompletionsConfig positional{"https://example.test/v1/chat/completions",
-                                                    "secret",
-                                                    "positional-model",
-                                                    7,
-                                                    42,
-                                                    4,
-                                                    123,
-                                                    777,
-                                                    {},
-                                                    {},
-                                                    aiagent::ModelAdapter::chat_completions,
-                                                    false,
-                                                    {}};
-    expect(positional.api_url == "https://example.test/v1/chat/completions" &&
-               positional.max_completion_tokens == 777 &&
-               positional.adapter == aiagent::ModelAdapter::chat_completions,
-           "v1.3 positional aggregate field order remains compatible");
+TEST(ProviderConfigContractTest, PreservesV13Compatibility) {
+    const mint::ChatCompletionsConfig positional{"https://example.test/v1/chat/completions",
+                                                 "secret",
+                                                 "positional-model",
+                                                 7,
+                                                 42,
+                                                 4,
+                                                 123,
+                                                 777,
+                                                 {},
+                                                 {},
+                                                 mint::ModelAdapter::chat_completions,
+                                                 false,
+                                                 {}};
+    MINT_EXPECT(positional.api_url == "https://example.test/v1/chat/completions" &&
+                    positional.max_completion_tokens == 777 &&
+                    positional.adapter == mint::ModelAdapter::chat_completions,
+                "v1.3 positional aggregate field order remains compatible");
 
     TemporaryDirectory temporary;
     const auto legacy_path = temporary.path() / "legacy.json";
     write_text(legacy_path, R"({"api_url":"https://example.test/v1/chat/completions",)"
                             R"("api_key":"secret","model":"test-model"})");
-    const auto legacy = aiagent::load_model_provider_config(legacy_path);
-    expect(legacy.adapter == aiagent::ModelAdapter::chat_completions && !legacy.stream,
-           "v1.3 config defaults to non-streaming Chat Completions");
-    const auto compatibility = aiagent::load_chat_completions_config(legacy_path);
-    expect(compatibility.adapter == legacy.adapter && compatibility.model == legacy.model,
-           "legacy loader remains source and behavior compatible");
+    const auto legacy = mint::load_model_provider_config(legacy_path);
+    MINT_EXPECT(legacy.adapter == mint::ModelAdapter::chat_completions && !legacy.stream,
+                "v1.3 config defaults to non-streaming Chat Completions");
+    const auto compatibility = mint::load_chat_completions_config(legacy_path);
+    MINT_EXPECT(compatibility.adapter == legacy.adapter && compatibility.model == legacy.model,
+                "legacy loader remains source and behavior compatible");
 
     const auto responses_path = temporary.path() / "responses.json";
     write_text(responses_path,
                R"({"adapter":"responses","api_url":"https://api.openai.com/v1/responses",)"
                R"("api_key":"secret","model":"test-model","stream":true})");
-    const auto responses = aiagent::load_model_provider_config(responses_path);
-    expect(responses.adapter == aiagent::ModelAdapter::responses && responses.stream,
-           "config selects the Responses streaming adapter explicitly");
+    const auto responses = mint::load_model_provider_config(responses_path);
+    MINT_EXPECT(responses.adapter == mint::ModelAdapter::responses && responses.stream,
+                "config selects the Responses streaming adapter explicitly");
 
     const auto invalid_adapter_path = temporary.path() / "invalid-adapter.json";
     write_text(invalid_adapter_path, R"({"adapter":"magic","api_url":"https://example.test",)"
                                      R"("model":"test-model"})");
     bool adapter_rejected = false;
     try {
-        (void)aiagent::load_model_provider_config(invalid_adapter_path);
+        (void)mint::load_model_provider_config(invalid_adapter_path);
     } catch (const std::runtime_error& error) {
         adapter_rejected = std::string(error.what()).find("adapter") != std::string::npos;
     }
-    expect(adapter_rejected, "unknown adapters fail with a field-specific error");
+    MINT_EXPECT(adapter_rejected, "unknown adapters fail with a field-specific error");
 
     const auto invalid_stream_path = temporary.path() / "invalid-stream.json";
     write_text(invalid_stream_path,
                R"({"api_url":"https://example.test","model":"test-model","stream":"yes"})");
     bool stream_rejected = false;
     try {
-        (void)aiagent::load_model_provider_config(invalid_stream_path);
+        (void)mint::load_model_provider_config(invalid_stream_path);
     } catch (const std::runtime_error& error) {
         stream_rejected = std::string(error.what()).find("stream") != std::string::npos;
     }
-    expect(stream_rejected, "stream requires a JSON boolean");
+    MINT_EXPECT(stream_rejected, "stream requires a JSON boolean");
 }
 
-void test_chat_stream_contract() {
-    const aiagent::ModelProviderConfig config{.api_url = "https://example.test/chat",
-                                              .model = "chat-test",
-                                              .max_completion_tokens = 321,
-                                              .adapter = aiagent::ModelAdapter::chat_completions,
-                                              .stream = true};
-    const auto messages = aiagent::Json::array(
+TEST(ProviderProtocolContractTest, DecodesChatCompletionsStream) {
+    const mint::ModelProviderConfig config{.api_url = "https://example.test/chat",
+                                           .model = "chat-test",
+                                           .max_completion_tokens = 321,
+                                           .adapter = mint::ModelAdapter::chat_completions,
+                                           .stream = true};
+    const auto messages = mint::Json::array(
         {{{"role", "system"}, {"content", "test"}},
          {{"role", "user"}, {"content", "inspect"}},
          {{"role", "assistant"},
           {"content", "old"},
-          {"_aiagent_provider_state", {{"adapter", "responses"}, {"output", "private"}}}}});
-    const auto request =
-        aiagent::detail::build_provider_request(config, messages, tool_definitions());
-    expect(request.at("stream") && request.at("stream_options").at("include_usage"),
-           "Chat streaming requests include final usage reporting");
-    expect(request.at("max_completion_tokens") == 321,
-           "Chat requests keep the compatible completion limit field");
-    expect(!request.at("messages").at(2).contains("_aiagent_provider_state"),
-           "provider-private state never leaks into Chat messages");
+          {"_mint_provider_state", {{"adapter", "responses"}, {"output", "private"}}}}});
+    const auto request = mint::detail::build_provider_request(config, messages, tool_definitions());
+    MINT_EXPECT(request.at("stream") && request.at("stream_options").at("include_usage"),
+                "Chat streaming requests include final usage reporting");
+    MINT_EXPECT(request.at("max_completion_tokens") == 321,
+                "Chat requests keep the compatible completion limit field");
+    MINT_EXPECT(!request.at("messages").at(2).contains("_mint_provider_state"),
+                "provider-private state never leaks into Chat messages");
 
-    std::vector<aiagent::ModelStreamEvent> deltas;
-    aiagent::detail::ModelStreamDecoder decoder(
-        aiagent::ModelAdapter::chat_completions,
-        [&](const aiagent::ModelStreamEvent& event) { deltas.push_back(event); });
+    std::vector<mint::ModelStreamEvent> deltas;
+    mint::detail::ModelStreamDecoder decoder(
+        mint::ModelAdapter::chat_completions,
+        [&](const mint::ModelStreamEvent& event) { deltas.push_back(event); });
     std::string stream;
-    stream +=
-        sse({{"id", "chat_1"},
-             {"model", "chat-test"},
-             {"choices",
-              aiagent::Json::array({{{"delta", {{"role", "assistant"}, {"content", "先"}}}}})}});
-    const aiagent::Json first_tool_delta = {
-        {"index", 0},
-        {"id", "call_1"},
-        {"type", "function"},
-        {"function", {{"name", "read_"}, {"arguments", "{\"pa"}}}};
-    stream += sse(
-        {{"choices",
-          aiagent::Json::array({{{"delta",
-                                  {{"content", "检查"},
-                                   {"tool_calls", aiagent::Json::array({first_tool_delta})}}}}})}});
-    const aiagent::Json second_tool_delta = {
-        {"index", 0}, {"function", {{"name", "file"}, {"arguments", "th\":\"README.md\"}"}}}};
+    stream += sse({{"id", "chat_1"},
+                   {"model", "chat-test"},
+                   {"choices",
+                    mint::Json::array({{{"delta", {{"role", "assistant"}, {"content", "先"}}}}})}});
+    const mint::Json first_tool_delta = {{"index", 0},
+                                         {"id", "call_1"},
+                                         {"type", "function"},
+                                         {"function", {{"name", "read_"}, {"arguments", "{\"pa"}}}};
     stream +=
         sse({{"choices",
-              aiagent::Json::array(
-                  {{{"delta", {{"tool_calls", aiagent::Json::array({second_tool_delta})}}}}})}});
-    stream += sse({{"choices", aiagent::Json::array()},
+              mint::Json::array({{{"delta",
+                                   {{"content", "检查"},
+                                    {"tool_calls", mint::Json::array({first_tool_delta})}}}}})}});
+    const mint::Json second_tool_delta = {
+        {"index", 0}, {"function", {{"name", "file"}, {"arguments", "th\":\"README.md\"}"}}}};
+    stream += sse({{"choices",
+                    mint::Json::array(
+                        {{{"delta", {{"tool_calls", mint::Json::array({second_tool_delta})}}}}})}});
+    stream += sse({{"choices", mint::Json::array()},
                    {"usage",
                     {{"prompt_tokens", 10},
                      {"completion_tokens", 4},
@@ -415,130 +412,141 @@ void test_chat_stream_contract() {
 
     const auto response = decoder.finish();
     const auto reply =
-        aiagent::detail::parse_provider_response(aiagent::ModelAdapter::chat_completions, response);
-    expect(reply.text == "先检查" && reply.tool_calls.size() == 1,
-           "fragmented Chat text and tool deltas form one canonical reply");
-    expect(reply.tool_calls.at(0).id == "call_1" && reply.tool_calls.at(0).name == "read_file" &&
-               reply.tool_calls.at(0).arguments.at("path") == "README.md",
-           "fragmented Chat function name and arguments are reassembled by index");
-    expect(reply.usage.available && reply.usage.prompt_tokens == 10 &&
-               reply.usage.completion_tokens == 4 && reply.usage.cached_tokens == 6,
-           "Chat streaming keeps usage from the terminal usage chunk");
-    expect(decoder.event_count() == 4 && decoder.streamed_bytes() > 0,
-           "stream decoder exposes body-free event and byte metrics");
-    expect(deltas.size() == 4 && deltas.front().kind == aiagent::ModelStreamEventKind::text_delta &&
-               deltas.back().kind == aiagent::ModelStreamEventKind::tool_arguments_delta,
-           "Chat streaming emits text and function-argument deltas incrementally");
+        mint::detail::parse_provider_response(mint::ModelAdapter::chat_completions, response);
+    MINT_EXPECT(reply.text == "先检查" && reply.tool_calls.size() == 1,
+                "fragmented Chat text and tool deltas form one canonical reply");
+    MINT_EXPECT(reply.tool_calls.at(0).id == "call_1" &&
+                    reply.tool_calls.at(0).name == "read_file" &&
+                    reply.tool_calls.at(0).arguments.at("path") == "README.md",
+                "fragmented Chat function name and arguments are reassembled by index");
+    MINT_EXPECT(reply.usage.available && reply.usage.prompt_tokens == 10 &&
+                    reply.usage.completion_tokens == 4 && reply.usage.cached_tokens == 6,
+                "Chat streaming keeps usage from the terminal usage chunk");
+    MINT_EXPECT(decoder.event_count() == 4 && decoder.streamed_bytes() > 0,
+                "stream decoder exposes body-free event and byte metrics");
+    MINT_EXPECT(deltas.size() == 4 &&
+                    deltas.front().kind == mint::ModelStreamEventKind::text_delta &&
+                    deltas.back().kind == mint::ModelStreamEventKind::tool_arguments_delta,
+                "Chat streaming emits text and function-argument deltas incrementally");
 }
 
-void test_responses_round_trip_contract() {
-    const aiagent::ModelProviderConfig config{.api_url = "https://example.test/responses",
-                                              .model = "responses-test",
-                                              .max_completion_tokens = 456,
-                                              .adapter = aiagent::ModelAdapter::responses};
-    auto messages = aiagent::Json::array({{{"role", "system"}, {"content", "test"}},
-                                          {{"role", "user"}, {"content", "read the file"}}});
+TEST(ProviderProtocolContractTest, RoundTripsResponsesTools) {
+    const mint::ModelProviderConfig config{.api_url = "https://example.test/responses",
+                                           .model = "responses-test",
+                                           .max_completion_tokens = 456,
+                                           .adapter = mint::ModelAdapter::responses};
+    auto messages = mint::Json::array({{{"role", "system"}, {"content", "test"}},
+                                       {{"role", "user"}, {"content", "read the file"}}});
     const auto first_request =
-        aiagent::detail::build_provider_request(config, messages, tool_definitions());
-    expect(first_request.at("store") == false && first_request.at("max_output_tokens") == 456,
-           "Responses requests are stateless and use max_output_tokens");
-    expect(first_request.at("include").at(0) == "reasoning.encrypted_content",
-           "Responses requests preserve stateless reasoning continuation data");
-    expect(first_request.at("tools").at(0).at("type") == "function" &&
-               first_request.at("tools").at(0).at("name") == "read_file" &&
-               !first_request.at("tools").at(0).contains("function"),
-           "Chat-shaped tool definitions are flattened for Responses");
+        mint::detail::build_provider_request(config, messages, tool_definitions());
+    MINT_EXPECT(first_request.at("store") == false && first_request.at("max_output_tokens") == 456,
+                "Responses requests are stateless and use max_output_tokens");
+    MINT_EXPECT(first_request.at("include").at(0) == "reasoning.encrypted_content",
+                "Responses requests preserve stateless reasoning continuation data");
+    MINT_EXPECT(first_request.at("tools").at(0).at("type") == "function" &&
+                    first_request.at("tools").at(0).at("name") == "read_file" &&
+                    !first_request.at("tools").at(0).contains("function"),
+                "Chat-shaped tool definitions are flattened for Responses");
 
-    const aiagent::Json tool_response = {
+    const mint::Json tool_response = {
         {"id", "resp_1"},
         {"object", "response"},
         {"status", "completed"},
         {"model", "responses-test"},
-        {"output", aiagent::Json::array({{{"id", "rs_1"},
-                                          {"type", "reasoning"},
-                                          {"summary", aiagent::Json::array()},
-                                          {"encrypted_content", "opaque"}},
-                                         {{"id", "fc_1"},
-                                          {"type", "function_call"},
-                                          {"call_id", "call_1"},
-                                          {"name", "read_file"},
-                                          {"arguments", "{\"path\":\"README.md\"}"},
-                                          {"status", "completed"}}})},
+        {"output", mint::Json::array({{{"id", "rs_1"},
+                                       {"type", "reasoning"},
+                                       {"summary", mint::Json::array()},
+                                       {"encrypted_content", "opaque"}},
+                                      {{"id", "fc_1"},
+                                       {"type", "function_call"},
+                                       {"call_id", "call_1"},
+                                       {"name", "read_file"},
+                                       {"arguments", "{\"path\":\"README.md\"}"},
+                                       {"status", "completed"}}})},
         {"usage",
          {{"input_tokens", 20},
           {"output_tokens", 8},
           {"total_tokens", 28},
           {"input_tokens_details", {{"cached_tokens", 12}}}}}};
     const auto tool_reply =
-        aiagent::detail::parse_provider_response(aiagent::ModelAdapter::responses, tool_response);
-    expect(tool_reply.tool_calls.size() == 1 && tool_reply.tool_calls.at(0).id == "call_1" &&
-               tool_reply.tool_calls.at(0).arguments.at("path") == "README.md",
-           "Responses function_call maps call_id into the canonical tool call");
-    expect(tool_reply.usage.prompt_tokens == 20 && tool_reply.usage.completion_tokens == 8 &&
-               tool_reply.usage.cached_tokens == 12,
-           "Responses usage maps input/output/cached token names");
+        mint::detail::parse_provider_response(mint::ModelAdapter::responses, tool_response);
+    MINT_EXPECT(tool_reply.tool_calls.size() == 1 && tool_reply.tool_calls.at(0).id == "call_1" &&
+                    tool_reply.tool_calls.at(0).arguments.at("path") == "README.md",
+                "Responses function_call maps call_id into the canonical tool call");
+    MINT_EXPECT(tool_reply.usage.prompt_tokens == 20 && tool_reply.usage.completion_tokens == 8 &&
+                    tool_reply.usage.cached_tokens == 12,
+                "Responses usage maps input/output/cached token names");
 
     messages.push_back(tool_reply.assistant_message);
     messages.push_back({{"role", "tool"},
                         {"tool_call_id", "call_1"},
                         {"content", R"({"ok":true,"content":"# Agent"})"}});
     const auto second_request =
-        aiagent::detail::build_provider_request(config, messages, tool_definitions());
+        mint::detail::build_provider_request(config, messages, tool_definitions());
     const auto& input = second_request.at("input");
-    expect(input.size() == 5 && input.at(2).at("type") == "reasoning" &&
-               input.at(3).at("type") == "function_call" &&
-               input.at(4).at("type") == "function_call_output",
-           "Responses continuation resends exact output items followed by tool output");
-    expect(input.at(4).at("call_id") == "call_1" &&
-               input.at(4).at("output").get<std::string>().find("# Agent") != std::string::npos,
-           "Responses tool output preserves call linkage and result text");
+    MINT_EXPECT(input.size() == 5 && input.at(2).at("type") == "reasoning" &&
+                    input.at(3).at("type") == "function_call" &&
+                    input.at(4).at("type") == "function_call_output",
+                "Responses continuation resends exact output items followed by tool output");
+    MINT_EXPECT(input.at(4).at("call_id") == "call_1" &&
+                    input.at(4).at("output").get<std::string>().find("# Agent") !=
+                        std::string::npos,
+                "Responses tool output preserves call linkage and result text");
 
-    const aiagent::Json final_response = {
+    auto legacy_messages = messages;
+    legacy_messages.at(2)["_aiagent_provider_state"] =
+        legacy_messages.at(2).at("_mint_provider_state");
+    legacy_messages.at(2).erase("_mint_provider_state");
+    const auto legacy_request =
+        mint::detail::build_provider_request(config, legacy_messages, tool_definitions());
+    MINT_EXPECT(legacy_request.at("input") == input,
+                "Responses continuation accepts provider state from existing checkpoints");
+
+    const mint::Json final_response = {
         {"id", "resp_2"},
         {"status", "completed"},
         {"model", "responses-test"},
-        {"output", aiagent::Json::array(
-                       {{{"id", "msg_1"},
-                         {"type", "message"},
-                         {"role", "assistant"},
-                         {"status", "completed"},
-                         {"content", aiagent::Json::array({{{"type", "output_text"},
-                                                            {"text", "README 已读取。"}}})}}})}};
+        {"output",
+         mint::Json::array({{{"id", "msg_1"},
+                             {"type", "message"},
+                             {"role", "assistant"},
+                             {"status", "completed"},
+                             {"content", mint::Json::array({{{"type", "output_text"},
+                                                             {"text", "README 已读取。"}}})}}})}};
     const auto final_reply =
-        aiagent::detail::parse_provider_response(aiagent::ModelAdapter::responses, final_response);
-    expect(final_reply.text == "README 已读取。" && final_reply.tool_calls.empty(),
-           "Responses output_text maps to the canonical final answer");
+        mint::detail::parse_provider_response(mint::ModelAdapter::responses, final_response);
+    MINT_EXPECT(final_reply.text == "README 已读取。" && final_reply.tool_calls.empty(),
+                "Responses output_text maps to the canonical final answer");
 
     bool failed_response_rejected = false;
     try {
-        (void)aiagent::detail::parse_provider_response(
-            aiagent::ModelAdapter::responses,
+        (void)mint::detail::parse_provider_response(
+            mint::ModelAdapter::responses,
             {{"status", "failed"}, {"error", {{"message", "provider failed"}}}});
     } catch (const std::runtime_error& error) {
         failed_response_rejected =
             std::string(error.what()).find("provider failed") != std::string::npos;
     }
-    expect(failed_response_rejected, "Responses failed status cannot become an Agent reply");
+    MINT_EXPECT(failed_response_rejected, "Responses failed status cannot become an Agent reply");
 }
 
-void test_responses_stream_contract() {
-    const aiagent::Json completed_response = {
+TEST(ProviderProtocolContractTest, DecodesResponsesStream) {
+    const mint::Json completed_response = {
         {"id", "resp_stream"},
         {"status", "completed"},
         {"model", "responses-test"},
-        {"output",
-         aiagent::Json::array({{{"id", "msg_stream"},
-                                {"type", "message"},
-                                {"role", "assistant"},
-                                {"status", "completed"},
-                                {"content", aiagent::Json::array({{{"type", "output_text"},
-                                                                   {"text", "流式完成"}}})}}})},
+        {"output", mint::Json::array({{{"id", "msg_stream"},
+                                       {"type", "message"},
+                                       {"role", "assistant"},
+                                       {"status", "completed"},
+                                       {"content", mint::Json::array({{{"type", "output_text"},
+                                                                       {"text", "流式完成"}}})}}})},
         {"usage", {{"input_tokens", 5}, {"output_tokens", 3}, {"total_tokens", 8}}}};
 
-    std::vector<aiagent::ModelStreamEvent> deltas;
-    aiagent::detail::ModelStreamDecoder decoder(
-        aiagent::ModelAdapter::responses,
-        [&](const aiagent::ModelStreamEvent& event) { deltas.push_back(event); });
+    std::vector<mint::ModelStreamEvent> deltas;
+    mint::detail::ModelStreamDecoder decoder(
+        mint::ModelAdapter::responses,
+        [&](const mint::ModelStreamEvent& event) { deltas.push_back(event); });
     std::string stream;
     stream += "event: response.created\n";
     stream += sse({{"type", "response.created"}, {"response", {{"id", "resp_stream"}}}});
@@ -558,15 +566,15 @@ void test_responses_stream_contract() {
                    {"delta", "{\"path\":"}});
     stream += sse({{"type", "response.completed"}, {"response", completed_response}});
     feed_fragmented(decoder, stream);
-    const auto reply = aiagent::detail::parse_provider_response(aiagent::ModelAdapter::responses,
-                                                                decoder.finish());
-    expect(reply.text == "流式完成" && reply.usage.total_tokens == 8,
-           "Responses stream uses the authoritative response.completed object");
-    expect(deltas.size() == 3 && deltas.at(0).kind == aiagent::ModelStreamEventKind::text_delta &&
-               deltas.at(2).kind == aiagent::ModelStreamEventKind::tool_arguments_delta,
-           "Responses stream exposes text and function argument deltas");
+    const auto reply =
+        mint::detail::parse_provider_response(mint::ModelAdapter::responses, decoder.finish());
+    MINT_EXPECT(reply.text == "流式完成" && reply.usage.total_tokens == 8,
+                "Responses stream uses the authoritative response.completed object");
+    MINT_EXPECT(deltas.size() == 3 && deltas.at(0).kind == mint::ModelStreamEventKind::text_delta &&
+                    deltas.at(2).kind == mint::ModelStreamEventKind::tool_arguments_delta,
+                "Responses stream exposes text and function argument deltas");
 
-    aiagent::detail::ModelStreamDecoder incomplete(aiagent::ModelAdapter::responses, {});
+    mint::detail::ModelStreamDecoder incomplete(mint::ModelAdapter::responses, {});
     incomplete.feed(sse({{"type", "response.output_text.delta"}, {"delta", "partial"}}));
     bool rejected = false;
     try {
@@ -574,24 +582,24 @@ void test_responses_stream_contract() {
     } catch (const std::runtime_error& error) {
         rejected = std::string(error.what()).find("response.completed") != std::string::npos;
     }
-    expect(rejected, "Responses streams must end with response.completed");
+    MINT_EXPECT(rejected, "Responses streams must end with response.completed");
 }
 
-void test_streaming_http_transport() {
+TEST(ProviderTransportContractTest, StreamsHttpResponses) {
 #if defined(_WIN32)
     return;
 #else
-    const aiagent::Json completed_response = {
+    const mint::Json completed_response = {
         {"id", "resp_http"},
         {"status", "completed"},
         {"model", "responses-http-test"},
-        {"output", aiagent::Json::array(
-                       {{{"id", "msg_http"},
-                         {"type", "message"},
-                         {"role", "assistant"},
-                         {"status", "completed"},
-                         {"content", aiagent::Json::array({{{"type", "output_text"},
-                                                            {"text", "HTTP 流式完成"}}})}}})},
+        {"output",
+         mint::Json::array({{{"id", "msg_http"},
+                             {"type", "message"},
+                             {"role", "assistant"},
+                             {"status", "completed"},
+                             {"content", mint::Json::array({{{"type", "output_text"},
+                                                             {"text", "HTTP 流式完成"}}})}}})},
         {"usage", {{"input_tokens", 9}, {"output_tokens", 4}, {"total_tokens", 13}}}};
     std::string body;
     body += sse({{"type", "response.created"}, {"response", {{"id", "resp_http"}}}});
@@ -608,116 +616,118 @@ void test_streaming_http_transport() {
     body += sse({{"type", "response.completed"}, {"response", completed_response}});
     ScriptedHttpServer server({std::move(body)});
 
-    std::vector<aiagent::ModelProgress> progress;
+    std::vector<mint::ModelProgress> progress;
     std::string streamed_text;
-    aiagent::ModelProviderClient client(
+    mint::ModelProviderClient client(
         {.api_url = server.url(),
          .model = "responses-http-test",
          .connect_timeout_seconds = 2,
          .request_timeout_seconds = 2,
          .max_retries = 0,
-         .progress = [&](const aiagent::ModelProgress& event) { progress.push_back(event); },
-         .adapter = aiagent::ModelAdapter::responses,
+         .progress = [&](const mint::ModelProgress& event) { progress.push_back(event); },
+         .adapter = mint::ModelAdapter::responses,
          .stream = true,
          .stream_event =
-             [&](const aiagent::ModelStreamEvent& event) {
-                 if (event.kind == aiagent::ModelStreamEventKind::text_delta) {
+             [&](const mint::ModelStreamEvent& event) {
+                 if (event.kind == mint::ModelStreamEventKind::text_delta) {
                      streamed_text += event.delta;
                  }
              }});
     const auto reply =
-        client.complete(aiagent::Json::array({{{"role", "system"}, {"content", "test"}},
-                                              {{"role", "user"}, {"content", "stream"}}}),
-                        aiagent::Json::array());
+        client.complete(mint::Json::array({{{"role", "system"}, {"content", "test"}},
+                                           {{"role", "user"}, {"content", "stream"}}}),
+                        mint::Json::array());
     server.wait();
 
-    expect(reply.text == "HTTP 流式完成" && streamed_text == reply.text,
-           "libcurl transport delivers Responses deltas before the canonical reply");
-    expect(reply.metadata.adapter == "responses" && reply.metadata.streamed &&
-               reply.metadata.stream_events == 4 && reply.metadata.streamed_bytes > 0 &&
-               reply.metadata.http_status == 200,
-           "streaming transport records adapter, event, byte and HTTP metadata");
-    expect(progress.size() == 4 &&
-               progress.at(0).kind == aiagent::ModelProgressKind::attempt_started &&
-               progress.at(1).kind == aiagent::ModelProgressKind::stream_started &&
-               progress.at(2).kind == aiagent::ModelProgressKind::stream_completed &&
-               progress.at(3).kind == aiagent::ModelProgressKind::request_succeeded,
-           "streaming transport reports a stable progress lifecycle");
-    expect(server.request().find("POST /v1/responses HTTP/1.1") != std::string::npos,
-           "HTTP transport targets the configured Responses endpoint");
-    expect(server.request().find(R"("stream":true)") != std::string::npos,
-           "HTTP transport enables Responses streaming");
-    expect(server.request().find(R"("store":false)") != std::string::npos,
-           "HTTP transport disables remote Responses storage");
-    expect(server.request().find(R"("max_output_tokens":1024)") != std::string::npos,
-           "HTTP transport sends the Responses output token limit");
+    MINT_EXPECT(reply.text == "HTTP 流式完成" && streamed_text == reply.text,
+                "libcurl transport delivers Responses deltas before the canonical reply");
+    MINT_EXPECT(reply.metadata.adapter == "responses" && reply.metadata.streamed &&
+                    reply.metadata.stream_events == 4 && reply.metadata.streamed_bytes > 0 &&
+                    reply.metadata.http_status == 200,
+                "streaming transport records adapter, event, byte and HTTP metadata");
+    MINT_EXPECT(progress.size() == 4 &&
+                    progress.at(0).kind == mint::ModelProgressKind::attempt_started &&
+                    progress.at(1).kind == mint::ModelProgressKind::stream_started &&
+                    progress.at(2).kind == mint::ModelProgressKind::stream_completed &&
+                    progress.at(3).kind == mint::ModelProgressKind::request_succeeded,
+                "streaming transport reports a stable progress lifecycle");
+    MINT_EXPECT(server.request().find("POST /v1/responses HTTP/1.1") != std::string::npos,
+                "HTTP transport targets the configured Responses endpoint");
+    MINT_EXPECT(server.request().find(R"("stream":true)") != std::string::npos,
+                "HTTP transport enables Responses streaming");
+    MINT_EXPECT(server.request().find(R"("store":false)") != std::string::npos,
+                "HTTP transport disables remote Responses storage");
+    MINT_EXPECT(server.request().find(R"("max_output_tokens":1024)") != std::string::npos,
+                "HTTP transport sends the Responses output token limit");
 #endif
 }
 
-void test_streaming_http_retry_contract() {
+TEST(ProviderTransportContractTest, RetriesStreamingHttpFailures) {
 #if defined(_WIN32)
     return;
 #else
     const auto rate_limit_stream =
         sse({{"type", "error"}, {"message", "transient stream rate limit"}});
-    const aiagent::Json completed_response = {
+    const mint::Json completed_response = {
         {"id", "resp_retry"},
         {"status", "completed"},
         {"model", "responses-retry-test"},
-        {"output", aiagent::Json::array(
-                       {{{"id", "msg_retry"},
-                         {"type", "message"},
-                         {"role", "assistant"},
-                         {"status", "completed"},
-                         {"content", aiagent::Json::array({{{"type", "output_text"},
-                                                            {"text", "retry completed"}}})}}})}};
+        {"output",
+         mint::Json::array({{{"id", "msg_retry"},
+                             {"type", "message"},
+                             {"role", "assistant"},
+                             {"status", "completed"},
+                             {"content", mint::Json::array({{{"type", "output_text"},
+                                                             {"text", "retry completed"}}})}}})}};
     const auto success_stream =
         sse({{"type", "response.completed"}, {"response", completed_response}});
     ScriptedHttpServer server({rate_limit_stream, success_stream}, {429, 200});
 
-    std::vector<aiagent::ModelProgress> progress;
-    aiagent::ModelProviderClient client(
+    std::vector<mint::ModelProgress> progress;
+    mint::ModelProviderClient client(
         {.api_url = server.url(),
          .model = "responses-retry-test",
          .connect_timeout_seconds = 2,
          .request_timeout_seconds = 2,
          .max_retries = 1,
          .retry_initial_delay_ms = 1,
-         .progress = [&](const aiagent::ModelProgress& event) { progress.push_back(event); },
-         .adapter = aiagent::ModelAdapter::responses,
+         .progress = [&](const mint::ModelProgress& event) { progress.push_back(event); },
+         .adapter = mint::ModelAdapter::responses,
          .stream = true});
     const auto reply = client.complete(
-        aiagent::Json::array({{{"role", "user"}, {"content", "retry"}}}), aiagent::Json::array());
+        mint::Json::array({{{"role", "user"}, {"content", "retry"}}}), mint::Json::array());
     server.wait();
-    expect(reply.text == "retry completed" && reply.metadata.retries == 1,
-           "streaming client retries an SSE-formatted HTTP 429 response");
-    expect(server.request(0).find(R"("stream":true)") != std::string::npos &&
-               server.request(1).find(R"("stream":true)") != std::string::npos,
-           "streaming retry sends the same protocol contract on both attempts");
-    expect(progress.size() == 7 &&
-               progress.at(2).kind == aiagent::ModelProgressKind::retry_scheduled &&
-               progress.at(2).http_status == 429 &&
-               progress.at(5).kind == aiagent::ModelProgressKind::stream_completed &&
-               progress.at(6).kind == aiagent::ModelProgressKind::request_succeeded,
-           "SSE HTTP errors follow retry progress instead of becoming parser failures");
+    MINT_EXPECT(reply.text == "retry completed" && reply.metadata.retries == 1,
+                "streaming client retries an SSE-formatted HTTP 429 response");
+    MINT_EXPECT(server.request(0).find(R"("stream":true)") != std::string::npos &&
+                    server.request(1).find(R"("stream":true)") != std::string::npos,
+                "streaming retry sends the same protocol contract on both attempts");
+    MINT_EXPECT(progress.size() == 7 &&
+                    progress.at(2).kind == mint::ModelProgressKind::retry_scheduled &&
+                    progress.at(2).http_status == 429 &&
+                    progress.at(5).kind == mint::ModelProgressKind::stream_completed &&
+                    progress.at(6).kind == mint::ModelProgressKind::request_succeeded,
+                "SSE HTTP errors follow retry progress instead of becoming parser failures");
 #endif
 }
 
-void test_cli_responses_streaming_loop(const std::string& aiagent_executable) {
+TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
 #if defined(_WIN32)
-    (void)aiagent_executable;
     return;
 #else
-    const aiagent::Json tool_response = {
+    if (mint_executable.empty()) {
+        GTEST_SKIP() << "mint executable was not supplied";
+    }
+    const mint::Json tool_response = {
         {"id", "resp_cli_1"},
         {"status", "completed"},
         {"model", "responses-cli-test"},
-        {"output", aiagent::Json::array({{{"id", "fc_cli"},
-                                          {"type", "function_call"},
-                                          {"call_id", "call_cli"},
-                                          {"name", "read_file"},
-                                          {"arguments", "{\"path\":\"README.md\"}"},
-                                          {"status", "completed"}}})},
+        {"output", mint::Json::array({{{"id", "fc_cli"},
+                                       {"type", "function_call"},
+                                       {"call_id", "call_cli"},
+                                       {"name", "read_file"},
+                                       {"arguments", "{\"path\":\"README.md\"}"},
+                                       {"status", "completed"}}})},
         {"usage", {{"input_tokens", 12}, {"output_tokens", 5}, {"total_tokens", 17}}}};
     std::string first_stream;
     first_stream += sse({{"type", "response.function_call_arguments.delta"},
@@ -726,18 +736,18 @@ void test_cli_responses_streaming_loop(const std::string& aiagent_executable) {
                          {"delta", "{\"path\":\"README.md\"}"}});
     first_stream += sse({{"type", "response.completed"}, {"response", tool_response}});
 
-    const aiagent::Json final_response = {
+    const mint::Json final_response = {
         {"id", "resp_cli_2"},
         {"status", "completed"},
         {"model", "responses-cli-test"},
         {"output",
-         aiagent::Json::array(
+         mint::Json::array(
              {{{"id", "msg_cli"},
                {"type", "message"},
                {"role", "assistant"},
                {"status", "completed"},
-               {"content", aiagent::Json::array({{{"type", "output_text"},
-                                                  {"text", "README 证明项目是本地 Agent。"}}})}}})},
+               {"content", mint::Json::array({{{"type", "output_text"},
+                                               {"text", "README 证明项目是本地 Agent。"}}})}}})},
         {"usage", {{"input_tokens", 18}, {"output_tokens", 7}, {"total_tokens", 25}}}};
     std::string second_stream;
     second_stream += sse({{"type", "response.output_text.delta"},
@@ -758,67 +768,63 @@ void test_cli_responses_streaming_loop(const std::string& aiagent_executable) {
     std::filesystem::create_directories(workspace);
     write_text(workspace / "README.md", "# Local Agent\n");
     const auto config_path = temporary.path() / "config.json";
-    write_text(config_path, aiagent::Json({{"adapter", "responses"},
-                                           {"api_url", server.url()},
-                                           {"api_key", ""},
-                                           {"model", "responses-cli-test"},
-                                           {"connect_timeout_seconds", 2},
-                                           {"request_timeout_seconds", 2},
-                                           {"max_retries", 0},
-                                           {"max_completion_tokens", 128},
-                                           {"stream", true}})
+    write_text(config_path, mint::Json({{"adapter", "responses"},
+                                        {"api_url", server.url()},
+                                        {"api_key", ""},
+                                        {"model", "responses-cli-test"},
+                                        {"connect_timeout_seconds", 2},
+                                        {"request_timeout_seconds", 2},
+                                        {"max_retries", 0},
+                                        {"max_completion_tokens", 128},
+                                        {"stream", true}})
                                 .dump(2));
 
-    const auto [exit_code, output] = run_process(
-        {aiagent_executable, "--json", "--config", config_path.generic_string(), "--root",
-         workspace.generic_string(), "读取 README.md 后用一句话说明项目用途"});
+    const auto [exit_code, output] =
+        run_process({mint_executable, "--json", "--config", config_path.generic_string(), "--root",
+                     workspace.generic_string(), "读取 README.md 后用一句话说明项目用途"});
     server.wait();
-    expect(exit_code == 0, "streaming Responses CLI exits successfully: " + output);
+    MINT_EXPECT(exit_code == 0, "streaming Responses CLI exits successfully: " + output);
 
-    aiagent::Json result;
-    try {
-        result = aiagent::Json::parse(output);
-    } catch (const aiagent::Json::exception& error) {
-        throw std::runtime_error("FAILED: CLI stdout is not one JSON document: " + output + " (" +
-                                 error.what() + ")");
-    }
-    expect(result.at("status") == "completed" && result.at("turns") == 2 &&
-               result.at("execution").at("tool_calls") == 1,
-           "CLI completes a two-turn Responses tool loop");
-    expect(result.at("answer") == "README 证明项目是本地 Agent。",
-           "CLI keeps the authoritative streamed final answer");
-    expect(result.at("model").at("adapter") == "responses" &&
-               result.at("model").at("streamed_calls") == 2 &&
-               result.at("model").at("stream_events") == 5 &&
-               result.at("model").at("streamed_bytes").get<std::size_t>() > 0,
-           "CLI JSON reports Responses adapter and aggregate stream metrics");
-    expect(server.request(0).find(R"("tools":[{"description")") != std::string::npos &&
-               server.request(0).find(R"("name":"read_file")") != std::string::npos,
-           "first CLI request advertises flattened Responses tools");
-    expect(server.request(1).find(R"("type":"function_call_output")") != std::string::npos &&
-               server.request(1).find(R"("call_id":"call_cli")") != std::string::npos &&
-               server.request(1).find("# Local Agent") != std::string::npos,
-           "second CLI request returns the real tool result with call linkage");
+    mint::Json result;
+    ASSERT_NO_THROW(result = mint::Json::parse(output))
+        << "CLI stdout is not one JSON document: " << output;
+    MINT_EXPECT(result.at("status") == "completed" && result.at("turns") == 2 &&
+                    result.at("execution").at("tool_calls") == 1,
+                "CLI completes a two-turn Responses tool loop");
+    MINT_EXPECT(result.at("answer") == "README 证明项目是本地 Agent。",
+                "CLI keeps the authoritative streamed final answer");
+    MINT_EXPECT(result.at("model").at("adapter") == "responses" &&
+                    result.at("model").at("streamed_calls") == 2 &&
+                    result.at("model").at("stream_events") == 5 &&
+                    result.at("model").at("streamed_bytes").get<std::size_t>() > 0,
+                "CLI JSON reports Responses adapter and aggregate stream metrics");
+    MINT_EXPECT(server.request(0).find(R"("tools":[{"description")") != std::string::npos &&
+                    server.request(0).find(R"("name":"read_file")") != std::string::npos,
+                "first CLI request advertises flattened Responses tools");
+    MINT_EXPECT(server.request(1).find(R"("type":"function_call_output")") != std::string::npos &&
+                    server.request(1).find(R"("call_id":"call_cli")") != std::string::npos &&
+                    server.request(1).find("# Local Agent") != std::string::npos,
+                "second CLI request returns the real tool result with call linkage");
 #endif
 }
 
 } // namespace
 
+#undef MINT_EXPECT
+
 int main(int argc, char** argv) {
-    try {
-        test_config_compatibility();
-        test_chat_stream_contract();
-        test_responses_round_trip_contract();
-        test_responses_stream_contract();
-        test_streaming_http_transport();
-        test_streaming_http_retry_contract();
-        if (argc >= 2) {
-            test_cli_responses_streaming_loop(argv[1]);
+    constexpr std::string_view executable_option = "--mint-executable=";
+    int write_index = 1;
+    for (int read_index = 1; read_index < argc; ++read_index) {
+        const std::string_view argument = argv[read_index];
+        if (argument.starts_with(executable_option)) {
+            mint_executable = argument.substr(executable_option.size());
+        } else {
+            argv[write_index++] = argv[read_index];
         }
-        std::cout << "v1.4 provider contracts passed\n";
-        return 0;
-    } catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
-        return 1;
     }
+    argc = write_index;
+    argv[argc] = nullptr;
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }

@@ -1,8 +1,9 @@
-#include "aiagent/tools/tool_registry.hpp"
+#include "mint/tools/tool_registry.hpp"
 
-#include "aiagent/domain/change_journal.hpp"
+#include "mint/domain/change_journal.hpp"
 
 #include "file_support.hpp"
+#include "tool_contract.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -17,11 +18,8 @@
 #include <utility>
 #include <vector>
 
-namespace aiagent {
+namespace mint {
 namespace {
-
-constexpr std::size_t max_changes = 16;
-constexpr std::size_t max_total_payload_bytes = 1024 * 1024;
 
 struct FileState {
     bool exists = false;
@@ -61,7 +59,7 @@ void require_exact_fields(const Json& object,
 std::string read_text_file(const std::filesystem::path& path) {
     std::error_code error;
     const auto size = std::filesystem::file_size(path, error);
-    if (error || size > tools::detail::max_edit_file_bytes) {
+    if (error || size > runtime_bounds::max_edit_file_bytes) {
         throw std::invalid_argument("apply_changeset 只处理不超过 256 KiB 的文本文件");
     }
     std::ifstream input(path, std::ios::binary);
@@ -74,13 +72,13 @@ std::string read_text_file(const std::filesystem::path& path) {
 }
 
 void validate_text(std::string_view field, const std::string& value, std::size_t& total_payload) {
-    if (value.size() > tools::detail::max_edit_file_bytes || tools::detail::contains_nul(value) ||
+    if (value.size() > runtime_bounds::max_edit_file_bytes || tools::detail::contains_nul(value) ||
         !tools::detail::is_valid_utf8(value)) {
         throw std::invalid_argument("apply_changeset 的 " + std::string(field) +
                                     " 必须是最多 256 KiB 的 UTF-8 文本");
     }
     total_payload += value.size();
-    if (total_payload > max_total_payload_bytes) {
+    if (total_payload > tools::contract::max_changeset_payload_bytes) {
         throw std::invalid_argument("apply_changeset 文本参数总量不能超过 1 MiB");
     }
 }
@@ -120,7 +118,7 @@ Json ToolRegistry::apply_changeset(const Json& arguments) const {
         throw std::invalid_argument("apply_changeset 只接受 changes 数组");
     }
     const auto& changes = arguments.at("changes");
-    if (changes.empty() || changes.size() > max_changes) {
+    if (changes.empty() || changes.size() > tools::contract::max_changes) {
         throw std::invalid_argument("apply_changeset 每次必须包含 1 到 16 个操作");
     }
 
@@ -209,9 +207,9 @@ Json ToolRegistry::apply_changeset(const Json& arguments) const {
                 throw std::invalid_argument("replace 目标不存在: " + requested);
             }
             const auto old_text = required_string(item, "old_text");
-            change.after = required_string(item, "new_text");
+            const auto new_text = required_string(item, "new_text");
             validate_text("old_text", old_text, total_payload);
-            validate_text("new_text", change.after, total_payload);
+            validate_text("new_text", new_text, total_payload);
             if (old_text.empty()) {
                 throw std::invalid_argument("replace 的 old_text 不能为空");
             }
@@ -223,11 +221,11 @@ Json ToolRegistry::apply_changeset(const Json& arguments) const {
             }
             change.before = original.content;
             change.after = original.content;
-            change.after.replace(position, old_text.size(), required_string(item, "new_text"));
+            change.after.replace(position, old_text.size(), new_text);
             if (change.after == change.before) {
                 throw std::invalid_argument("replace 前后内容相同: " + requested);
             }
-            if (change.after.size() > tools::detail::max_edit_file_bytes) {
+            if (change.after.size() > runtime_bounds::max_edit_file_bytes) {
                 throw std::invalid_argument("replace 后文件不能超过 256 KiB: " + requested);
             }
             final_states[change.path] = {true, change.after};
@@ -276,7 +274,7 @@ Json ToolRegistry::apply_changeset(const Json& arguments) const {
             preview.record_created(change.destination_label, change.before);
         }
     }
-    const auto preview_snapshot = preview.snapshot(128 * 1024);
+    const auto preview_snapshot = preview.snapshot(tools::contract::changeset_preview_bytes);
     std::vector<std::string> paths;
     for (const auto& item : preview_snapshot.at("changed_files")) {
         paths.push_back(item.at("path").get<std::string>());
@@ -337,4 +335,4 @@ Json ToolRegistry::apply_changeset(const Json& arguments) const {
             {"rollback_performed", false}};
 }
 
-} // namespace aiagent
+} // namespace mint

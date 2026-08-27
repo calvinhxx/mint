@@ -7,10 +7,20 @@
 #include <utility>
 #include <vector>
 
-namespace aiagent::detail {
+namespace mint::detail {
 namespace {
 
-constexpr std::string_view provider_state_field = "_aiagent_provider_state";
+constexpr std::string_view provider_state_field = "_mint_provider_state";
+constexpr std::string_view legacy_provider_state_field = "_aiagent_provider_state";
+
+const Json* provider_state(const Json& message) {
+    for (const auto field : {provider_state_field, legacy_provider_state_field}) {
+        if (message.contains(field) && message.at(field).is_object()) {
+            return &message.at(field);
+        }
+    }
+    return nullptr;
+}
 
 std::size_t token_count(const Json& object, const char* field) {
     if (!object.contains(field) || !object.at(field).is_number_integer()) {
@@ -259,12 +269,10 @@ Json responses_input(const Json& messages) {
             throw std::invalid_argument("模型消息缺少 role");
         }
         const auto role = message.at("role").get<std::string>();
-        if (message.contains(provider_state_field) &&
-            message.at(provider_state_field).is_object() &&
-            message.at(provider_state_field).value("adapter", "") == "responses" &&
-            message.at(provider_state_field).contains("output") &&
-            message.at(provider_state_field).at("output").is_array()) {
-            for (const auto& item : message.at(provider_state_field).at("output")) {
+        if (const auto* state = provider_state(message);
+            state != nullptr && state->value("adapter", "") == "responses" &&
+            state->contains("output") && state->at("output").is_array()) {
+            for (const auto& item : state->at("output")) {
                 input.push_back(item);
             }
             continue;
@@ -624,4 +632,4 @@ std::size_t ModelStreamDecoder::streamed_bytes() const noexcept {
     return state_->delta_bytes;
 }
 
-} // namespace aiagent::detail
+} // namespace mint::detail

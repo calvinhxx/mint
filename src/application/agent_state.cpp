@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace aiagent::agent_detail {
+namespace mint::agent_detail {
 namespace {
 
 std::size_t required_size(const Json& object, const char* field) {
@@ -444,9 +444,9 @@ Json event_arguments_summary(const ToolRegistry& tools, const ToolCall& call) {
     return summary;
 }
 
-} // namespace aiagent::agent_detail
+} // namespace mint::agent_detail
 
-namespace aiagent {
+namespace mint {
 
 Json agent_result_to_json(const AgentResult& result) {
     return {{"schema_version", 1},
@@ -465,4 +465,4 @@ Json agent_result_to_json(const AgentResult& result) {
               {"diff_truncated", result.changes.diff_truncated}}}};
 }
 
-} // namespace aiagent
+} // namespace mint

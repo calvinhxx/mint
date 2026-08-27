@@ -1,6 +1,7 @@
-#include "aiagent/application/project_service.hpp"
+#include "mint/application/project_service.hpp"
 
-#include "aiagent/version.hpp"
+#include "mint/domain/runtime_settings.hpp"
+#include "mint/version.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -12,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace aiagent {
+namespace mint {
 namespace {
 
 constexpr std::uintmax_t max_package_json_bytes = 1024 * 1024;
@@ -46,9 +47,12 @@ void add_existing_path(const std::filesystem::path& root, const std::string& rel
 
 Json recipe(std::string name, std::string description, std::string program,
             std::vector<std::string> args, bool verification = false) {
-    return {{"name", std::move(name)},       {"description", std::move(description)},
-            {"program", std::move(program)}, {"args", std::move(args)},
-            {"timeout_seconds", 300},        {"verification", verification}};
+    return {{"name", std::move(name)},
+            {"description", std::move(description)},
+            {"program", std::move(program)},
+            {"args", std::move(args)},
+            {"timeout_seconds", runtime_defaults::managed_recipe_timeout_seconds},
+            {"verification", verification}};
 }
 
 Json read_package_json(const std::filesystem::path& path) {
@@ -99,11 +103,11 @@ ProjectSuggestion suggest_project_policy(const std::filesystem::path& root) {
             add_existing_path(resolved, path, write_paths, seen_paths);
         }
         recipes.push_back(recipe("configure", "Configure the managed CMake build", "cmake",
-                                 {"-S", ".", "-B", "build/aiagent-managed"}));
+                                 {"-S", ".", "-B", "build/mint-managed"}));
         recipes.push_back(recipe("build", "Build the managed CMake tree", "cmake",
-                                 {"--build", "build/aiagent-managed"}));
+                                 {"--build", "build/mint-managed"}));
         recipes.push_back(recipe("test", "Run CTest in the managed build tree", "ctest",
-                                 {"--test-dir", "build/aiagent-managed", "--output-on-failure"},
+                                 {"--test-dir", "build/mint-managed", "--output-on-failure"},
                                  true));
         require_verification = true;
     } else if (is_plain_regular_file(resolved / "Cargo.toml")) {
@@ -151,10 +155,11 @@ ProjectSuggestion suggest_project_policy(const std::filesystem::path& root) {
                          {"write_paths", std::move(write_paths)},
                          {"recipes", std::move(recipes)},
                          {"require_verification", require_verification},
-                         {"max_turns", 24},
-                         {"max_context_bytes", 128 * 1024},
-                         {"max_seconds", 900}};
+                         {"max_turns", runtime_defaults::managed_max_turns},
+                         {"max_context_bytes", runtime_defaults::managed_max_context_bytes},
+                         {"max_seconds", runtime_defaults::managed_max_seconds},
+                         {"tool_limits", tool_runtime_settings_to_json({})}};
     return suggestion;
 }
 
-} // namespace aiagent
+} // namespace mint

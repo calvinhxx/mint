@@ -1,8 +1,9 @@
 /build/
+/vcpkg_installed/
 /cmake-build-*/
 /.cache/
 .DS_Store
 /config.json
 /config-*.json
-/.aiagent-session.json
-/.aiagent-events.jsonl
+/.mint-session.json
+/.mint-events.jsonl

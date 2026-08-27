@@ -4,12 +4,12 @@
 #include <memory>
 #include <string_view>
 
-#include "aiagent/infrastructure/model_provider_client.hpp"
+#include "mint/infrastructure/model_provider_client.hpp"
 
-namespace aiagent::detail {
+namespace mint::detail {
 
-[[nodiscard]] Json build_provider_request(const ModelProviderConfig& config,
-                                          const Json& messages, const Json& tools);
+[[nodiscard]] Json build_provider_request(const ModelProviderConfig& config, const Json& messages,
+                                          const Json& tools);
 [[nodiscard]] ModelReply parse_provider_response(ModelAdapter adapter, const Json& response);
 
 class ModelStreamDecoder final {
@@ -30,4 +30,4 @@ class ModelStreamDecoder final {
     std::unique_ptr<State> state_;
 };
 
-} // namespace aiagent::detail
+} // namespace mint::detail

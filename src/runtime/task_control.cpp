@@ -1,8 +1,8 @@
-#include "aiagent/runtime/task_control.hpp"
+#include "mint/runtime/task_control.hpp"
 
 #include <algorithm>
 
-namespace aiagent {
+namespace mint {
 
 TaskControl::TaskControl(std::chrono::milliseconds total_budget,
                          const volatile std::sig_atomic_t* external_cancel_flag)
@@ -51,4 +51,4 @@ long long TaskControl::remaining_milliseconds() const noexcept {
     return std::max<long long>(0, total_budget_.count() - elapsed_milliseconds());
 }
 
-} // namespace aiagent
+} // namespace mint

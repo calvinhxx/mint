@@ -1,13 +1,13 @@
 #include "command_line.hpp"
+#include "console.hpp"
 
 #include <filesystem>
-#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace aiagent::cli {
+namespace mint::cli {
 namespace {
 
 unsigned long parse_unsigned(const std::string& text, const std::string& option) {
@@ -46,9 +46,9 @@ bool is_managed_mode(CommandMode mode) noexcept {
     return mode != CommandMode::legacy;
 }
 
-void print_help(const char* program) {
-    std::cout
-        << "C++20 Local Coding Agent\n\n"
+void print_help(Console& console, const char* program) {
+    console.output_stream()
+        << "mint - Lightweight General AI Agent\n\n"
         << "日常工作流:\n"
         << "  " << program << " init [--root 路径] [--state-dir 路径] [--force] [--json]\n"
         << "  " << program
@@ -62,6 +62,7 @@ void print_help(const char* program) {
         << " [--allow-write] [--allow-write-path 路径] [--allow-command 程序]"
            " [--require-verification] [--approve-each-command] [--approve-each-changeset]"
            " [--max-seconds 秒] [--unsafe-no-command-sandbox] [--max-context-bytes 字节]"
+           " [--log-level 级别]"
            " [--events-jsonl 路径] [--session 路径] [--resume] [--retry-inflight] [--json]"
            " [--config JSON路径] [--policy JSON路径] [--root 路径] [--max-turns 数量] [问题]\n\n"
         << "日常选项:\n"
@@ -71,6 +72,7 @@ void print_help(const char* program) {
         << "  --demo            离线演示 Agent 循环，不请求真实模型\n"
         << "  --json            stdout 只输出机器可读 JSON\n"
         << "  --config 路径     模型配置文件，默认 ./config.json\n"
+        << "  --log-level 级别  诊断日志级别：trace/debug/info/warn/error/critical/off；默认 warn\n"
         << "  --root 路径       限定 Agent 可以访问的工作目录\n\n"
         << "能力与恢复选项:\n"
         << "  --policy 路径     显式采用 task policy；兼容工作流使用\n"
@@ -85,9 +87,11 @@ void print_help(const char* program) {
         << "  --resume          恢复兼容工作流的 --session\n"
         << "  --retry-inflight  显式重试未确认完成的副作用工具\n"
         << "  --events-jsonl 路径  写入脱敏事件\n"
-        << "  --max-turns 数量  最大模型轮数，1 到 50\n"
-        << "  --max-seconds 秒  总墙钟预算，1 到 86400\n"
-        << "  --max-context-bytes 字节  模型上下文上限，16384 到 8388608\n"
+        << "  --max-turns 数量  最大模型轮数，" << runtime_bounds::min_turns << " 到 "
+        << runtime_bounds::max_turns << "\n"
+        << "  --max-seconds 秒  总墙钟预算，1 到 " << runtime_bounds::max_seconds << "\n"
+        << "  --max-context-bytes 字节  模型上下文上限，" << runtime_bounds::min_context_bytes
+        << " 到 " << runtime_bounds::max_context_bytes << "\n"
         << "  --version         显示版本\n"
         << "  -h, --help        显示帮助\n";
 }
@@ -166,6 +170,11 @@ CommandLine parse_arguments(int argc, char** argv) {
             }
             result.config = argv[index];
             result.config_specified = true;
+        } else if (argument == "--log-level") {
+            if (++index >= argc) {
+                throw std::invalid_argument("--log-level 后面需要日志级别");
+            }
+            result.log_level = argv[index];
         } else if (argument == "--policy") {
             if (++index >= argc) {
                 throw std::invalid_argument("--policy 后面需要一个 JSON 文件路径");
@@ -201,8 +210,8 @@ CommandLine parse_arguments(int argc, char** argv) {
                 throw std::invalid_argument("--max-turns 后面需要一个数字");
             }
             const auto parsed = parse_unsigned(argv[index], "--max-turns");
-            if (parsed == 0 || parsed > 50) {
-                throw std::invalid_argument("--max-turns 必须在 1 到 50 之间");
+            if (parsed < runtime_bounds::min_turns || parsed > runtime_bounds::max_turns) {
+                throw std::invalid_argument("--max-turns 超出允许范围");
             }
             result.max_turns = parsed;
             result.policy_conflict = true;
@@ -211,8 +220,8 @@ CommandLine parse_arguments(int argc, char** argv) {
                 throw std::invalid_argument("--max-seconds 后面需要一个数字");
             }
             const auto parsed = parse_unsigned(argv[index], "--max-seconds");
-            if (parsed == 0 || parsed > 86400) {
-                throw std::invalid_argument("--max-seconds 必须在 1 到 86400 之间");
+            if (parsed == 0 || parsed > static_cast<unsigned long>(runtime_bounds::max_seconds)) {
+                throw std::invalid_argument("--max-seconds 超出允许范围");
             }
             result.max_seconds = static_cast<long>(parsed);
             result.policy_conflict = true;
@@ -221,8 +230,9 @@ CommandLine parse_arguments(int argc, char** argv) {
                 throw std::invalid_argument("--max-context-bytes 后面需要一个数字");
             }
             const auto parsed = parse_unsigned(argv[index], "--max-context-bytes");
-            if (parsed < 16 * 1024 || parsed > 8 * 1024 * 1024) {
-                throw std::invalid_argument("--max-context-bytes 必须在 16384 到 8388608 之间");
+            if (parsed < runtime_bounds::min_context_bytes ||
+                parsed > runtime_bounds::max_context_bytes) {
+                throw std::invalid_argument("--max-context-bytes 超出允许范围");
             }
             result.max_context_bytes = parsed;
             result.policy_conflict = true;
@@ -284,4 +294,4 @@ bool requested_json_output(int argc, char** argv) {
     return false;
 }
 
-} // namespace aiagent::cli
+} // namespace mint::cli

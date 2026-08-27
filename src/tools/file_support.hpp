@@ -4,9 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace aiagent::tools::detail {
-
-inline constexpr std::uintmax_t max_edit_file_bytes = 256 * 1024;
+namespace mint::tools::detail {
 
 [[nodiscard]] bool contains_nul(std::string_view data);
 [[nodiscard]] bool is_valid_utf8(std::string_view data);
@@ -16,4 +14,4 @@ void replace_file_safely(const std::filesystem::path& target, std::string_view c
                          bool target_exists);
 void remove_file_safely(const std::filesystem::path& target);
 
-} // namespace aiagent::tools::detail
+} // namespace mint::tools::detail

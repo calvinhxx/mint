@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "mint",
+  "version-string": "1.4.0",
+  "description": "Lightweight general AI agent toolkit in C++",
+  "license": "MIT",
+  "builtin-baseline": "56bb2411609227288b70117ead2c47585ba07713",
+  "dependencies": [
+    {
+      "name": "curl",
+      "default-features": false,
+      "features": [
+        "ssl"
+      ]
+    },
+    "nlohmann-json",
+    "spdlog"
+  ],
+  "features": {
+    "tests": {
+      "description": "Build mint unit, integration, and contract tests",
+      "dependencies": [
+        "gtest"
+      ]
+    }
+  }
+}

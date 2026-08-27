@@ -1,12 +1,14 @@
 #include "tool_support.hpp"
 
+#include "tool_contract.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
 
-namespace aiagent::tools::detail {
+namespace mint::tools::detail {
 
 std::string dump_json(const Json& value) {
     return value.dump(-1, ' ', false, Json::error_handler_t::replace);
@@ -37,7 +39,7 @@ bool is_inside(const std::filesystem::path& root, const std::filesystem::path& c
 
 bool is_ignored_directory(const std::filesystem::path& path) {
     static const std::unordered_set<std::string> ignored = {
-        ".aiagent", ".git", ".cache", "build", "dist", "node_modules", "target", "__pycache__"};
+        ".mint", ".git", ".cache", "build", "dist", "node_modules", "target", "__pycache__"};
     const auto name = path.filename().string();
     return ignored.contains(name) || name.starts_with("cmake-build-");
 }
@@ -56,20 +58,28 @@ bool contains_ignored_component(const std::filesystem::path& root,
     return false;
 }
 
-std::string lowercase_ascii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    return value;
+bool contains_text(std::string_view text, std::string_view query, bool case_sensitive) {
+    if (case_sensitive) {
+        return text.find(query) != std::string_view::npos;
+    }
+    const auto same_letter = [](unsigned char left, unsigned char right) {
+        const auto fold = [](unsigned char character) {
+            return character >= 'A' && character <= 'Z'
+                       ? static_cast<unsigned char>(character + ('a' - 'A'))
+                       : character;
+        };
+        return fold(left) == fold(right);
+    };
+    return std::search(text.begin(), text.end(), query.begin(), query.end(), same_letter) !=
+           text.end();
 }
 
 std::string shorten_line(std::string line) {
-    constexpr std::size_t max_line_length = 400;
-    if (line.size() > max_line_length) {
-        line.resize(max_line_length);
+    if (line.size() > contract::max_search_line_bytes) {
+        line.resize(contract::max_search_line_bytes);
         line += "...";
     }
     return line;
 }
 
-} // namespace aiagent::tools::detail
+} // namespace mint::tools::detail

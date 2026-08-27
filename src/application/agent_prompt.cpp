@@ -1,14 +1,14 @@
-#include "aiagent/application/agent.hpp"
+#include "mint/application/agent.hpp"
 
-namespace aiagent {
+namespace mint {
 
 std::string Agent::system_prompt() const {
     std::string prompt =
-        "You are a small codebase assistant. "
+        "You are a lightweight local AI agent. "
         "Your allowed workspace root is: " +
         tools_.root().generic_string() +
         ". "
-        "Use list_files, search_text, and read_file whenever repository evidence is needed. "
+        "Use list_files, search_text, and read_file whenever workspace evidence is needed. "
         "Prefer search_text before reading large files. read_file returns bounded chunks; request "
         "the next_offset only when more evidence is necessary. Request independent tool calls "
         "together in one turn when possible. "
@@ -63,7 +63,7 @@ std::string Agent::system_prompt() const {
                       programs + ". ";
         }
         prompt +=
-            "Use commands for focused build or test verification. "
+            "Use commands only when they help complete or verify the task. "
             "There is no shell expansion. A command may still require per-call user approval. " +
             (tools_.commands_are_os_sandboxed()
                  ? "Commands run in the " + tools_.command_sandbox_backend() +
@@ -91,4 +91,4 @@ std::string Agent::system_prompt() const {
     return prompt;
 }
 
-} // namespace aiagent
+} // namespace mint

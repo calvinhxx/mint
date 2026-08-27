@@ -1,4 +1,6 @@
-#include "aiagent/infrastructure/event_log.hpp"
+#include "mint/infrastructure/event_log.hpp"
+
+#include "output_path.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -8,37 +10,10 @@
 #include <stdexcept>
 #include <string>
 
-namespace aiagent {
+namespace mint {
 namespace {
 
 constexpr std::uintmax_t max_existing_event_bytes = 64 * 1024 * 1024;
-
-std::filesystem::path resolve_output_path(std::filesystem::path path) {
-    if (path.empty() || path.filename().empty()) {
-        throw std::invalid_argument("事件日志路径不能为空且必须包含文件名");
-    }
-    std::error_code error;
-    auto parent = path.has_parent_path() ? path.parent_path() : std::filesystem::current_path();
-    parent = std::filesystem::weakly_canonical(parent, error);
-    if (error || !std::filesystem::is_directory(parent)) {
-        throw std::invalid_argument("事件日志父目录不存在或不是目录");
-    }
-    const auto resolved = parent / path.filename();
-    const auto status = std::filesystem::symlink_status(resolved, error);
-    if (!error && std::filesystem::is_symlink(status)) {
-        throw std::invalid_argument("事件日志路径不能是符号链接");
-    }
-    if (!error && std::filesystem::exists(status) && !std::filesystem::is_regular_file(status)) {
-        throw std::invalid_argument("事件日志已有路径必须是普通文件");
-    }
-    if (!error && std::filesystem::is_regular_file(status)) {
-        const auto links = std::filesystem::hard_link_count(resolved, error);
-        if (!error && links > 1) {
-            throw std::invalid_argument("事件日志路径不能是多重硬链接文件");
-        }
-    }
-    return resolved;
-}
 
 std::string utc_timestamp() {
     const auto now = std::chrono::system_clock::now();
@@ -62,7 +37,8 @@ std::string utc_timestamp() {
 } // namespace
 
 EventLog::EventLog(std::filesystem::path path, bool append)
-    : path_(resolve_output_path(std::move(path))) {
+    : path_(infrastructure_detail::validated_output_path(
+          std::move(path), "事件日志", infrastructure_detail::HardLinkPolicy::reject)) {
     bool needs_separator = false;
     if (append && std::filesystem::exists(path_)) {
         std::error_code size_error;
@@ -137,4 +113,4 @@ void EventLog::emit(std::string type, Json data) {
     }
 }
 
-} // namespace aiagent
+} // namespace mint

@@ -1,12 +1,34 @@
 #include "agent_support.hpp"
 
 #include <algorithm>
+#include <array>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-namespace aiagent::agent_detail {
+namespace mint::agent_detail {
 namespace {
+
+constexpr std::array<std::size_t, 3> payload_limits = {2048, 512, 128};
+constexpr std::size_t summary_reserve = 512;
+constexpr std::size_t compacted_text_limit = 256;
+
+constexpr std::array<std::string_view, 13> retained_tool_fields = {"ok",
+                                                                   "status",
+                                                                   "exit_code",
+                                                                   "signal",
+                                                                   "timed_out",
+                                                                   "task_timed_out",
+                                                                   "cancelled",
+                                                                   "verification_eligible",
+                                                                   "recipe",
+                                                                   "program",
+                                                                   "path",
+                                                                   "operation_count",
+                                                                   "output_truncated"};
+
+Json compacted_tool_result(const Json& message);
 
 void truncate_utf8(std::string& value, std::size_t limit) {
     if (value.size() <= limit) {
@@ -48,19 +70,26 @@ void compact_message_payload(Json& message, std::size_t string_limit) {
     }
     // Provider-specific continuation data is intentionally discarded when a historical
     // message is compacted. The canonical content and tool_calls fields remain sufficient.
+    message.erase("_mint_provider_state");
     message.erase("_aiagent_provider_state");
     if (message.contains("content") && message.at("content").is_string()) {
         auto content = message.at("content").get<std::string>();
+        bool structured_tool_result = false;
         if (message.value("role", "") == "tool") {
             try {
                 auto parsed = Json::parse(content);
                 compact_json_strings(parsed, string_limit);
                 content = parsed.dump();
+                structured_tool_result = true;
             } catch (const Json::exception&) {
                 // A bounded raw fallback is still valid context.
             }
         }
-        truncate_utf8(content, string_limit * 4);
+        if (structured_tool_result && content.size() > string_limit * 4) {
+            content = compacted_tool_result(message).dump();
+        } else {
+            truncate_utf8(content, string_limit * 4);
+        }
         message["content"] = std::move(content);
     }
     if (message.value("role", "") != "assistant" || !message.contains("tool_calls") ||
@@ -88,8 +117,76 @@ std::size_t serialized_size(const Json& value) {
     return value.dump().size();
 }
 
+void retain_scalar_field(const Json& source, Json& target, std::string_view field) {
+    const auto found = source.find(std::string(field));
+    if (found == source.end() || !found->is_primitive()) {
+        return;
+    }
+    target[std::string(field)] = *found;
+}
+
+Json compacted_tool_result(const Json& message) {
+    Json summary = {{"ok", nullptr},
+                    {"context_compacted", true},
+                    {"detail", "Tool payload omitted; retained status fields are original."}};
+
+    if (!message.contains("content") || !message.at("content").is_string()) {
+        return summary;
+    }
+
+    try {
+        const auto original = Json::parse(message.at("content").get<std::string>());
+        if (!original.is_object()) {
+            summary["detail"] = "Tool payload omitted; original result was not a JSON object.";
+            return summary;
+        }
+        for (const auto field : retained_tool_fields) {
+            retain_scalar_field(original, summary, field);
+        }
+        if (const auto error = original.find("error");
+            error != original.end() && error->is_string()) {
+            auto message = error->get<std::string>();
+            truncate_utf8(message, compacted_text_limit);
+            summary["error"] = std::move(message);
+        }
+    } catch (const Json::exception&) {
+        summary["detail"] = "Tool payload omitted; original result was not valid JSON.";
+    }
+    return summary;
+}
+
+void compact_assistant_tool_call(Json& message) {
+    message["content"] = "[Historical tool call payload compacted by harness]";
+    for (auto& call : message["tool_calls"]) {
+        if (call.is_object() && call.contains("function") && call["function"].is_object()) {
+            call["function"]["arguments"] = "{}";
+        }
+    }
+}
+
+void compact_message_fallback(Json& message) {
+    if (!message.is_object()) {
+        return;
+    }
+    const auto role = message.value("role", "");
+    if (role == "tool") {
+        message["content"] = compacted_tool_result(message).dump();
+        return;
+    }
+    if (role == "assistant" && message.contains("tool_calls") &&
+        message.at("tool_calls").is_array()) {
+        compact_assistant_tool_call(message);
+        return;
+    }
+    if (message.contains("content") && message.at("content").is_string()) {
+        auto content = message.at("content").get<std::string>();
+        truncate_utf8(content, compacted_text_limit);
+        message["content"] = std::move(content);
+    }
+}
+
 Json shrink_group(Json group, std::size_t available) {
-    for (const auto limit : {std::size_t{2048}, std::size_t{512}, std::size_t{128}}) {
+    for (const auto limit : payload_limits) {
         for (auto& message : group) {
             compact_message_payload(message, limit);
         }
@@ -99,28 +196,31 @@ Json shrink_group(Json group, std::size_t available) {
     }
 
     for (auto& message : group) {
-        if (!message.is_object()) {
-            continue;
-        }
-        const auto role = message.value("role", "");
-        if (role == "tool") {
-            message["content"] =
-                R"({"ok":true,"context_compacted":true,"detail":"historical tool payload omitted"})";
-        } else if (role == "assistant" && message.contains("tool_calls") &&
-                   message.at("tool_calls").is_array()) {
-            message["content"] = "[Historical tool call payload compacted by harness]";
-            for (auto& call : message["tool_calls"]) {
-                if (call.is_object() && call.contains("function") && call["function"].is_object()) {
-                    call["function"]["arguments"] = "{}";
-                }
-            }
-        } else if (message.contains("content") && message.at("content").is_string()) {
-            auto content = message.at("content").get<std::string>();
-            truncate_utf8(content, 256);
-            message["content"] = std::move(content);
-        }
+        compact_message_fallback(message);
     }
     return group;
+}
+
+std::vector<Json> message_groups(const Json& messages) {
+    std::vector<Json> groups;
+    for (std::size_t index = 2; index < messages.size(); ++index) {
+        const auto starts_group =
+            messages.at(index).is_object() && messages.at(index).value("role", "") == "assistant";
+        if (groups.empty() || starts_group) {
+            groups.push_back(Json::array());
+        }
+        groups.back().push_back(messages.at(index));
+    }
+    return groups;
+}
+
+Json context_summary(std::size_t dropped_groups) {
+    return {{"role", "system"},
+            {"content",
+             "[Harness context summary] " + std::to_string(dropped_groups) +
+                 " older assistant/tool groups were omitted to enforce the context byte budget. "
+                 "The complete history remains in the local checkpoint. Continue from the retained "
+                 "recent evidence."}};
 }
 
 } // namespace
@@ -139,20 +239,11 @@ CompactedContext compact_context(const Json& messages, std::size_t byte_limit) {
 
     Json prefix = Json::array({messages.at(0), messages.at(1)});
     const auto prefix_bytes = serialized_size(prefix);
-    constexpr std::size_t summary_reserve = 512;
     if (prefix_bytes + summary_reserve >= byte_limit) {
         throw std::runtime_error("系统提示与用户任务超过 --max-context-bytes 限制");
     }
 
-    std::vector<Json> groups;
-    for (std::size_t index = 2; index < messages.size(); ++index) {
-        const auto starts_group =
-            messages.at(index).is_object() && messages.at(index).value("role", "") == "assistant";
-        if (groups.empty() || starts_group) {
-            groups.push_back(Json::array());
-        }
-        groups.back().push_back(messages.at(index));
-    }
+    const auto groups = message_groups(messages);
 
     auto remaining = byte_limit - prefix_bytes - summary_reserve;
     std::vector<Json> selected_reverse;
@@ -174,13 +265,7 @@ CompactedContext compact_context(const Json& messages, std::size_t byte_limit) {
     }
 
     result.messages = std::move(prefix);
-    result.messages.push_back(
-        {{"role", "system"},
-         {"content",
-          "[Harness context summary] " + std::to_string(result.dropped_groups) +
-              " older assistant/tool groups were omitted to enforce the context byte budget. "
-              "The complete history remains in the local checkpoint. Continue from the retained "
-              "recent evidence."}});
+    result.messages.push_back(context_summary(result.dropped_groups));
     for (auto iterator = selected_reverse.rbegin(); iterator != selected_reverse.rend();
          ++iterator) {
         for (auto& message : *iterator) {
@@ -194,4 +279,4 @@ CompactedContext compact_context(const Json& messages, std::size_t byte_limit) {
     return result;
 }
 
-} // namespace aiagent::agent_detail
+} // namespace mint::agent_detail

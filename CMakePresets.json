@@ -1,0 +1,95 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "vcpkg-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "MINT_WARNINGS_AS_ERRORS": true
+      }
+    },
+    {
+      "name": "vcpkg-test-base",
+      "hidden": true,
+      "inherits": "vcpkg-base",
+      "cacheVariables": {
+        "BUILD_TESTING": true,
+        "VCPKG_MANIFEST_FEATURES": "tests"
+      }
+    },
+    {
+      "name": "vcpkg-dev",
+      "displayName": "vcpkg Debug",
+      "inherits": "vcpkg-test-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "vcpkg-release",
+      "displayName": "vcpkg Release",
+      "inherits": "vcpkg-base",
+      "cacheVariables": {
+        "BUILD_TESTING": false,
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "vcpkg-sanitize",
+      "displayName": "vcpkg ASan + UBSan",
+      "inherits": "vcpkg-dev",
+      "binaryDir": "${sourceDir}/build/vcpkg-sanitize",
+      "cacheVariables": {
+        "MINT_ENABLE_SANITIZERS": true
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "vcpkg-dev",
+      "configurePreset": "vcpkg-dev",
+      "jobs": 4
+    },
+    {
+      "name": "vcpkg-release",
+      "configurePreset": "vcpkg-release",
+      "jobs": 4
+    },
+    {
+      "name": "vcpkg-sanitize",
+      "configurePreset": "vcpkg-sanitize",
+      "jobs": 4
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "vcpkg-dev",
+      "configurePreset": "vcpkg-dev",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
+      }
+    },
+    {
+      "name": "vcpkg-sanitize",
+      "configurePreset": "vcpkg-sanitize",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4
+      }
+    }
+  ]
+}

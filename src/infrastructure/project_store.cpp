@@ -1,7 +1,7 @@
-#include "aiagent/infrastructure/project_store.hpp"
+#include "mint/infrastructure/project_store.hpp"
 
-#include "aiagent/domain/task_policy.hpp"
-#include "aiagent/infrastructure/session_store.hpp"
+#include "mint/domain/task_policy.hpp"
+#include "mint/infrastructure/session_store.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace aiagent {
+namespace mint {
 namespace {
 
 constexpr int project_schema_version = 1;
@@ -101,7 +101,7 @@ std::filesystem::path normalized_absolute(std::filesystem::path path) {
     std::error_code error;
     path = std::filesystem::absolute(std::move(path), error);
     if (error || path.empty()) {
-        throw std::invalid_argument("无法解析 aiagent 状态目录");
+        throw std::invalid_argument("无法解析 mint 状态目录");
     }
     const auto resolved = std::filesystem::weakly_canonical(path, error);
     return error ? path.lexically_normal() : resolved;
@@ -112,7 +112,7 @@ void restrict_directory_permissions(const std::filesystem::path& path) {
     std::filesystem::permissions(path, std::filesystem::perms::owner_all,
                                  std::filesystem::perm_options::replace, error);
     if (error) {
-        throw std::runtime_error("无法把 aiagent 状态目录权限限制为当前用户: " + error.message());
+        throw std::runtime_error("无法把 mint 状态目录权限限制为当前用户: " + error.message());
     }
 }
 
@@ -120,11 +120,11 @@ void create_private_directory(const std::filesystem::path& path) {
     std::error_code error;
     const bool created = std::filesystem::create_directories(path, error);
     if (error || !std::filesystem::is_directory(path)) {
-        throw std::runtime_error("无法创建 aiagent 状态目录: " + path.generic_string());
+        throw std::runtime_error("无法创建 mint 状态目录: " + path.generic_string());
     }
     const auto status = std::filesystem::symlink_status(path, error);
     if (error || std::filesystem::is_symlink(status)) {
-        throw std::runtime_error("aiagent 状态目录不能是符号链接: " + path.generic_string());
+        throw std::runtime_error("mint 状态目录不能是符号链接: " + path.generic_string());
     }
     if (created) {
         restrict_directory_permissions(path);
@@ -133,7 +133,7 @@ void create_private_directory(const std::filesystem::path& path) {
         const auto public_permissions =
             std::filesystem::perms::group_all | std::filesystem::perms::others_all;
         if ((status.permissions() & public_permissions) != std::filesystem::perms::none) {
-            throw std::runtime_error("已有 aiagent 状态目录不是当前用户私有目录: " +
+            throw std::runtime_error("已有 mint 状态目录不是当前用户私有目录: " +
                                      path.generic_string());
         }
 #endif
@@ -272,29 +272,29 @@ std::string_view managed_task_mode_name(ManagedTaskMode mode) noexcept {
     return "unknown";
 }
 
-std::filesystem::path default_aiagent_state_directory() {
+std::filesystem::path default_mint_state_directory() {
 #if defined(_WIN32)
     const char* base = std::getenv("LOCALAPPDATA");
     if (base == nullptr || std::string_view(base).empty()) {
         throw std::runtime_error("无法确定状态目录；请显式传入 --state-dir");
     }
-    return std::filesystem::path(base) / "aiagent";
+    return std::filesystem::path(base) / "mint";
 #elif defined(__APPLE__)
     const char* home = std::getenv("HOME");
     if (home == nullptr || std::string_view(home).empty()) {
         throw std::runtime_error("无法确定状态目录；请显式传入 --state-dir");
     }
-    return std::filesystem::path(home) / "Library" / "Application Support" / "aiagent";
+    return std::filesystem::path(home) / "Library" / "Application Support" / "mint";
 #else
     if (const char* xdg = std::getenv("XDG_STATE_HOME");
         xdg != nullptr && !std::string_view(xdg).empty()) {
-        return std::filesystem::path(xdg) / "aiagent";
+        return std::filesystem::path(xdg) / "mint";
     }
     const char* home = std::getenv("HOME");
     if (home == nullptr || std::string_view(home).empty()) {
         throw std::runtime_error("无法确定状态目录；请显式传入 --state-dir");
     }
-    return std::filesystem::path(home) / ".local" / "state" / "aiagent";
+    return std::filesystem::path(home) / ".local" / "state" / "mint";
 #endif
 }
 
@@ -316,7 +316,7 @@ ProjectStore::ProjectStore(std::filesystem::path workspace_root, std::filesystem
     if (error || !std::filesystem::is_directory(workspace_root_)) {
         throw std::invalid_argument("项目根目录不存在或不是目录");
     }
-    state_root_ = normalized_absolute(state_root.empty() ? default_aiagent_state_directory()
+    state_root_ = normalized_absolute(state_root.empty() ? default_mint_state_directory()
                                                          : std::move(state_root));
     if (state_root_ == workspace_root_ || is_inside(workspace_root_, state_root_) ||
         is_inside(state_root_, workspace_root_)) {
@@ -353,14 +353,14 @@ bool ProjectStore::initialized() const {
 
 Json ProjectStore::load_profile() const {
     if (!initialized()) {
-        throw std::runtime_error("项目尚未初始化；先运行 aiagent init");
+        throw std::runtime_error("项目尚未初始化；先运行 mint init");
     }
     const auto profile = SessionStore(profile_path()).load();
     if (!profile.is_object() || profile.value("schema_version", 0) != project_schema_version ||
         profile.value("workspace_root", "") != workspace_root_.generic_string() ||
         profile.value("policy_file", "") != "policy.json" || !profile.contains("project_kind") ||
         !profile.at("project_kind").is_string()) {
-        throw std::runtime_error("aiagent 项目配置损坏或与当前工作区不匹配");
+        throw std::runtime_error("mint 项目配置损坏或与当前工作区不匹配");
     }
     return profile;
 }
@@ -379,7 +379,7 @@ void ProjectStore::initialize(const std::string& project_kind, const Json& polic
     const auto policy_state = stored_file_state(project_policy_path());
     if (profile_state == StoredFileState::invalid || policy_state == StoredFileState::invalid ||
         (profile_state == StoredFileState::missing) != (policy_state == StoredFileState::missing)) {
-        throw std::runtime_error("已有 aiagent 项目状态不完整或包含非普通文件");
+        throw std::runtime_error("已有 mint 项目状态不完整或包含非普通文件");
     }
     const bool has_existing_project = profile_state == StoredFileState::plain;
     if (has_existing_project) {
@@ -527,4 +527,4 @@ std::optional<ManagedTaskPaths> ProjectStore::latest_resumable_task() const {
     return std::nullopt;
 }
 
-} // namespace aiagent
+} // namespace mint

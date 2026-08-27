@@ -1,4 +1,4 @@
-#include "aiagent/domain/change_journal.hpp"
+#include "mint/domain/change_journal.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace aiagent {
+namespace mint {
 namespace {
 
 constexpr std::size_t context_lines = 3;
@@ -263,4 +263,4 @@ void ChangeJournal::restore(const Json& state) {
     entries_ = std::move(restored);
 }
 
-} // namespace aiagent
+} // namespace mint

@@ -1,12 +1,12 @@
-if(NOT DEFINED AIAGENT_EXECUTABLE OR NOT DEFINED FIXTURE_DIR OR NOT DEFINED STATE_DIR)
-    message(FATAL_ERROR "AIAGENT_EXECUTABLE, FIXTURE_DIR and STATE_DIR are required")
+if(NOT DEFINED MINT_EXECUTABLE OR NOT DEFINED FIXTURE_DIR OR NOT DEFINED STATE_DIR)
+    message(FATAL_ERROR "MINT_EXECUTABLE, FIXTURE_DIR and STATE_DIR are required")
 endif()
 
 file(REMOVE_RECURSE "${STATE_DIR}")
 file(REMOVE_RECURSE "${STATE_DIR}-errors")
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
+    COMMAND "${MINT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
     RESULT_VARIABLE init_result
     OUTPUT_VARIABLE init_output
     ERROR_VARIABLE init_error
@@ -27,7 +27,7 @@ if(NOT state_inside_workspace EQUAL -1)
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
+    COMMAND "${MINT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
     RESULT_VARIABLE empty_status_result
     OUTPUT_VARIABLE empty_status_output
     ERROR_VARIABLE empty_status_error
@@ -42,7 +42,7 @@ if(NOT empty_task_count EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" run --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --demo --json "inspect this fixture"
+    COMMAND "${MINT_EXECUTABLE}" run --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --demo --json "inspect this fixture"
     RESULT_VARIABLE run_result
     OUTPUT_VARIABLE run_output
     ERROR_VARIABLE run_error
@@ -73,7 +73,7 @@ if(demo_allow_write OR demo_write_path_count GREATER 0 OR demo_recipe_count GREA
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
+    COMMAND "${MINT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
     RESULT_VARIABLE populated_status_result
     OUTPUT_VARIABLE populated_status_output
     ERROR_VARIABLE populated_status_error
@@ -93,7 +93,7 @@ if(NOT task_count EQUAL 1 OR NOT listed_task_id STREQUAL task_id OR
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" resume --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --task "${task_id}" --json
+    COMMAND "${MINT_EXECUTABLE}" resume --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --task "${task_id}" --json
     RESULT_VARIABLE resume_result
     OUTPUT_VARIABLE resume_output
     ERROR_VARIABLE resume_error
@@ -109,7 +109,7 @@ if(NOT resume_status STREQUAL "error" OR NOT resume_message MATCHES "不可恢�
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
+    COMMAND "${MINT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
     RESULT_VARIABLE duplicate_init_result
     OUTPUT_VARIABLE duplicate_init_output
     ERROR_VARIABLE duplicate_init_error
@@ -119,7 +119,7 @@ if(duplicate_init_result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --force --json
+    COMMAND "${MINT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --force --json
     RESULT_VARIABLE force_init_result
     OUTPUT_VARIABLE force_init_output
     ERROR_VARIABLE force_init_error
@@ -129,7 +129,7 @@ if(NOT force_init_result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
+    COMMAND "${MINT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --json
     RESULT_VARIABLE post_force_status_result
     OUTPUT_VARIABLE post_force_status_output
     ERROR_VARIABLE post_force_status_error
@@ -144,7 +144,7 @@ if(NOT post_force_task_count EQUAL 1)
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --demo --json
+    COMMAND "${MINT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}" --demo --json
     RESULT_VARIABLE invalid_status_result
     OUTPUT_VARIABLE invalid_status_output
     ERROR_VARIABLE invalid_status_error
@@ -159,7 +159,7 @@ if(NOT invalid_status STREQUAL "error")
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${FIXTURE_DIR}/.aiagent-state" --json
+    COMMAND "${MINT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${FIXTURE_DIR}/.mint-state" --json
     RESULT_VARIABLE unsafe_state_result
     OUTPUT_VARIABLE unsafe_state_output
     ERROR_VARIABLE unsafe_state_error
@@ -174,7 +174,7 @@ if(NOT unsafe_state_status STREQUAL "error")
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}-errors" --json
+    COMMAND "${MINT_EXECUTABLE}" init --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}-errors" --json
     RESULT_VARIABLE error_init_result
     OUTPUT_VARIABLE error_init_output
     ERROR_VARIABLE error_init_error
@@ -183,7 +183,7 @@ if(NOT error_init_result EQUAL 0)
     message(FATAL_ERROR "error-contract fixture init failed: ${error_init_output}${error_init_error}")
 endif()
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" run --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}-errors" --config "${STATE_DIR}-errors/missing-config.json" --json "report a setup failure"
+    COMMAND "${MINT_EXECUTABLE}" run --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}-errors" --config "${STATE_DIR}-errors/missing-config.json" --json "report a setup failure"
     RESULT_VARIABLE failed_run_result
     OUTPUT_VARIABLE failed_run_output
     ERROR_VARIABLE failed_run_error
@@ -198,7 +198,7 @@ if(NOT failed_run_status STREQUAL "error" OR failed_run_task_id STREQUAL "")
     message(FATAL_ERROR "managed run errors must retain their task identity: ${failed_run_output}${failed_run_error}")
 endif()
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}-errors" --task "${failed_run_task_id}" --json
+    COMMAND "${MINT_EXECUTABLE}" status --root "${FIXTURE_DIR}" --state-dir "${STATE_DIR}-errors" --task "${failed_run_task_id}" --json
     RESULT_VARIABLE failed_task_status_result
     OUTPUT_VARIABLE failed_task_status_output
     ERROR_VARIABLE failed_task_status_error
@@ -213,7 +213,7 @@ if(NOT failed_task_state STREQUAL "created")
 endif()
 
 execute_process(
-    COMMAND "${AIAGENT_EXECUTABLE}" --demo --root "${FIXTURE_DIR}" --json "legacy compatibility"
+    COMMAND "${MINT_EXECUTABLE}" --demo --root "${FIXTURE_DIR}" --json "legacy compatibility"
     RESULT_VARIABLE legacy_result
     OUTPUT_VARIABLE legacy_output
     ERROR_VARIABLE legacy_error

@@ -1,9 +1,12 @@
-#include "aiagent/tools/tool_registry.hpp"
+#include "mint/tools/tool_registry.hpp"
 
-#include "aiagent/domain/change_journal.hpp"
-#include "aiagent/infrastructure/command_runner.hpp"
+#include "mint/domain/change_journal.hpp"
+#include "mint/infrastructure/command_runner.hpp"
 
+#include "../infrastructure/diagnostic_log.hpp"
 #include "file_support.hpp"
+#include "tool_catalog.hpp"
+#include "tool_contract.hpp"
 #include "tool_support.hpp"
 
 #include <algorithm>
@@ -13,7 +16,24 @@
 #include <utility>
 #include <vector>
 
-namespace aiagent {
+namespace mint {
+namespace {
+
+void reconcile_command_output_limit(ToolRuntimeSettings& runtime, std::size_t& legacy_limit) {
+    const ToolRuntimeSettings defaults;
+    const bool legacy_overridden = legacy_limit != defaults.command_output_bytes;
+    const bool runtime_overridden = runtime.command_output_bytes != defaults.command_output_bytes;
+    if (legacy_overridden && runtime_overridden && legacy_limit != runtime.command_output_bytes) {
+        throw std::invalid_argument("command output limit 配置冲突");
+    }
+    if (legacy_overridden) {
+        runtime.command_output_bytes = legacy_limit;
+    } else {
+        legacy_limit = runtime.command_output_bytes;
+    }
+}
+
+} // namespace
 
 using tools::detail::contains_ignored_component;
 using tools::detail::contains_nul;
@@ -22,13 +42,13 @@ using tools::detail::dump_json;
 using tools::detail::error_result;
 using tools::detail::is_inside;
 using tools::detail::is_valid_utf8;
-using tools::detail::max_edit_file_bytes;
-using tools::detail::max_read_bytes;
 
 ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions options)
-    : allow_write_(options.allow_write),
+    : allow_write_(options.allow_write), runtime_(options.runtime),
       change_set_approval_(std::move(options.change_set_approval)),
       policy_fingerprint_(std::move(options.policy_fingerprint)) {
+    reconcile_command_output_limit(runtime_, options.max_command_output_bytes);
+    validate_tool_runtime_settings(runtime_, "ToolRegistry runtime");
     std::error_code error;
     root_ = std::filesystem::weakly_canonical(std::move(root), error);
     if (error || root_.empty() || !std::filesystem::is_directory(root_)) {
@@ -57,19 +77,20 @@ ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions optio
             throw std::invalid_argument("写路径白名单不能指向符号链接");
         }
         error.clear();
-        const auto resolved = std::filesystem::weakly_canonical(unresolved, error);
+        auto resolved = std::filesystem::weakly_canonical(unresolved, error);
         if (error || !is_inside(root_, resolved) || contains_ignored_component(root_, resolved)) {
             throw std::invalid_argument("写路径白名单超出工作区或位于忽略目录");
         }
-        if (std::find(allowed_write_paths_.begin(), allowed_write_paths_.end(), resolved) !=
-            allowed_write_paths_.end()) {
+        const auto duplicate =
+            std::find_if(write_scopes_.begin(), write_scopes_.end(),
+                         [&](const WriteScope& scope) { return scope.path == resolved; });
+        if (duplicate != write_scopes_.end()) {
             continue;
         }
         error.clear();
         const bool recursive = std::filesystem::is_directory(resolved, error) && !error;
-        allowed_write_paths_.push_back(resolved);
-        recursive_write_paths_.push_back(recursive);
-        write_path_labels_.push_back(display_path(root_, resolved));
+        write_scopes_.push_back({std::move(resolved), recursive});
+        write_path_labels_.push_back(display_path(root_, write_scopes_.back().path));
     }
 
     if (allow_write_) {
@@ -155,6 +176,10 @@ const std::string& ToolRegistry::policy_fingerprint() const noexcept {
     return policy_fingerprint_;
 }
 
+const ToolRuntimeSettings& ToolRegistry::runtime_settings() const noexcept {
+    return runtime_;
+}
+
 bool ToolRegistry::has_workspace_changes() const {
     return change_journal_ != nullptr && change_journal_->has_changes();
 }
@@ -182,7 +207,7 @@ void ToolRegistry::restore_workspace_change_state(const Json& state) {
         !state.contains("entries") || !state.at("entries").is_array()) {
         throw std::invalid_argument("会话中的变更日志格式无效");
     }
-    if (state.at("entries").size() > 1024) {
+    if (state.at("entries").size() > tools::contract::max_restored_changes) {
         throw std::invalid_argument("会话中的变更日志条目过多");
     }
     if (change_journal_ == nullptr) {
@@ -216,10 +241,10 @@ void ToolRegistry::restore_workspace_change_state(const Json& state) {
             before_exists = item.at("before_exists").get<bool>();
             after_exists = item.at("after_exists").get<bool>();
         }
-        if (before.size() > max_edit_file_bytes || expected.size() > max_edit_file_bytes ||
-            contains_nul(before) || contains_nul(expected) || !is_valid_utf8(before) ||
-            !is_valid_utf8(expected) || (!before_exists && !before.empty()) ||
-            (!after_exists && !expected.empty())) {
+        if (before.size() > runtime_bounds::max_edit_file_bytes ||
+            expected.size() > runtime_bounds::max_edit_file_bytes || contains_nul(before) ||
+            contains_nul(expected) || !is_valid_utf8(before) || !is_valid_utf8(expected) ||
+            (!before_exists && !before.empty()) || (!after_exists && !expected.empty())) {
             throw std::invalid_argument("会话中的变更日志内容无效: " + requested);
         }
 
@@ -251,7 +276,7 @@ void ToolRegistry::restore_workspace_change_state(const Json& state) {
             throw std::invalid_argument("会话变更路径当前不是普通文件: " + requested);
         }
         const auto size = std::filesystem::file_size(target, error);
-        if (error || size > max_edit_file_bytes) {
+        if (error || size > runtime_bounds::max_edit_file_bytes) {
             throw std::invalid_argument("会话变更文件当前无法读取: " + requested);
         }
         std::ifstream input_stream(target, std::ios::binary);
@@ -278,12 +303,11 @@ bool ToolRegistry::is_write_allowed(const std::filesystem::path& path) const {
     if (contains_ignored_component(root_, path)) {
         return false;
     }
-    if (allowed_write_paths_.empty()) {
+    if (write_scopes_.empty()) {
         return true;
     }
-    for (std::size_t index = 0; index < allowed_write_paths_.size(); ++index) {
-        if (path == allowed_write_paths_.at(index) ||
-            (recursive_write_paths_.at(index) && is_inside(allowed_write_paths_.at(index), path))) {
+    for (const auto& scope : write_scopes_) {
+        if (path == scope.path || (scope.recursive && is_inside(scope.path, path))) {
             return true;
         }
     }
@@ -291,142 +315,7 @@ bool ToolRegistry::is_write_allowed(const std::filesystem::path& path) const {
 }
 
 Json ToolRegistry::definitions() const {
-    Json result = Json::array(
-        {{{"type", "function"},
-          {"function",
-           {{"name", "list_files"},
-            {"description",
-             "List files and directories below the allowed workspace root. Use relative paths."},
-            {"parameters",
-             {{"type", "object"},
-              {"properties",
-               {{"path",
-                 {{"type", "string"},
-                  {"description", "Relative directory path. Defaults to the workspace root."}}},
-                {"max_depth",
-                 {{"type", "integer"},
-                  {"minimum", 1},
-                  {"maximum", 4},
-                  {"description", "How many directory levels to include. Defaults to 2."}}}}},
-              {"additionalProperties", false}}}}}},
-         {{"type", "function"},
-          {"function",
-           {{"name", "read_file"},
-            {"description",
-             "Read a text file inside the allowed workspace root. Large files are truncated."},
-            {"parameters",
-             {{"type", "object"},
-              {"properties",
-               {{"path",
-                 {{"type", "string"}, {"description", "Relative path of the text file to read."}}},
-                {"offset",
-                 {{"type", "integer"},
-                  {"minimum", 0},
-                  {"description", "Byte offset to start from. Defaults to 0."}}},
-                {"max_bytes",
-                 {{"type", "integer"},
-                  {"minimum", 1024},
-                  {"maximum", max_read_bytes},
-                  {"description", "Maximum bytes to return. Defaults to 16384. Use next_offset for "
-                                  "another chunk."}}}}},
-              {"required", Json::array({"path"})},
-              {"additionalProperties", false}}}}}},
-         {{"type", "function"},
-          {"function",
-           {{"name", "search_text"},
-            {"description",
-             "Search text files inside the allowed workspace root and return matching lines."},
-            {"parameters",
-             {{"type", "object"},
-              {"properties",
-               {{"query",
-                 {{"type", "string"},
-                  {"description", "Literal text to search for, not a regular expression."}}},
-                {"path",
-                 {{"type", "string"},
-                  {"description",
-                   "Relative file or directory path. Defaults to the workspace root."}}},
-                {"case_sensitive",
-                 {{"type", "boolean"},
-                  {"description",
-                   "Whether ASCII letter matching is case-sensitive. Defaults to false."}}}}},
-              {"required", Json::array({"query"})},
-              {"additionalProperties", false}}}}}}});
-
-    if (allow_write_) {
-        result.push_back(
-            {{"type", "function"},
-             {"function",
-              {{"name", "apply_patch"},
-               {"description",
-                "Create one text file or replace one exact, unique text block in an existing file. "
-                "Read existing files first. This tool cannot delete files or run commands."},
-               {"parameters",
-                {{"type", "object"},
-                 {"properties",
-                  {{"path",
-                    {{"type", "string"},
-                     {"description", "Relative path inside the allowed workspace root."}}},
-                   {"operation",
-                    {{"type", "string"},
-                     {"enum", Json::array({"replace", "create"})},
-                     {"description",
-                      "Use replace for an existing file or create for a new file."}}},
-                   {"old_text",
-                    {{"type", "string"},
-                     {"description",
-                      "For replace: the non-empty text block that must occur exactly once."}}},
-                   {"new_text",
-                    {{"type", "string"},
-                     {"description",
-                      "Complete replacement block, or complete contents for a new file."}}}}},
-                 {"required", Json::array({"path", "operation", "new_text"})},
-                 {"additionalProperties", false}}}}}});
-        result.push_back(
-            {{"type", "function"},
-             {"function",
-              {{"name", "apply_changeset"},
-               {"description",
-                "Apply 1-16 validated text-file changes as one rollback transaction. Supports "
-                "create, exact replace, delete, and move. Delete/move require old_text to equal "
-                "the complete current file. Use only these exact fields per item: "
-                "create(operation,path,new_text), "
-                "replace(operation,path,old_text,new_text), "
-                "delete(operation,path,old_text), or "
-                "move(operation,path,old_text,destination). "
-                "All paths are validated before approval and commit."},
-               {"parameters",
-                {{"type", "object"},
-                 {"properties",
-                  {{"changes",
-                    {{"type", "array"},
-                     {"minItems", 1},
-                     {"maxItems", 16},
-                     {"items",
-                      {{"type", "object"},
-                       {"properties",
-                        {{"operation",
-                          {{"type", "string"},
-                           {"enum", Json::array({"create", "replace", "delete", "move"})}}},
-                         {"path", {{"type", "string"}}},
-                         {"old_text", {{"type", "string"}}},
-                         {"new_text", {{"type", "string"}}},
-                         {"destination", {{"type", "string"}}}}},
-                       {"required", Json::array({"operation", "path"})},
-                       {"additionalProperties", false}}}}}}},
-                 {"required", Json::array({"changes"})},
-                 {"additionalProperties", false}}}}}});
-        result.push_back({{"type", "function"},
-                          {"function",
-                           {{"name", "workspace_changes"},
-                            {"description", "Return every file changed by file-edit tools in this "
-                                            "session and a bounded unified diff "
-                                            "from the original contents to the current contents."},
-                            {"parameters",
-                             {{"type", "object"},
-                              {"properties", Json::object()},
-                              {"additionalProperties", false}}}}}});
-    }
+    auto result = tools::detail::workspace_tool_definitions(allow_write_, runtime_);
     if (command_runner_ != nullptr) {
         result.push_back(command_runner_->definition());
     }
@@ -434,136 +323,59 @@ Json ToolRegistry::definitions() const {
 }
 
 std::string ToolRegistry::describe_call(const ToolCall& call) const {
+    return tools::detail::summarize_tool_call(call);
+}
+
+Json ToolRegistry::execute_json(const ToolCall& call) const {
     if (!call.arguments.is_object()) {
-        return call.arguments.dump();
+        return error_result("工具参数必须是 JSON 对象");
     }
-
-    if (call.name == "run_recipe") {
-        Json summary = Json::object();
-        if (call.arguments.contains("recipe") && call.arguments.at("recipe").is_string()) {
-            summary["recipe"] = call.arguments.at("recipe");
-        }
-        return summary.dump();
+    if (call.name == "list_files") {
+        return list_files(call.arguments);
     }
-
-    if (call.name == "run_command") {
-        Json summary = Json::object();
-        if (call.arguments.contains("program") && call.arguments.at("program").is_string()) {
-            summary["program"] = call.arguments.at("program");
-        }
-        if (call.arguments.contains("cwd") && call.arguments.at("cwd").is_string()) {
-            summary["cwd"] = call.arguments.at("cwd");
-        }
-        if (call.arguments.contains("timeout_seconds") &&
-            call.arguments.at("timeout_seconds").is_number_integer()) {
-            summary["timeout_seconds"] = call.arguments.at("timeout_seconds");
-        }
-        if (call.arguments.contains("args") && call.arguments.at("args").is_array()) {
-            summary["arg_count"] = call.arguments.at("args").size();
-        }
-        return summary.dump();
+    if (call.name == "read_file") {
+        return read_file(call.arguments);
     }
-
+    if (call.name == "search_text") {
+        return search_text(call.arguments);
+    }
+    if (call.name == "apply_patch") {
+        return allow_write_ ? apply_patch(call.arguments)
+                            : error_result("写入能力未启用；请由用户使用 --allow-write 显式授权");
+    }
     if (call.name == "apply_changeset") {
-        Json summary = Json::object();
-        if (!call.arguments.contains("changes") || !call.arguments.at("changes").is_array()) {
-            return summary.dump();
+        return allow_write_ ? apply_changeset(call.arguments)
+                            : error_result("写入能力未启用；请由用户显式授权写路径");
+    }
+    if (call.name == "workspace_changes") {
+        if (change_journal_ == nullptr) {
+            return error_result("变更日志未启用；请由用户使用 --allow-write 显式授权");
         }
-        summary["operation_count"] = call.arguments.at("changes").size();
-        Json paths = Json::array();
-        for (const auto& item : call.arguments.at("changes")) {
-            if (!item.is_object()) {
-                continue;
-            }
-            Json change = Json::object();
-            for (const auto* field : {"operation", "path", "destination"}) {
-                if (item.contains(field) && item.at(field).is_string()) {
-                    change[field] = item.at(field);
-                }
-            }
-            if (item.contains("old_text") && item.at("old_text").is_string()) {
-                change["old_bytes"] = item.at("old_text").get_ref<const std::string&>().size();
-            }
-            if (item.contains("new_text") && item.at("new_text").is_string()) {
-                change["new_bytes"] = item.at("new_text").get_ref<const std::string&>().size();
-            }
-            paths.push_back(std::move(change));
+        return call.arguments.empty() ? change_journal_->snapshot()
+                                      : error_result("workspace_changes 不接受参数");
+    }
+    if (call.name == "run_command" || call.name == "run_recipe") {
+        if (command_runner_ == nullptr) {
+            return error_result("命令执行未启用；请由用户显式授权程序或 task policy recipe");
         }
-        summary["changes"] = std::move(paths);
-        return summary.dump();
+        if ((call.name == "run_recipe") != command_runner_->uses_recipes()) {
+            return error_result("命令工具与当前授权模式不匹配");
+        }
+        return command_runner_->run(call.arguments);
     }
-
-    if (call.name != "apply_patch") {
-        return call.arguments.dump();
-    }
-
-    Json summary = Json::object();
-    if (call.arguments.contains("path") && call.arguments.at("path").is_string()) {
-        summary["path"] = call.arguments.at("path");
-    }
-    if (call.arguments.contains("operation") && call.arguments.at("operation").is_string()) {
-        summary["operation"] = call.arguments.at("operation");
-    }
-    if (call.arguments.contains("old_text") && call.arguments.at("old_text").is_string()) {
-        summary["old_bytes"] = call.arguments.at("old_text").get_ref<const std::string&>().size();
-    }
-    if (call.arguments.contains("new_text") && call.arguments.at("new_text").is_string()) {
-        summary["new_bytes"] = call.arguments.at("new_text").get_ref<const std::string&>().size();
-    }
-    return summary.dump();
+    return error_result("未知工具: " + call.name);
 }
 
 std::string ToolRegistry::execute(const ToolCall& call) const {
     try {
-        if (!call.arguments.is_object()) {
-            return dump_json(error_result("工具参数必须是 JSON 对象"));
-        }
-        if (call.name == "list_files") {
-            return dump_json(list_files(call.arguments));
-        }
-        if (call.name == "read_file") {
-            return dump_json(read_file(call.arguments));
-        }
-        if (call.name == "search_text") {
-            return dump_json(search_text(call.arguments));
-        }
-        if (call.name == "apply_patch") {
-            if (!allow_write_) {
-                return dump_json(
-                    error_result("写入能力未启用；请由用户使用 --allow-write 显式授权"));
-            }
-            return dump_json(apply_patch(call.arguments));
-        }
-        if (call.name == "apply_changeset") {
-            if (!allow_write_) {
-                return dump_json(error_result("写入能力未启用；请由用户显式授权写路径"));
-            }
-            return dump_json(apply_changeset(call.arguments));
-        }
-        if (call.name == "workspace_changes") {
-            if (change_journal_ == nullptr) {
-                return dump_json(
-                    error_result("变更日志未启用；请由用户使用 --allow-write 显式授权"));
-            }
-            if (!call.arguments.empty()) {
-                return dump_json(error_result("workspace_changes 不接受参数"));
-            }
-            return dump_json(change_journal_->snapshot());
-        }
-        if (call.name == "run_command" || call.name == "run_recipe") {
-            if (command_runner_ == nullptr) {
-                return dump_json(
-                    error_result("命令执行未启用；请由用户显式授权程序或 task policy recipe"));
-            }
-            if ((call.name == "run_recipe") != command_runner_->uses_recipes()) {
-                return dump_json(error_result("命令工具与当前授权模式不匹配"));
-            }
-            return dump_json(command_runner_->run(call.arguments));
-        }
-        return dump_json(error_result("未知工具: " + call.name));
+        const auto result = execute_json(call);
+        diagnostics::emit(diagnostics::Level::debug, "tool.completed",
+                          {{"name", call.name}, {"ok", result.value("ok", false)}});
+        return dump_json(result);
     } catch (const std::exception& error) {
+        diagnostics::emit(diagnostics::Level::warning, "tool.failed", {{"name", call.name}});
         return dump_json(error_result(error.what()));
     }
 }
 
-} // namespace aiagent
+} // namespace mint

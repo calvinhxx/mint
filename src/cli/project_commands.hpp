@@ -1,16 +1,13 @@
 #pragma once
 
-#include <ostream>
-
-#include "aiagent/infrastructure/project_store.hpp"
+#include "mint/infrastructure/project_store.hpp"
 
 #include "command_line.hpp"
+#include "console.hpp"
 
-namespace aiagent::cli {
+namespace mint::cli {
 
-int handle_init_command(const CommandLine& command_line, ProjectStore& store,
-                        std::ostream& output);
-int handle_status_command(const CommandLine& command_line, ProjectStore& store,
-                          std::ostream& output);
+int handle_init_command(const CommandLine& command_line, ProjectStore& store, Console& console);
+int handle_status_command(const CommandLine& command_line, ProjectStore& store, Console& console);
 
-} // namespace aiagent::cli
+} // namespace mint::cli
