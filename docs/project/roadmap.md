@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |---|---|
-| 代码版本 | `1.4.0`，尚未创建 release tag |
+| 代码版本 | `1.4.0` |
 | 产品定位 | 轻量的通用 AI Agent 工具与 C++ 内核 |
 | 形态 | 本地 CLI；一次 `run` 处理一个任务 |
 | 命令 | `init / run / resume / status` |
@@ -16,7 +16,7 @@
 | 完整验证平台 | macOS arm64 |
 | 本地测试 | Debug 和 Sanitizer CTest 50/50 |
 | 持续集成 | GitHub Actions macOS 发布门禁已通过 |
-| 最近真实模型验收 | v1.2 Chat Completions 隔离任务 |
+| 最近真实模型验收 | v1.4 Chat Completions 隔离修复任务 |
 
 主流程已经覆盖项目初始化、读取、修改、验证、状态查询和中断恢复。当前重点是稳定 CLI 和可扩展内核，不包含 IDE 或 GUI。
 
@@ -33,6 +33,7 @@
 - HTTP 传输、重试编排和模型协议相互独立，成功 SSE 不重复缓存完整响应体；
 - vcpkg 依赖、spdlog 诊断日志和 GoogleTest 单元测试；
 - 本地与 GitHub Actions 共用一条发布检查，覆盖版本、格式、Debug、Release、Sanitizer、CTest 和离线 CLI；
+- v1.4 真实 Chat Completions 回归，包含工具调用、限流等待、修改、验证和独立复测；
 - 文本输出、JSON 输出和诊断信息分流。
 
 ## 证据范围
@@ -43,26 +44,23 @@
 | 本地假模型服务 | HTTP、SSE、重试和工具闭环 | 所有 provider 均可用 |
 | 真实模型验收 | 当时的端点和配置完成了任务 | 其他端点或未来版本也通过 |
 
-v1.4 本轮没有重新调用外部模型。具体命令、结果和历史真实模型记录见 [测试与验收](../development/testing.md)。
+v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任务。Responses 和 SSE 仍只有本地协议与回环服务证据。具体结果见 [测试与验收](../development/testing.md)。
 
 ## 仍缺少
 
 | 方向 | 缺口 |
 |---|---|
-| 发布 | CI 已接入，尚未创建 `v1.4.0` tag |
 | 平台 | Linux / Windows 缺少正式安全命令后端 |
 | 资源限制 | 缺少 CPU、内存、进程数和磁盘配额 |
 | 恢复 | 多文件修改缺少跨进程事务日志 |
-| 模型兼容 | 需要按 provider 做能力识别和真实回归 |
+| 模型兼容 | Responses、SSE 和更多 provider 尚未做真实回归 |
 | 交互 | 没有持续聊天、多任务 GUI 和多 Agent 编排 |
 
 ## 下一步
 
-1. 用当前版本完成一次隔离的真实 provider 回归；
-2. 完成发布检查并创建 `v1.4.0` tag；
-3. 实现 Linux 安全命令后端，再处理 Windows；
-4. 增加资源配额和更强的事务恢复；
-5. 增加 provider 能力识别和固定回归配置；
-6. 内核稳定后再增加持续聊天和 GUI。
+1. 实现 Linux 安全命令后端，再处理 Windows；
+2. 增加资源配额和更强的事务恢复；
+3. 增加 provider 能力识别和固定回归配置；
+4. 内核稳定后再增加持续聊天和 GUI。
 
 历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议、流式传输和工程基础设施。

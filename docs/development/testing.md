@@ -70,17 +70,18 @@ ctest --preset vcpkg-sanitize
 
 当前 fixture 位于 [`tests/fixtures/v1_broken_project`](../../tests/fixtures/v1_broken_project)。它先让 `calculator::add` 测试失败，再验证把减法修正为加法后 CTest 通过。
 
-## 历史真实模型记录
+## 真实模型记录
 
-这些记录没有在 v1.4 重新执行，只用于保留已有证据。
+### v1.4
 
-### v1.0
-
-- 在 `/private/tmp` 的 fixture 副本中运行，不修改仓库基线；
-- 只允许修改 `src/calculator.cpp` 和 `FIX_REPORT.md`；
-- 只允许执行登记的 CMake、CTest 命令，并强制使用 macOS Seatbelt；
-- 初始 CTest exit code 为 8，修改后的最后一次 CTest exit code 为 0；
-- 共 16 轮、15 次工具调用、2 个文件变化；Agent 结束后独立 CTest 为 1/1 passed。
+- 2026-08-27 在 `/private/tmp` 的 fixture 副本中运行，仓库基线没有修改；
+- 模型响应报告为 `openai/gpt-oss-120b`，adapter 为 `chat_completions`，未开启 SSE；
+- 初始独立 CTest 为 0/1，`calculator::add` 把加法写成了减法；
+- Agent 共 9 轮、8 次工具调用，只修改 `src/calculator.cpp`；
+- 3 次固定 recipe 全部成功，verification 状态为 `passed`；
+- 2 次 429 按服务端时间等待后重试成功；
+- 最终独立新建构建目录复测为 1/1 passed；
+- 共使用 17,955 tokens，其中输入 17,177、输出 778、缓存 1,280。
 
 ### v1.2
 
@@ -90,9 +91,17 @@ ctest --preset vcpkg-sanitize
 - 普通 build 不能解除验证门禁，只有标记为 verification 的 test 可以；
 - 最终 session 为 schema v3，独立 CTest 为 1/1 passed。
 
+### v1.0
+
+- 在 `/private/tmp` 的 fixture 副本中运行，不修改仓库基线；
+- 只允许修改 `src/calculator.cpp` 和 `FIX_REPORT.md`；
+- 只允许执行登记的 CMake、CTest 命令，并强制使用 macOS Seatbelt；
+- 初始 CTest exit code 为 8，修改后的最后一次 CTest exit code 为 0；
+- 共 16 轮、15 次工具调用、2 个文件变化；Agent 结束后独立 CTest 为 1/1 passed。
+
 ## 当前边界
 
-- v1.4 没有读取真实 API Key，也没有调用外部模型；
+- v1.4 的真实外部证据只覆盖 Chat Completions 非流式配置；
 - 完整验证平台仍是 macOS arm64；
 - Linux 和 Windows 尚无正式的安全命令后端；
 - 本地测试证明确定性行为，不替代真实 provider 回归；

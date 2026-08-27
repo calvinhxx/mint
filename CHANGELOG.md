@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 - Unreleased
+## 1.4.0 - 2026-08-27
 
 - Renamed the project, executable, C++ namespace, public headers, CMake targets, and state paths to `mint`; positioned it as a lightweight general AI agent toolkit.
 - Added a unified model-provider layer for Chat Completions and Responses, including optional SSE streaming, normalized tool calls, usage statistics, and server-directed retries.
@@ -14,6 +14,7 @@
 - Replaced the hand-written test harness with independently discoverable GoogleTest unit, integration, and contract cases.
 - Added an injectable CLI Console boundary and an architecture test that prevents direct process I/O from spreading into production modules.
 - Consolidated duplicate versioned acceptance notes and source-reading guidance into the current testing and architecture docs.
+- Revalidated the current Chat Completions path against the isolated repair fixture, including server-directed rate-limit retries and independent post-run verification.
 
 ## 1.3.0 - 2026-08-24
 

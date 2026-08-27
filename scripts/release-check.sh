@@ -19,8 +19,9 @@ if [[ -z "$project_version" || "$project_version" != "$manifest_version" ]]; the
     echo "Version mismatch: CMake='$project_version', vcpkg='$manifest_version'" >&2
     exit 1
 fi
-if ! grep -Fqx "## $project_version - Unreleased" CHANGELOG.md; then
-    echo "CHANGELOG.md has no Unreleased section for $project_version" >&2
+if ! grep -Eq "^## $project_version - (Unreleased|[0-9]{4}-[0-9]{2}-[0-9]{2})$" \
+    CHANGELOG.md; then
+    echo "CHANGELOG.md has no valid section for $project_version" >&2
     exit 1
 fi
 
