@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(mint VERSION 1.4.0 DESCRIPTION "Lightweight general AI agent toolkit" LANGUAGES CXX)
+project(mint VERSION 1.5.0 DESCRIPTION "Lightweight general AI agent toolkit" LANGUAGES CXX)
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 

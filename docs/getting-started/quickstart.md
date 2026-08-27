@@ -4,15 +4,32 @@
 
 ## 准备环境
 
-需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。
+需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。先设置 vcpkg 路径：
 
 ~~~bash
 export VCPKG_ROOT=/path/to/vcpkg
+~~~
+
+Windows PowerShell 使用：
+
+~~~powershell
+$env:VCPKG_ROOT = 'C:\src\vcpkg'
+~~~
+
+Linux 上如果要让 Agent 运行构建或测试，还需要安装 Bubblewrap。Ubuntu / Debian 示例：
+
+~~~bash
+sudo apt-get install bubblewrap
+~~~
+
+然后构建当前机器的 Release 版本：
+
+~~~bash
 cmake --preset vcpkg-release
 cmake --build --preset vcpkg-release
 ~~~
 
-生成的程序位于 `build/vcpkg-release/mint`。
+生成的程序位于 `build/vcpkg-release/mint`，Windows 下为 `mint.exe`。需要指定系统和架构时，使用[构建矩阵](../development/testing.md#平台构建矩阵)中的 preset。
 
 ## 先跑离线演示
 
@@ -53,3 +70,5 @@ cp config.responses.example.json config.json
 ~~~
 
 模型不能执行任意 shell，只能选择 `init` 登记的命令。文件访问受项目根目录和任务 policy 限制，任务记录保存在项目之外。
+
+macOS 和 Linux 默认要求操作系统沙箱。Linux 会隐藏用户目录和任务配置，只把当前工作区映射为宿主机可写路径，并断开宿主网络。缺少 Bubblewrap 时，mint 会拒绝运行项目命令。

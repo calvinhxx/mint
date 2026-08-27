@@ -28,6 +28,14 @@ test      -> ctest --test-dir build --output-on-failure
 
 运行时只能选择已经登记且被 policy 允许的 recipe。`CommandRunner` 还负责超时、输出限制和平台沙箱。
 
+| 系统 | 默认命令保护 |
+|---|---|
+| macOS | Seatbelt：限制宿主写入、敏感文件和网络 |
+| Linux | Bubblewrap：工作区可写，其余宿主路径只读或隐藏；使用独立网络和运行时目录 |
+| Windows | 暂未开放安全命令执行 |
+
+Linux 缺少 `bwrap` 时会直接拒绝命令，不会自动退回到无沙箱模式。非标准安装位置可以用 `MINT_BWRAP_PATH=/absolute/path/to/bwrap` 指定。需要排查特殊工具兼容问题时，用户可以显式传入 `--unsafe-no-command-sandbox`，但这表示接受该命令直接接触宿主系统。
+
 ## 修改后的验证
 
 启用验证门禁后：
@@ -54,8 +62,8 @@ Agent 会在工具执行前后保存 checkpoint。恢复时按动作是否有副
 ## 当前边界
 
 - macOS arm64 是目前完整验证的平台；
-- macOS Seatbelt 提供额外限制，但不是容器；
-- Linux 还没有正式命令沙箱，Windows 还不能安全运行项目命令；
+- Linux Bubblewrap 后端已经实现，仍需在 x64 / ARM64 原生 CI 完成验收；
+- Windows 还不能安全运行项目命令；
 - CPU、内存、进程数和磁盘配额仍待补充。
 
 这些限制属于当前实现范围，不应由提示词代替。

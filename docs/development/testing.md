@@ -19,6 +19,30 @@
 
 库目标同时提供 `mint::domain`、`mint::runtime`、`mint::infrastructure`、`mint::tools`、`mint::application` 和 `mint::core` 别名。新增源码时，只修改所属目录的 `CMakeLists.txt`。
 
+## 平台构建矩阵
+
+六个 preset 都在对应架构的原生系统上配置、编译并运行适用的 CTest：
+
+| 系统 | x64 | ARM64 |
+|---|---|---|
+| Windows | `vcpkg-windows` | `vcpkg-windows-arm64` |
+| macOS | `vcpkg-osx-x64` | `vcpkg-osx` |
+| Linux | `vcpkg-linux` | `vcpkg-linux-arm64` |
+
+替换下面的 `PRESET` 即可本地复现：
+
+~~~bash
+cmake --preset PRESET
+cmake --build --preset PRESET
+ctest --preset PRESET
+~~~
+
+这些 preset 面向同架构原生构建，例如 `vcpkg-linux-arm64` 应在 ARM64 Linux 上运行。CI 从 [`.github/build-matrix.json`](../../.github/build-matrix.json) 读取 runner、vcpkg triplet、CMake preset 和平台运行时依赖；校验脚本会检查它们是否一致。
+
+这里的“支持”表示代码能够在目标系统编译并运行该系统适用的自动测试。不适用的系统测试会明确显示为 `Skipped`，不会冒充通过。macOS 命令使用 Seatbelt；Linux 使用 Bubblewrap，并由矩阵安装 `bubblewrap` 包；Windows 安全命令后端仍在 roadmap 中。
+
+Linux 沙箱测试会真实检查四件事：工作区内可以写、工作区外不能写、受保护文件不能读、命令不能访问宿主网络。Bubblewrap 不可用时不会静默降级；只有用户显式传入 `--unsafe-no-command-sandbox` 才能关闭这层保护。
+
 ## 本地全量验证
 
 需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。
@@ -28,8 +52,7 @@ export VCPKG_ROOT=/path/to/vcpkg
 bash scripts/release-check.sh
 ~~~
 
-这条命令检查版本号、代码格式、Debug、Release、ASan/UBSan、全部 CTest 和离线 CLI。
-GitHub Actions 也执行同一条命令。
+这条命令检查版本号、构建矩阵、代码格式、Debug、Release、ASan/UBSan、全部 CTest 和离线 CLI。GitHub Actions 除了执行这条 macOS ARM64 深度门禁，还会运行上面的六组合构建矩阵。
 
 只排查某一种构建时，可以单独运行 preset：
 
@@ -102,7 +125,7 @@ ctest --preset vcpkg-sanitize
 ## 当前边界
 
 - v1.4 的真实外部证据只覆盖 Chat Completions 非流式配置；
-- 完整验证平台仍是 macOS arm64；
-- Linux 和 Windows 尚无正式的安全命令后端；
+- 六组合矩阵覆盖原生构建和适用测试；Linux 后端在 x64 / ARM64 原生 CI 通过前仍属于待验收实现；
+- Windows 尚无正式的安全命令后端；
 - 本地测试证明确定性行为，不替代真实 provider 回归；
 - checkpoint 保证从稳定点恢复，不承诺跨进程 exactly-once。

@@ -6,10 +6,9 @@ mint 是一个轻量的通用 AI Agent 工具。它提供模型循环、工具�
 
 ## 快速试用
 
-需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。
+需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。macOS / Linux 用 `export VCPKG_ROOT=/path/to/vcpkg`，Windows PowerShell 用 `$env:VCPKG_ROOT = 'C:\src\vcpkg'`。
 
 ~~~bash
-export VCPKG_ROOT=/path/to/vcpkg
 cmake --preset vcpkg-release
 cmake --build --preset vcpkg-release
 
@@ -36,4 +35,4 @@ cmake --build --preset vcpkg-release
 
 第一次使用只需阅读“开始使用”；需要理解源码时，再阅读“工作原理与代码结构”。
 
-目前完整验证的平台是 macOS arm64。Linux 和 Windows 的安全命令后端尚未完成。
+源码构建矩阵覆盖 Windows、macOS、Linux 的 x64 / ARM64，具体 preset 见[构建、测试与验收](docs/development/testing.md)。安全命令后端支持 macOS Seatbelt 和 Linux Bubblewrap；Windows 目前只能运行不需要项目命令的任务。

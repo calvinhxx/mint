@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0 - Unreleased
+
+- Added native Windows, macOS, and Linux build/test lanes for x64 and ARM64, backed by matching vcpkg presets and a checked matrix catalog.
+- Added a Linux command sandbox backed by Bubblewrap: the workspace is the only writable host path, the user home and runtime directories are masked, protected files stay hidden, capabilities are dropped, and the host network is isolated.
+- Closed inherited file descriptors before approved commands start, preventing an otherwise isolated child from reusing process resources opened by mint.
+- Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
+
 ## 1.4.0 - 2026-08-27
 
 - Renamed the project, executable, C++ namespace, public headers, CMake targets, and state paths to `mint`; positioned it as a lightweight general AI agent toolkit.
