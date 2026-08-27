@@ -64,29 +64,29 @@ enum class ModelStreamEventKind { text_delta, tool_arguments_delta };
 struct ModelStreamEvent {
     ModelStreamEventKind kind = ModelStreamEventKind::text_delta;
     std::size_t output_index = 0;
-    std::string item_id;
-    std::string name;
-    std::string delta;
+    std::string item_id{};
+    std::string name{};
+    std::string delta{};
 };
 
 using ModelStreamCallback = std::function<void(const ModelStreamEvent&)>;
 
 struct ModelProviderConfig {
-    std::string api_url;
-    std::string api_key;
-    std::string model;
+    std::string api_url{};
+    std::string api_key{};
+    std::string model{};
     long connect_timeout_seconds = model_provider_defaults::connect_timeout_seconds;
     long request_timeout_seconds = model_provider_defaults::request_timeout_seconds;
     long max_retries = model_provider_defaults::max_retries;
     long retry_initial_delay_ms = model_provider_defaults::retry_initial_delay_ms;
     long max_completion_tokens = model_provider_defaults::max_completion_tokens;
-    std::shared_ptr<TaskControl> task_control;
-    ModelProgressCallback progress;
+    std::shared_ptr<TaskControl> task_control{};
+    ModelProgressCallback progress{};
     // Appended after the v1.3 fields so positional aggregate initialization of
     // ChatCompletionsConfig remains source compatible.
     ModelAdapter adapter = ModelAdapter::chat_completions;
     bool stream = false;
-    ModelStreamCallback stream_event;
+    ModelStreamCallback stream_event{};
 };
 
 class ModelProviderClient final : public ModelClient {

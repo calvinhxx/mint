@@ -16,25 +16,25 @@ namespace mint {
 class TaskControl;
 
 struct CommandApprovalRequest {
-    std::string program;
-    std::vector<std::string> args;
-    std::string cwd;
+    std::string program{};
+    std::vector<std::string> args{};
+    std::string cwd{};
     long timeout_seconds = 0;
 };
 
 using CommandApproval = std::function<bool(const CommandApprovalRequest&)>;
 
 struct CommandRunnerOptions {
-    std::filesystem::path root;
-    std::vector<std::string> allowed_programs;
-    std::vector<CommandRecipe> recipes;
+    std::filesystem::path root{};
+    std::vector<std::string> allowed_programs{};
+    std::vector<CommandRecipe> recipes{};
     long default_timeout_seconds = runtime_defaults::command_timeout_seconds;
     long max_timeout_seconds = runtime_defaults::max_command_timeout_seconds;
     std::size_t max_output_bytes = runtime_defaults::command_output_bytes;
-    std::shared_ptr<TaskControl> task_control;
-    CommandApproval approval;
+    std::shared_ptr<TaskControl> task_control{};
+    CommandApproval approval{};
     bool require_os_sandbox = false;
-    std::vector<std::filesystem::path> denied_read_paths;
+    std::vector<std::filesystem::path> denied_read_paths{};
 };
 
 class CommandRunner {

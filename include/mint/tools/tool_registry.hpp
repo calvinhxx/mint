@@ -17,29 +17,29 @@ class ChangeJournal;
 class TaskControl;
 
 struct ChangeSetApprovalRequest {
-    std::vector<std::string> paths;
-    std::string unified_diff;
+    std::vector<std::string> paths{};
+    std::string unified_diff{};
     bool diff_truncated = false;
 };
 
 using ChangeSetApproval = std::function<bool(const ChangeSetApprovalRequest&)>;
 
 struct ToolRegistryOptions {
-    std::vector<std::filesystem::path> protected_paths;
+    std::vector<std::filesystem::path> protected_paths{};
     bool allow_write = false;
-    std::vector<std::filesystem::path> allowed_write_paths;
-    std::vector<std::string> allowed_programs;
-    std::vector<CommandRecipe> command_recipes;
-    std::string policy_fingerprint;
+    std::vector<std::filesystem::path> allowed_write_paths{};
+    std::vector<std::string> allowed_programs{};
+    std::vector<CommandRecipe> command_recipes{};
+    std::string policy_fingerprint{};
     long default_command_timeout_seconds = runtime_defaults::command_timeout_seconds;
     long max_command_timeout_seconds = runtime_defaults::max_command_timeout_seconds;
     // Backward-compatible alias. New policy code should use runtime.command_output_bytes.
     std::size_t max_command_output_bytes = runtime_defaults::command_output_bytes;
-    std::shared_ptr<TaskControl> task_control;
-    CommandApproval command_approval;
-    ChangeSetApproval change_set_approval;
+    std::shared_ptr<TaskControl> task_control{};
+    CommandApproval command_approval{};
+    ChangeSetApproval change_set_approval{};
     bool require_command_sandbox = false;
-    ToolRuntimeSettings runtime;
+    ToolRuntimeSettings runtime{};
 };
 
 class ToolRegistry {

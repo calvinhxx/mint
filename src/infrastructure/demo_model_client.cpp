@@ -31,6 +31,13 @@ ModelReply demo_tool_call(std::string id, std::string name, Json arguments) {
     return reply;
 }
 
+ModelCallMetadata demo_metadata() {
+    ModelCallMetadata metadata;
+    metadata.adapter = "demo";
+    metadata.model = "deterministic-demo";
+    return metadata;
+}
+
 } // namespace
 
 ModelReply DemoModelClient::complete(const Json& messages, const Json& tools) {
@@ -39,18 +46,18 @@ ModelReply DemoModelClient::complete(const Json& messages, const Json& tools) {
     switch (step_++) {
     case 0: {
         auto reply = demo_tool_call("demo-list", "list_files", {{"path", "."}, {"max_depth", 2}});
-        reply.metadata = {.adapter = "demo", .model = "deterministic-demo"};
+        reply.metadata = demo_metadata();
         return reply;
     }
     case 1: {
         auto reply = demo_tool_call("demo-search", "search_text",
                                     {{"path", "."}, {"query", "Agent"}, {"case_sensitive", false}});
-        reply.metadata = {.adapter = "demo", .model = "deterministic-demo"};
+        reply.metadata = demo_metadata();
         return reply;
     }
     case 2: {
         auto reply = demo_tool_call("demo-read", "read_file", {{"path", "README.md"}});
-        reply.metadata = {.adapter = "demo", .model = "deterministic-demo"};
+        reply.metadata = demo_metadata();
         return reply;
     }
     default: {
@@ -69,7 +76,7 @@ ModelReply DemoModelClient::complete(const Json& messages, const Json& tools) {
                      "\n\n最后一次工具结果：\n" +
                      last_result;
         reply.assistant_message = {{"role", "assistant"}, {"content", reply.text}};
-        reply.metadata = {.adapter = "demo", .model = "deterministic-demo"};
+        reply.metadata = demo_metadata();
         return reply;
     }
     }

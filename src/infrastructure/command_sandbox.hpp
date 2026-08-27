@@ -8,8 +8,8 @@
 namespace mint::command_detail {
 
 struct SandboxConfig {
-    std::filesystem::path executable;
-    std::vector<std::string> arguments;
+    std::filesystem::path executable{};
+    std::vector<std::string> arguments{};
     std::string backend = "none";
     bool sets_working_directory = false;
 };

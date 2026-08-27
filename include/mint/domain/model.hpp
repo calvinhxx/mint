@@ -11,9 +11,9 @@ namespace mint {
 using Json = nlohmann::json;
 
 struct ToolCall {
-    std::string id;
-    std::string name;
-    Json arguments;
+    std::string id{};
+    std::string name{};
+    Json arguments{};
 };
 
 struct ModelUsage {
@@ -25,9 +25,9 @@ struct ModelUsage {
 };
 
 struct ModelCallMetadata {
-    std::string adapter;
-    std::string response_id;
-    std::string model;
+    std::string adapter{};
+    std::string response_id{};
+    std::string model{};
     std::size_t attempts = 1;
     std::size_t retries = 0;
     long http_status = 0;
@@ -38,11 +38,11 @@ struct ModelCallMetadata {
 };
 
 struct ModelReply {
-    Json assistant_message;
-    std::string text;
-    std::vector<ToolCall> tool_calls;
-    ModelUsage usage;
-    ModelCallMetadata metadata;
+    Json assistant_message{};
+    std::string text{};
+    std::vector<ToolCall> tool_calls{};
+    ModelUsage usage{};
+    ModelCallMetadata metadata{};
 };
 
 class ModelClient {

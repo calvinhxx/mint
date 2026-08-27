@@ -22,6 +22,8 @@ std::string require_string(const Json& arguments, std::string_view name) {
     return arguments.at(key).get<std::string>();
 }
 
+#if !defined(_WIN32)
+
 bool contains_nul(std::string_view value) {
     return value.find('\0') != std::string_view::npos;
 }
@@ -41,8 +43,6 @@ std::string display_path(const std::filesystem::path& root, const std::filesyste
     const auto relative = path.lexically_relative(root);
     return relative.empty() ? "." : relative.generic_string();
 }
-
-#if !defined(_WIN32)
 
 struct CommandInvocation {
     std::string program;
