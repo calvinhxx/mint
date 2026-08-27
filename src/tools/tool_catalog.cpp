@@ -2,153 +2,182 @@
 
 #include "tool_contract.hpp"
 
+#include <initializer_list>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace mint::tools::detail {
 namespace {
 
+Json string_array(std::initializer_list<std::string_view> values) {
+    auto result = Json::array();
+    for (const auto value : values) {
+        result.push_back(value);
+    }
+    return result;
+}
+
+Json property_schema(std::string_view type, std::string description = {}) {
+    auto schema = Json::object();
+    schema["type"] = type;
+    if (!description.empty()) {
+        schema["description"] = std::move(description);
+    }
+    return schema;
+}
+
+Json object_schema() {
+    auto schema = property_schema("object");
+    schema["properties"] = Json::object();
+    schema["additionalProperties"] = false;
+    return schema;
+}
+
+Json tool_definition(std::string_view name, std::string description, Json parameters) {
+    auto function = Json::object();
+    function["name"] = name;
+    function["description"] = std::move(description);
+    function["parameters"] = std::move(parameters);
+
+    auto definition = Json::object();
+    definition["type"] = "function";
+    definition["function"] = std::move(function);
+    return definition;
+}
+
+Json list_files_definition() {
+    auto parameters = object_schema();
+    parameters["properties"]["path"] =
+        property_schema("string", "Relative directory path. Defaults to the workspace root.");
+
+    auto max_depth =
+        property_schema("integer", "How many directory levels to include. Defaults to " +
+                                       std::to_string(contract::default_list_depth) + ".");
+    max_depth["minimum"] = contract::min_list_depth;
+    max_depth["maximum"] = contract::max_list_depth;
+    parameters["properties"]["max_depth"] = std::move(max_depth);
+
+    return tool_definition(
+        "list_files",
+        "List files and directories below the allowed workspace root. Use relative paths.",
+        std::move(parameters));
+}
+
+Json read_file_definition(const ToolRuntimeSettings& runtime) {
+    auto parameters = object_schema();
+    parameters["properties"]["path"] =
+        property_schema("string", "Relative path of the text file to read.");
+
+    auto offset = property_schema("integer", "Byte offset to start from. Defaults to 0.");
+    offset["minimum"] = 0;
+    parameters["properties"]["offset"] = std::move(offset);
+
+    auto max_bytes = property_schema("integer", "Maximum bytes to return. Defaults to " +
+                                                    std::to_string(runtime.read_file_bytes) +
+                                                    ". Use next_offset for another chunk.");
+    max_bytes["minimum"] = runtime_bounds::min_read_file_bytes;
+    max_bytes["maximum"] = runtime_bounds::max_read_file_bytes;
+    parameters["properties"]["max_bytes"] = std::move(max_bytes);
+    parameters["required"] = string_array({"path"});
+
+    return tool_definition(
+        "read_file",
+        "Read a text file inside the allowed workspace root. Large files are truncated.",
+        std::move(parameters));
+}
+
+Json search_text_definition() {
+    auto parameters = object_schema();
+    parameters["properties"]["query"] = property_schema(
+        "string", "Literal text to search for, not a regular expression. At most " +
+                      std::to_string(contract::max_search_query_bytes) + " UTF-8 bytes.");
+    parameters["properties"]["path"] = property_schema(
+        "string", "Relative file or directory path. Defaults to the workspace root.");
+    parameters["properties"]["case_sensitive"] = property_schema(
+        "boolean", "Whether ASCII letter matching is case-sensitive. Defaults to false.");
+    parameters["required"] = string_array({"query"});
+
+    return tool_definition(
+        "search_text",
+        "Search text files inside the allowed workspace root and return matching lines.",
+        std::move(parameters));
+}
+
 Json read_only_definitions(const ToolRuntimeSettings& runtime) {
-    return Json::array(
-        {{{"type", "function"},
-          {"function",
-           {{"name", "list_files"},
-            {"description",
-             "List files and directories below the allowed workspace root. Use relative paths."},
-            {"parameters",
-             {{"type", "object"},
-              {"properties",
-               {{"path",
-                 {{"type", "string"},
-                  {"description", "Relative directory path. Defaults to the workspace root."}}},
-                {"max_depth",
-                 {{"type", "integer"},
-                  {"minimum", contract::min_list_depth},
-                  {"maximum", contract::max_list_depth},
-                  {"description", "How many directory levels to include. Defaults to " +
-                                      std::to_string(contract::default_list_depth) + "."}}}}},
-              {"additionalProperties", false}}}}}},
-         {{"type", "function"},
-          {"function",
-           {{"name", "read_file"},
-            {"description",
-             "Read a text file inside the allowed workspace root. Large files are truncated."},
-            {"parameters",
-             {{"type", "object"},
-              {"properties",
-               {{"path",
-                 {{"type", "string"}, {"description", "Relative path of the text file to read."}}},
-                {"offset",
-                 {{"type", "integer"},
-                  {"minimum", 0},
-                  {"description", "Byte offset to start from. Defaults to 0."}}},
-                {"max_bytes",
-                 {{"type", "integer"},
-                  {"minimum", runtime_bounds::min_read_file_bytes},
-                  {"maximum", runtime_bounds::max_read_file_bytes},
-                  {"description", "Maximum bytes to return. Defaults to " +
-                                      std::to_string(runtime.read_file_bytes) +
-                                      ". Use next_offset for another chunk."}}}}},
-              {"required", Json::array({"path"})},
-              {"additionalProperties", false}}}}}},
-         {{"type", "function"},
-          {"function",
-           {{"name", "search_text"},
-            {"description",
-             "Search text files inside the allowed workspace root and return matching lines."},
-            {"parameters",
-             {{"type", "object"},
-              {"properties",
-               {{"query",
-                 {{"type", "string"},
-                  {"description", "Literal text to search for, not a regular expression. At most " +
-                                      std::to_string(contract::max_search_query_bytes) +
-                                      " UTF-8 bytes."}}},
-                {"path",
-                 {{"type", "string"},
-                  {"description",
-                   "Relative file or directory path. Defaults to the workspace root."}}},
-                {"case_sensitive",
-                 {{"type", "boolean"},
-                  {"description",
-                   "Whether ASCII letter matching is case-sensitive. Defaults to false."}}}}},
-              {"required", Json::array({"query"})},
-              {"additionalProperties", false}}}}}}});
+    auto definitions = Json::array();
+    definitions.push_back(list_files_definition());
+    definitions.push_back(read_file_definition(runtime));
+    definitions.push_back(search_text_definition());
+    return definitions;
+}
+
+Json apply_patch_definition() {
+    auto parameters = object_schema();
+    parameters["properties"]["path"] =
+        property_schema("string", "Relative path inside the allowed workspace root.");
+
+    auto operation =
+        property_schema("string", "Use replace for an existing file or create for a new file.");
+    operation["enum"] = string_array({"replace", "create"});
+    parameters["properties"]["operation"] = std::move(operation);
+    parameters["properties"]["old_text"] = property_schema(
+        "string", "For replace: the non-empty text block that must occur exactly once.");
+    parameters["properties"]["new_text"] = property_schema(
+        "string", "Complete replacement block, or complete contents for a new file.");
+    parameters["required"] = string_array({"path", "operation", "new_text"});
+
+    return tool_definition(
+        "apply_patch",
+        "Create one text file or replace one exact, unique text block in an existing file. "
+        "Read existing files first. This tool cannot delete files or run commands.",
+        std::move(parameters));
+}
+
+Json apply_changeset_definition() {
+    auto item = object_schema();
+    auto operation = property_schema("string");
+    operation["enum"] = string_array({"create", "replace", "delete", "move"});
+    item["properties"]["operation"] = std::move(operation);
+    for (const auto field : {"path", "old_text", "new_text", "destination"}) {
+        item["properties"][field] = property_schema("string");
+    }
+    item["required"] = string_array({"operation", "path"});
+
+    auto changes = property_schema("array");
+    changes["minItems"] = 1;
+    changes["maxItems"] = contract::max_changes;
+    changes["items"] = std::move(item);
+
+    auto parameters = object_schema();
+    parameters["properties"]["changes"] = std::move(changes);
+    parameters["required"] = string_array({"changes"});
+
+    return tool_definition(
+        "apply_changeset",
+        "Apply 1-" + std::to_string(contract::max_changes) +
+            " validated text-file changes as one rollback transaction. Supports create, "
+            "exact replace, delete, and move. Delete/move require old_text to equal the "
+            "complete current file. Use only these exact fields per item: "
+            "create(operation,path,new_text), replace(operation,path,old_text,new_text), "
+            "delete(operation,path,old_text), or "
+            "move(operation,path,old_text,destination). All paths are validated before "
+            "approval and commit.",
+        std::move(parameters));
+}
+
+Json workspace_changes_definition() {
+    return tool_definition(
+        "workspace_changes",
+        "Return every file changed by file-edit tools in this session and a bounded unified "
+        "diff from the original contents to the current contents.",
+        object_schema());
 }
 
 void append_write_definitions(Json& definitions) {
-    definitions.push_back(
-        {{"type", "function"},
-         {"function",
-          {{"name", "apply_patch"},
-           {"description",
-            "Create one text file or replace one exact, unique text block in an existing file. "
-            "Read existing files first. This tool cannot delete files or run commands."},
-           {"parameters",
-            {{"type", "object"},
-             {"properties",
-              {{"path",
-                {{"type", "string"},
-                 {"description", "Relative path inside the allowed workspace root."}}},
-               {"operation",
-                {{"type", "string"},
-                 {"enum", Json::array({"replace", "create"})},
-                 {"description", "Use replace for an existing file or create for a new file."}}},
-               {"old_text",
-                {{"type", "string"},
-                 {"description", "For replace: the non-empty text block that must occur exactly "
-                                 "once."}}},
-               {"new_text",
-                {{"type", "string"},
-                 {"description",
-                  "Complete replacement block, or complete contents for a new file."}}}}},
-             {"required", Json::array({"path", "operation", "new_text"})},
-             {"additionalProperties", false}}}}}});
-    definitions.push_back(
-        {{"type", "function"},
-         {"function",
-          {{"name", "apply_changeset"},
-           {"description",
-            "Apply 1-" + std::to_string(contract::max_changes) +
-                " validated text-file changes as one rollback transaction. Supports create, "
-                "exact replace, delete, and move. Delete/move require old_text to equal the "
-                "complete current file. Use only these exact fields per item: "
-                "create(operation,path,new_text), replace(operation,path,old_text,new_text), "
-                "delete(operation,path,old_text), or "
-                "move(operation,path,old_text,destination). All paths are validated before "
-                "approval and commit."},
-           {"parameters",
-            {{"type", "object"},
-             {"properties",
-              {{"changes",
-                {{"type", "array"},
-                 {"minItems", 1},
-                 {"maxItems", contract::max_changes},
-                 {"items",
-                  {{"type", "object"},
-                   {"properties",
-                    {{"operation",
-                      {{"type", "string"},
-                       {"enum", Json::array({"create", "replace", "delete", "move"})}}},
-                     {"path", {{"type", "string"}}},
-                     {"old_text", {{"type", "string"}}},
-                     {"new_text", {{"type", "string"}}},
-                     {"destination", {{"type", "string"}}}}},
-                   {"required", Json::array({"operation", "path"})},
-                   {"additionalProperties", false}}}}}}},
-             {"required", Json::array({"changes"})},
-             {"additionalProperties", false}}}}}});
-    definitions.push_back(
-        {{"type", "function"},
-         {"function",
-          {{"name", "workspace_changes"},
-           {"description", "Return every file changed by file-edit tools in this session and a "
-                           "bounded unified diff from the original contents to the current "
-                           "contents."},
-           {"parameters",
-            {{"type", "object"},
-             {"properties", Json::object()},
-             {"additionalProperties", false}}}}}});
+    definitions.push_back(apply_patch_definition());
+    definitions.push_back(apply_changeset_definition());
+    definitions.push_back(workspace_changes_definition());
 }
 
 std::string command_summary(const ToolCall& call) {
