@@ -25,6 +25,16 @@
 
 ~~~bash
 export VCPKG_ROOT=/path/to/vcpkg
+bash scripts/release-check.sh
+~~~
+
+这条命令检查版本号、代码格式、Debug、Release、ASan/UBSan、全部 CTest 和离线 CLI。
+GitHub Actions 也执行同一条命令。
+
+只排查某一种构建时，可以单独运行 preset：
+
+~~~bash
+export VCPKG_ROOT=/path/to/vcpkg
 
 cmake --preset vcpkg-dev
 cmake --build --preset vcpkg-dev

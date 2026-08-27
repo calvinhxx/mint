@@ -2,6 +2,7 @@
 /vcpkg_installed/
 /cmake-build-*/
 /.cache/
+.qtcreator/
 .DS_Store
 /config.json
 /config-*.json

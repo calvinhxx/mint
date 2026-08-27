@@ -9,6 +9,7 @@
 - Split the Agent loop, model transport/retry path, command execution, tool routing, file editing, and CLI composition into smaller responsibility-focused modules without changing checkpoint compatibility.
 - Added a vcpkg manifest and CMake presets for Debug, Release, and ASan/UBSan builds; GoogleTest is installed only through the test feature.
 - Reorganized CMake by source layer, moved shared target and test behavior into focused modules, and added a core-only `add_subdirectory` path through `mint::core`.
+- Added a macOS CI gate that runs the same version, format, Debug, Release, sanitizer, test, and offline CLI checks used locally.
 - Added an internal spdlog diagnostics facade with structured task, model, tool, and command events that remain separate from machine-readable stdout.
 - Replaced the hand-written test harness with independently discoverable GoogleTest unit, integration, and contract cases.
 - Added an injectable CLI Console boundary and an architecture test that prevents direct process I/O from spreading into production modules.
