@@ -11,6 +11,10 @@
 #include <string_view>
 #include <utility>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace mint {
 namespace {
 
@@ -22,17 +26,27 @@ std::string require_string(const Json& arguments, std::string_view name) {
     return arguments.at(key).get<std::string>();
 }
 
-#if !defined(_WIN32)
-
 bool contains_nul(std::string_view value) {
     return value.find('\0') != std::string_view::npos;
+}
+
+bool path_component_equal(const std::filesystem::path& left, const std::filesystem::path& right) {
+#if defined(_WIN32)
+    const auto& left_native = left.native();
+    const auto& right_native = right.native();
+    return ::CompareStringOrdinal(left_native.c_str(), -1, right_native.c_str(), -1, TRUE) ==
+           CSTR_EQUAL;
+#else
+    return left == right;
+#endif
 }
 
 bool is_inside(const std::filesystem::path& root, const std::filesystem::path& candidate) {
     auto root_part = root.begin();
     auto candidate_part = candidate.begin();
     for (; root_part != root.end(); ++root_part, ++candidate_part) {
-        if (candidate_part == candidate.end() || *root_part != *candidate_part) {
+        if (candidate_part == candidate.end() ||
+            !path_component_equal(*root_part, *candidate_part)) {
             return false;
         }
     }
@@ -275,8 +289,6 @@ CommandCatalog build_command_catalog(CommandRunnerOptions& options, long max_tim
     return catalog;
 }
 
-#endif
-
 } // namespace
 
 CommandRunner::CommandRunner(CommandRunnerOptions options)
@@ -297,6 +309,7 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
         throw std::invalid_argument("命令输出上限必须在 1 字节到 1 MiB 之间");
     }
     validate_command_resource_limits(resource_limits_, "CommandRunner resource_limits");
+    command_detail::validate_process_resource_support(resource_limits_);
     if (!options.allowed_programs.empty() && !options.recipes.empty()) {
         throw std::invalid_argument("原始程序授权与固定命令 recipe 不能同时启用");
     }
@@ -304,9 +317,6 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
         throw std::invalid_argument("至少需要显式授权一个命令程序");
     }
 
-#if defined(_WIN32)
-    throw std::invalid_argument("当前受控命令执行暂未支持 Windows");
-#else
     auto catalog = build_command_catalog(options, max_timeout_seconds_);
     allowed_programs_ = std::move(catalog.allowed_programs);
     resolved_programs_ = std::move(catalog.resolved_programs);
@@ -321,7 +331,6 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
     sandbox_arguments_ = std::move(sandbox.arguments);
     sandbox_backend_ = std::move(sandbox.backend);
     sandbox_sets_working_directory_ = sandbox.sets_working_directory;
-#endif
 }
 
 const std::vector<std::string>& CommandRunner::allowed_programs() const noexcept {
@@ -438,10 +447,6 @@ Json CommandRunner::run(const Json& arguments) const {
 }
 
 Json CommandRunner::run_command(const Json& arguments) const {
-#if defined(_WIN32)
-    (void)arguments;
-    throw std::runtime_error("当前受控命令执行暂未支持 Windows");
-#else
     const auto invocation =
         parse_invocation(arguments, root_, resolved_programs_, default_timeout_seconds_,
                          max_timeout_seconds_, resource_limits_);
@@ -481,7 +486,6 @@ Json CommandRunner::run_command(const Json& arguments) const {
                        {"duration_ms", process.duration_ms},
                        {"output_truncated", process.output_truncated}});
     return process_result_json(invocation, std::move(process), is_os_sandboxed(), sandbox_backend_);
-#endif
 }
 
 } // namespace mint

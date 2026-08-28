@@ -1,5 +1,11 @@
+if(WIN32)
+    set(mint_command_process_source command_process_windows.cpp)
+else()
+    set(mint_command_process_source command_process.cpp)
+endif()
+
 add_library(mint_infrastructure STATIC
-    command_process.cpp
+    ${mint_command_process_source}
     command_runner.cpp
     command_sandbox.cpp
     config.cpp
