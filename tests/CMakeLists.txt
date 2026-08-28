@@ -123,6 +123,13 @@ add_test(
 set_tests_properties(provider_regression_script_unit PROPERTIES LABELS "unit;v1.5")
 
 add_test(
+    NAME fixture_regression_script_unit
+    COMMAND "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/tests/scripts/fixture_regression_tests.py"
+)
+set_tests_properties(fixture_regression_script_unit PROPERTIES LABELS "unit;v1.5")
+
+add_test(
     NAME provider_regression_offline
     COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/scripts/provider-regression.py"
@@ -134,6 +141,21 @@ set_tests_properties(
     PROPERTIES
         LABELS "v1.5;acceptance"
         PASS_REGULAR_EXPRESSION "\"operation\": \"provider_regression\""
+)
+
+add_test(
+    NAME fixture_regression_offline
+    COMMAND "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/scripts/fixture-regression.py"
+        --mint $<TARGET_FILE:mint>
+        --config "${PROJECT_SOURCE_DIR}/configs/providers/openai-responses.json"
+        --fixture "${PROJECT_SOURCE_DIR}/tests/fixtures/v1_broken_project"
+)
+set_tests_properties(
+    fixture_regression_offline
+    PROPERTIES
+        LABELS "v1.5;acceptance"
+        PASS_REGULAR_EXPRESSION "\"operation\": \"fixture_regression\""
 )
 
 add_test(
