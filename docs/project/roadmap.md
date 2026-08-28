@@ -37,6 +37,7 @@
 - provider 能力目录、官方端点识别和代理显式配置；请求按 profile 选择 token 字段、stream usage 和推理续传；
 - OpenAI Responses、Groq Chat、DeepSeek Chat 和 custom Chat 四份无密钥回归配置，以及离线 `mint provider` 检查命令；
 - 显式 `mint provider test` 真实兼容性握手：固定两轮请求验证 function call、参数和工具结果续接，限制重试与输出额度，只报告脱敏统计；
+- 跨平台回环 HTTP 验收：Windows、macOS、Linux 共用 Chat 重试、Responses SSE、Agent 工具循环和 provider test 契约，不因 Windows 跳过网络路径；
 - 支持从环境变量读取 API Key，检查命令不会读取或输出密钥，endpoint 查询参数也不会出现在报告中；
 - vcpkg 依赖、spdlog 诊断日志和 GoogleTest 单元测试；
 - Windows、macOS、Linux 的 x64 / ARM64 CMake preset、原生 CI runner 和矩阵一致性校验，六组合均已通过；
