@@ -201,10 +201,35 @@ jobs:
         shell: bash
         run: bash scripts/release-check.sh
 
+  release-assets:
+    name: Validate release assets
+    if: needs.build-plan.outputs.release_packages == 'true'
+    needs: [build-plan, platform-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate release assets
+        shell: bash
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          test "$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 12
+          test "$(find . -maxdepth 1 -type f -name '*.sha256' | wc -l | tr -d ' ')" -eq 6
+          test "$(find . -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')" -eq 2
+          test "$(find . -maxdepth 1 -type f -name '*.tar.gz' | wc -l | tr -d ' ')" -eq 4
+          sha256sum --check -- *.sha256
+
   publish:
     name: Publish GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [platform-build, quality]
+    needs: [release-assets, quality]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -216,14 +241,6 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
-
-      - name: Validate release assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          asset_count="$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
-          test "$asset_count" -eq 12
-          test "$(find release-assets -maxdepth 1 -type f -name '*.sha256' | wc -l | tr -d ' ')" -eq 6
 
       - name: Publish release
         shell: bash
