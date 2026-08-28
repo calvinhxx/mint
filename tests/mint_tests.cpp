@@ -2077,7 +2077,7 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
          {{"program", program},
           {"args", mint::Json::array({"--command-helper", "write", inside.generic_string()})}}}));
     MINT_EXPECT(allowed.at("sandboxed").get<bool>() &&
-                    allowed.at("sandbox_backend") == expected_backend,
+                    allowed.at("sandbox_backend").get<std::string>() == expected_backend,
                 "command result carries auditable sandbox metadata");
     MINT_EXPECT(allowed.at("exit_code") == 0 && std::filesystem::exists(inside),
                 "sandbox permits writes inside the workspace: " + allowed.dump());
