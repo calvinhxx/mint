@@ -78,13 +78,13 @@ ctest --preset vcpkg-sanitize
 
 2026-08-28 在 macOS arm64、AppleClang 17 上的结果：
 
-- Debug：64/64 tests passed；
-- ASan + UBSan：64/64 tests passed；
+- Debug：67/67 tests passed；
+- ASan + UBSan：67/67 tests passed；
 - Release：构建通过，且未安装 GoogleTest；
 - clang-format：通过；
-- GitHub Actions 六平台与发布门禁：[运行 33148572493](https://github.com/calvinhxx/mint/actions/runs/33148572493)，全部通过。
+- GitHub Actions 会运行六平台矩阵和发布门禁；最新结果见 [Actions](https://github.com/calvinhxx/mint/actions)。
 
-64 个测试包括 11 个单元测试、30 个集成测试、18 个契约测试、3 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
+67 个测试包括 11 个单元测试、30 个集成测试、21 个契约测试、3 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
 
 changeset 恢复测试会真实写两个文件并重建 `ToolRegistry`，覆盖：完整写入后崩溃、只完成部分文件、checkpoint 已确认但日志未清、外部改写、两个进程争用同一任务，以及 Agent 自动回滚并重放 in-flight changeset。测试同时检查 schema v2/v3 可迁移到 v4。
 
@@ -94,12 +94,21 @@ provider 契约测试会加载 `configs/providers` 下四份固定配置，检�
 ./build/vcpkg-dev/mint provider --config configs/providers/groq-chat.json --json
 ~~~
 
+需要检查真实服务时，显式运行：
+
+~~~bash
+export GROQ_API_KEY='你的密钥'
+./build/vcpkg-dev/mint provider test --config configs/providers/groq-chat.json --json
+~~~
+
+`provider test` 发出两个逻辑请求，检查唯一 function call、参数、call id、工具结果续接、流式状态和 usage。它不读取工作区；成功报告只保留协议、耗时、重试和 token 统计。输出上限固定为配置值与 1024 的较小者，每个逻辑请求最多尝试两次。仓库测试用本地回环 HTTP 服务运行同一条 CLI 路径，因此不会消耗外部额度。
+
 ## 测试覆盖到哪里
 
 | 证据 | 主要检查 | 不能证明 |
 |---|---|---|
 | 单元与契约测试 | policy、工具、checkpoint、协议转换、输出边界 | 真实服务始终兼容 |
-| 本地回环 HTTP 服务 | Chat / Responses、SSE、重试、两轮工具闭环 | 所有 provider 都可用 |
+| 本地回环 HTTP 服务 | Chat / Responses、SSE、重试、脱敏的两轮 provider 验收 | 所有真实 provider 都可用 |
 | 固定 provider 配置 | profile 解析和请求形状保持稳定 | 服务在线、密钥有效或模型可用 |
 | 故障 fixture | 失败基线、修改、写后重新验证 | 任意项目都能自动修好 |
 | 真实模型记录 | 当时端点和配置完成了隔离任务 | 当前版本或其他端点也通过 |
@@ -142,5 +151,5 @@ provider 契约测试会加载 `configs/providers` 下四份固定配置，检�
 - Windows AppContainer 不是虚拟机；工作区外的工具链必须通过 `command_read_paths` 显式授权；
 - 工作区磁盘限制按普通文件逻辑大小巡检，不是文件系统原生 quota；
 - 本地测试证明确定性行为，不替代真实 provider 回归；
-- OpenAI、Groq、DeepSeek 和 custom 固定配置目前只做离线契约回归；
+- OpenAI、Groq、DeepSeek 和 custom 固定配置已有统一验收入口，但尚未记录本版本的真实外部运行；
 - session 管理的 `apply_changeset` 通过事务日志避免跨进程重复提交；`apply_patch`、命令和任意扩展工具不承诺 exactly-once。

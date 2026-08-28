@@ -11,11 +11,11 @@
 | 代码版本 | `1.5.0`（开发中） |
 | 产品定位 | 轻量的通用 AI Agent 工具与 C++ 内核 |
 | 形态 | 本地 CLI；一次 `run` 处理一个任务 |
-| 命令 | `init / run / resume / status / provider` |
+| 命令 | `init / run / resume / status / provider / provider test` |
 | 模型接口 | OpenAI、Groq、DeepSeek 与 custom profile；Chat Completions、Responses、可选 SSE |
 | 构建矩阵 | Windows / macOS / Linux × x64 / ARM64 |
 | 平台验收 | 六组合原生 CI；三个系统都默认启用 OS 命令隔离 |
-| 本地测试 | Debug 和 Sanitizer CTest 64/64 |
+| 本地测试 | Debug 和 Sanitizer CTest 67/67 |
 | 持续集成 | 六组合原生构建矩阵；macOS ARM64 深度门禁 |
 | 最近真实模型验收 | v1.4 Chat Completions 隔离修复任务 |
 
@@ -35,6 +35,7 @@
 - HTTP 传输、重试编排和模型协议相互独立，成功 SSE 不重复缓存完整响应体；
 - provider 能力目录、官方端点识别和代理显式配置；请求按 profile 选择 token 字段、stream usage 和推理续传；
 - OpenAI Responses、Groq Chat、DeepSeek Chat 和 custom Chat 四份无密钥回归配置，以及离线 `mint provider` 检查命令；
+- 显式 `mint provider test` 真实兼容性握手：固定两轮请求验证 function call、参数和工具结果续接，限制重试与输出额度，只报告脱敏统计；
 - 支持从环境变量读取 API Key，检查命令不会读取或输出密钥，endpoint 查询参数也不会出现在报告中；
 - vcpkg 依赖、spdlog 诊断日志和 GoogleTest 单元测试；
 - Windows、macOS、Linux 的 x64 / ARM64 CMake preset、原生 CI runner 和矩阵一致性校验，六组合均已通过；
@@ -51,11 +52,11 @@
 | 证据 | 已覆盖 | 不代表 |
 |---|---|---|
 | 单元和协议测试 | 权限、消息转换、恢复等确定性行为 | 真实服务始终兼容 |
-| 本地假模型服务 | HTTP、SSE、重试和工具闭环 | 所有 provider 均可用 |
+| 本地假模型服务 | HTTP、SSE、重试和同一条 provider 验收 CLI | 所有真实 provider 均可用 |
 | 固定 provider 配置 | 配置字段、能力选择和请求 JSON 不漂移 | 对应模型已发起真实请求 |
 | 真实模型验收 | 当时的端点和配置完成了任务 | 其他端点或未来版本也通过 |
 
-v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任务。Responses 和 SSE 仍只有本地协议与回环服务证据。具体结果见 [测试与验收](../development/testing.md)。
+v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任务。v1.5 已把真实服务握手收敛为可重复命令，但尚未使用外部额度执行；Responses 和 SSE 仍只有本地协议与回环服务证据。具体结果见 [测试与验收](../development/testing.md)。
 
 ## 仍缺少
 
@@ -63,13 +64,13 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 |---|---|
 | 资源限制 | Windows 不支持单文件大小限制；POSIX CPU / 内存不是进程树汇总；工作区磁盘限制是巡检而非文件系统硬配额 |
 | 恢复 | changeset 已可自动恢复；单文件写和命令仍按副作用工具处理，需要用户确认不确定结果 |
-| 模型兼容 | Responses、SSE 和更多 provider 尚未做真实回归 |
+| 模型兼容 | 已有统一验收命令；Responses、SSE 和更多 provider 尚未留下本版本真实运行记录 |
 | 交互 | 没有持续聊天、多任务 GUI 和多 Agent 编排 |
 
 ## 下一步
 
-1. 有模型额度时，按固定配置分别跑 OpenAI Responses、Groq Chat 和 DeepSeek Chat 真实回归；
-2. 根据真实构建负载决定是否增加 Linux cgroup 等硬资源后端；
-3. 内核稳定后再增加持续聊天和 GUI。
+1. 有模型额度时，用固定配置分别运行 OpenAI Responses、Groq Chat 和 DeepSeek Chat 的 `provider test`，保存脱敏结果；
+2. OpenAI Responses 握手通过后，再用 Responses + SSE 跑一次隔离修复 fixture；
+3. 根据真实构建负载决定是否增加 Linux cgroup 等硬资源后端；内核稳定后再做持续聊天和 GUI。
 
 历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议，v1.5 补齐六平台构建、三平台命令隔离、资源限制、多文件事务恢复和 provider profile。

@@ -67,6 +67,14 @@ $env:GROQ_API_KEY = '你的密钥'
 
 `mint provider` 只解析配置并显示 adapter、能力和 token 参数，不会请求模型，也不会输出密钥。使用代理时在配置中明确写 `provider`；只有自定义兼容接口允许覆盖 `capabilities`。
 
+想先确认真实接口能否完成工具调用，可以运行：
+
+~~~bash
+./build/vcpkg-release/mint provider test --config config.json
+~~~
+
+这条命令会消耗额度。它只发送两轮固定内容：第一轮要求调用一个回显工具，第二轮把工具结果交还模型。它不读取工作区、不执行命令，也不输出密钥或模型原文；每轮输出上限不超过 1024 tokens，每轮最多尝试两次。
+
 确认配置后运行：
 
 ~~~bash

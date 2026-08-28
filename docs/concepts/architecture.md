@@ -74,7 +74,9 @@ flowchart LR
 2. 代理地址在配置中明确写 `provider`；
 3. 其他地址按 `custom` 处理，可以显式填写 `capabilities`。
 
-能力目录集中在 `model_provider_profile.cpp`，目前决定工具调用、流式输出、流式 usage、无状态推理续传和 token 上限字段。它描述的是 API 方言，不承诺某个模型始终可用。`mint provider --config ...` 可离线查看解析结果，不会探测网络或读取环境变量中的密钥。
+能力目录集中在 `model_provider_profile.cpp`，目前决定工具调用、流式输出、流式 usage、无状态推理续传和 token 上限字段。它描述的是 API 方言，不承诺某个模型始终可用。
+
+`mint provider --config ...` 只离线解析配置，不读取密钥。`mint provider test --config ...` 才会读取密钥并发出请求；它绕过 Agent Loop 和工作区工具，用固定的两轮握手检查 function call、参数解析和工具结果续接。
 
 ## 关键文件
 
@@ -83,7 +85,8 @@ flowchart LR
 | [`src/cli/agent_command.cpp`](../../src/cli/agent_command.cpp) | 一次命令的主流程 |
 | [`src/cli/agent_command_config.cpp`](../../src/cli/agent_command_config.cpp) | policy、路径和工具配置 |
 | [`src/cli/agent_command_io.cpp`](../../src/cli/agent_command_io.cpp) | 审批、模型进度和运行信息 |
-| [`src/cli/provider_command.cpp`](../../src/cli/provider_command.cpp) | 离线显示 provider 配置和能力 |
+| [`src/cli/provider_command.cpp`](../../src/cli/provider_command.cpp) | provider 配置检查与显式验收入口 |
+| [`src/cli/provider_acceptance.cpp`](../../src/cli/provider_acceptance.cpp) | 固定两轮工具握手、结果校验和脱敏统计 |
 | [`src/application/agent.cpp`](../../src/application/agent.cpp) | 校验 Agent 参数并进入循环 |
 | [`src/application/agent_loop.cpp`](../../src/application/agent_loop.cpp) | 循环推进、任务开始和结束 |
 | [`src/application/agent_cycle.cpp`](../../src/application/agent_cycle.cpp) | 模型调用、工具执行和验证门禁 |
