@@ -14,7 +14,9 @@ mint_add_gtest(mint_unit_tests
 )
 
 mint_add_gtest(mint_tests
-    SOURCES mint_tests.cpp
+    SOURCES
+        mint_tests.cpp
+        integration/change_transaction_tests.cpp
     LIBRARIES mint::core
     INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/src/application"
     TEST_PREFIX "integration."

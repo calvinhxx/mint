@@ -2618,17 +2618,17 @@ TEST(SessionTest, CheckpointsAndResumes) {
     MINT_EXPECT(read_text(workspace / "README.md") == "# Broken\n",
                 "pending tool is checkpointed before execution when cancellation arrives");
     const auto checkpoint = session.load();
-    MINT_EXPECT(checkpoint.at("schema_version") == 3 && checkpoint.at("status") == "cancelled" &&
+    MINT_EXPECT(checkpoint.at("schema_version") == 4 && checkpoint.at("status") == "cancelled" &&
                     checkpoint.at("pending_tool_calls").size() == 1 &&
                     checkpoint.at("in_flight_tool_call").is_null(),
                 "session stores the pending call at a stable resume point");
 
-    const auto incomplete_path = temporary.path() / "incomplete-v3-session.json";
+    const auto incomplete_path = temporary.path() / "incomplete-v4-session.json";
     mint::SessionStore incomplete_session(incomplete_path);
     auto incomplete_checkpoint = checkpoint;
     incomplete_checkpoint.erase("in_flight_tool_call");
     incomplete_session.save(incomplete_checkpoint);
-    bool rejected_incomplete_v3 = false;
+    bool rejected_incomplete_v4 = false;
     try {
         mint::ToolRegistry incomplete_tools(
             workspace, mint::ToolRegistryOptions{.protected_paths = {incomplete_path},
@@ -2644,11 +2644,11 @@ TEST(SessionTest, CheckpointsAndResumes) {
                                                         .resume_session = true});
         (void)incomplete_agent.run("");
     } catch (const std::invalid_argument& error) {
-        rejected_incomplete_v3 =
+        rejected_incomplete_v4 =
             std::string(error.what()).find("缺少必需状态") != std::string::npos;
     }
-    MINT_EXPECT(rejected_incomplete_v3,
-                "schema v3 rejects a checkpoint missing its durable in-flight marker");
+    MINT_EXPECT(rejected_incomplete_v4,
+                "schema v4 rejects a checkpoint missing its durable in-flight marker");
 
     bool rejected_tool_limit_change = false;
     try {
@@ -2753,8 +2753,8 @@ TEST(SessionTest, CheckpointsAndResumes) {
                                                 .session_store = &legacy_session,
                                                 .resume_session = true});
     const auto migrated = legacy_agent.run("");
-    MINT_EXPECT(migrated.completed && legacy_session.load().at("schema_version") == 3,
-                "v1.2 restores a v2 checkpoint and rewrites it as schema v3");
+    MINT_EXPECT(migrated.completed && legacy_session.load().at("schema_version") == 4,
+                "current mint restores a v2 checkpoint and rewrites it as schema v4");
     write_text(workspace / "README.md", "# Broken\n");
 
     bool rejected_policy_downgrade = false;
@@ -2915,9 +2915,18 @@ TEST(ModelClientTest, RetriesWithServerDirectedBackoff) {
 
 } // namespace
 
+const std::filesystem::path& mint_test_executable_path() {
+    return test_executable;
+}
+
+int run_change_transaction_lock_helper(int argc, char** argv);
+
 #undef MINT_EXPECT
 
 int main(int argc, char** argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--transaction-lock-helper") {
+        return run_change_transaction_lock_helper(argc, argv);
+    }
     if (argc >= 2 && std::string(argv[1]) == "--command-helper") {
         return run_command_helper(argc, argv);
     }

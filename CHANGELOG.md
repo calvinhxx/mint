@@ -8,6 +8,7 @@
 - Closed inherited file descriptors before approved commands start, preventing an otherwise isolated child from reusing process resources opened by mint.
 - Added policy-configurable CPU, memory, process-count, and per-file size limits for POSIX commands, with resource-limit evidence retained through context compaction.
 - Added a Windows AppContainer command backend with no network capabilities, DACL-scoped workspace and executable access, protected-path denial, strict argv and handle isolation, and Job Object resource limits.
+- Added session schema v4 and a per-task changeset journal with an exclusive process lock, deterministic crash rollback, checkpoint acknowledgement, and fail-closed external-change detection.
 - Fixed Windows file replacement and multi-config fixture handling exposed by the native test lanes.
 - Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
 - Added a security policy, immutable workflow action pins, a pin-validation gate, and weekly Dependabot updates.

@@ -15,7 +15,7 @@
 | 模型接口 | Chat Completions、Responses、可选 SSE |
 | 构建矩阵 | Windows / macOS / Linux × x64 / ARM64 |
 | 平台验收 | 六组合原生 CI；三个系统都默认启用 OS 命令隔离 |
-| 本地测试 | Debug 和 Sanitizer CTest 51/51 |
+| 本地测试 | Debug 和 Sanitizer CTest 57/57 |
 | 持续集成 | 六组合原生构建矩阵；macOS ARM64 深度门禁 |
 | 最近真实模型验收 | v1.4 Chat Completions 隔离修复任务 |
 
@@ -28,6 +28,7 @@
 - 受限的文件读取、搜索、修改和多文件变更；
 - 固定构建、测试命令及验证门禁；
 - checkpoint、事件日志和中断恢复；
+- session schema v4 与多文件事务日志：进程在 changeset 中途退出时自动回滚或确认，恢复后不会重复提交；
 - 循环生命周期、单轮执行和 checkpoint 恢复分离，session schema 保持兼容；
 - Chat Completions / Responses 统一内部格式；
 - 普通响应、SSE、限流重试和请求统计；
@@ -57,15 +58,14 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 |---|---|
 | 平台运行时 | Windows 还不能在 policy 中声明工作区外的自定义只读工具链路径 |
 | 资源限制 | 还缺 POSIX 进程树总量、跨平台工作区磁盘配额；Windows 不支持单文件大小限制 |
-| 恢复 | 多文件修改缺少跨进程事务日志 |
+| 恢复 | changeset 已可自动恢复；单文件写和命令仍按副作用工具处理，需要用户确认不确定结果 |
 | 模型兼容 | Responses、SSE 和更多 provider 尚未做真实回归 |
 | 交互 | 没有持续聊天、多任务 GUI 和多 Agent 编排 |
 
 ## 下一步
 
-1. 为多文件修改增加跨进程事务日志；
-2. 增加 provider 能力识别和固定回归配置；
-3. 增加 Windows 外部只读工具链路径，补 POSIX 进程树与跨平台磁盘配额；
-4. 内核稳定后再增加持续聊天和 GUI。
+1. 增加 provider 能力识别和固定回归配置；
+2. 增加 Windows 外部只读工具链路径，补 POSIX 进程树与跨平台磁盘配额；
+3. 内核稳定后再增加持续聊天和 GUI。
 
-历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议，v1.5 补齐六平台构建、三平台命令隔离和资源限制。
+历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议，v1.5 补齐六平台构建、三平台命令隔离、资源限制和多文件事务恢复。

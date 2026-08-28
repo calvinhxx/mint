@@ -1,5 +1,6 @@
 add_library(mint_tools STATIC
     change_set.cpp
+    change_transaction.cpp
     file_editor.cpp
     file_support.cpp
     tool_catalog.cpp

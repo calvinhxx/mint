@@ -48,6 +48,7 @@ class AgentRun final {
     Json tool_definitions_;
     long long previous_duration_ms_ = 0;
     std::size_t model_calls_this_run_ = 0;
+    ChangeTransactionRecovery transaction_recovery_ = ChangeTransactionRecovery::none;
     bool recovered_in_flight_ = false;
 };
 

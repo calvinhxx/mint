@@ -1,6 +1,7 @@
 #include "mint/tools/tool_registry.hpp"
 
 #include "mint/domain/change_journal.hpp"
+#include "mint/infrastructure/change_transaction_store.hpp"
 #include "mint/infrastructure/command_runner.hpp"
 
 #include "../infrastructure/diagnostic_log.hpp"
@@ -95,6 +96,15 @@ ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions optio
 
     if (allow_write_) {
         change_journal_ = std::make_unique<ChangeJournal>();
+    }
+    if (!options.change_transaction_path.empty()) {
+        if (!allow_write_) {
+            throw std::invalid_argument("changeset 事务日志需要先启用写入能力");
+        }
+        change_transaction_store_ =
+            std::make_unique<ChangeTransactionStore>(std::move(options.change_transaction_path));
+        protected_paths_.push_back(change_transaction_store_->path());
+        protected_paths_.push_back(change_transaction_lock_path(change_transaction_store_->path()));
     }
 
     if (!options.allowed_programs.empty() && !options.command_recipes.empty()) {

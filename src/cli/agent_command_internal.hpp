@@ -22,6 +22,7 @@ namespace mint::cli::command_detail {
 struct RuntimeFiles {
     std::unique_ptr<SessionStore> session;
     std::unique_ptr<EventLog> events;
+    std::filesystem::path change_transaction;
 };
 
 [[nodiscard]] int exit_code_for(const AgentResult& result);
@@ -39,10 +40,10 @@ void validate_runtime_paths(const CommandLine& command_line);
 protected_paths(const CommandLine& command_line, const std::optional<TaskPolicy>& task_policy,
                 const RuntimeFiles& files, const std::optional<ProjectStore>& project_store,
                 const std::optional<ManagedTaskPaths>& managed_task);
-[[nodiscard]] ToolRegistryOptions tool_options(const CommandLine& command_line,
-                                               std::vector<std::filesystem::path> protected_files,
-                                               const std::shared_ptr<TaskControl>& task_control,
-                                               bool has_commands, Console& console);
+[[nodiscard]] ToolRegistryOptions
+tool_options(const CommandLine& command_line, std::vector<std::filesystem::path> protected_files,
+             const std::shared_ptr<TaskControl>& task_control, bool has_commands,
+             std::filesystem::path change_transaction_path, Console& console);
 
 [[nodiscard]] std::unique_ptr<ModelClient>
 create_model(const CommandLine& command_line, const std::shared_ptr<TaskControl>& task_control,

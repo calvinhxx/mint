@@ -9,6 +9,7 @@ endif()
 
 add_library(mint_infrastructure STATIC
     ${mint_command_process_sources}
+    change_transaction_store.cpp
     command_runner.cpp
     command_sandbox.cpp
     config.cpp
