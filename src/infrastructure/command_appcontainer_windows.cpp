@@ -7,8 +7,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
-#include <chrono>
 #include <cstdlib>
 #include <cwchar>
 #include <limits>
@@ -26,8 +24,6 @@ constexpr DWORD workspace_access =
     FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE | FILE_DELETE_CHILD;
 constexpr DWORD readonly_access = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
 constexpr DWORD denied_access = workspace_access;
-
-std::atomic<unsigned long long> profile_counter{0};
 
 [[noreturn]] void throw_windows_error(DWORD error, std::string_view context) {
     throw std::system_error(static_cast<int>(error), std::system_category(), std::string(context));
@@ -173,10 +169,16 @@ runtime_read_paths(const std::filesystem::path& workspace,
 }
 
 std::wstring unique_profile_name() {
-    const auto sequence = profile_counter.fetch_add(1, std::memory_order_relaxed);
-    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    return L"Mint.CommandSandbox." + std::to_wstring(::GetCurrentProcessId()) + L"." +
-           std::to_wstring(stamp) + L"." + std::to_wstring(sequence);
+    GUID identifier{};
+    const HRESULT create_result = ::CoCreateGuid(&identifier);
+    if (FAILED(create_result)) {
+        throw_hresult(create_result, "无法生成 Windows AppContainer 标识");
+    }
+    std::array<wchar_t, 39> text{};
+    if (::StringFromGUID2(identifier, text.data(), static_cast<int>(text.size())) == 0) {
+        throw std::runtime_error("无法格式化 Windows AppContainer 标识");
+    }
+    return L"Mint.CommandSandbox." + std::wstring(text.data() + 1, text.size() - 3);
 }
 
 bool path_is_directory(const std::filesystem::path& path) {
