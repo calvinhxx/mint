@@ -84,7 +84,7 @@ gh workflow run CI --ref main -f release_packages=true
 
 这次运行会用六个独立 Release preset 构建、解包验收并上传保留 7 天的 Actions artifacts，再由 Ubuntu 汇总检查文件数量和六份 SHA-256；它不会创建 GitHub Release。普通 push 和 PR 不上传这些包。
 
-在主分支提交上推送与 CMake、vcpkg manifest 和 Changelog 日期一致的 `vMAJOR.MINOR.PATCH` tag 后，CI 会执行同一条打包路径。全部测试和包验收通过后才公开 GitHub Release。
+在主分支提交上推送与 CMake、vcpkg manifest 和 Changelog 日期一致的 `vMAJOR.MINOR.PATCH` tag 后，CI 会执行同一条打包路径。tag 还必须包含当前版本的两份真实回归证据；全部门禁和包验收通过后才公开 GitHub Release。
 
 只排查某一种构建时，可以单独运行 preset：
 
@@ -104,16 +104,16 @@ cmake --build --preset vcpkg-sanitize
 ctest --preset vcpkg-sanitize
 ~~~
 
-2026-08-28 在 macOS arm64、AppleClang 17 上的结果：
+2026-08-29 在 macOS arm64、AppleClang 17 上的结果：
 
-- Debug：69/69 tests passed；
-- ASan + UBSan：69/69 tests passed；
+- Debug：72/72 tests passed；
+- ASan + UBSan：72/72 tests passed；
 - Release：构建通过，且未安装 GoogleTest；
 - Release 包：macOS ARM64 归档、SHA-256、文件布局和解包运行通过；
 - clang-format：通过；
 - GitHub Actions 会运行六平台矩阵和发布门禁；最新结果见 [Actions](https://github.com/calvinhxx/mint/actions)。
 
-71 个测试包括 13 个单元测试、30 个集成测试、21 个契约测试、3 个 CLI smoke 和 4 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
+72 个测试包括 14 个单元测试、30 个集成测试、21 个契约测试、3 个 CLI smoke 和 4 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
 
 changeset 恢复测试会真实写两个文件并重建 `ToolRegistry`，覆盖：完整写入后崩溃、只完成部分文件、checkpoint 已确认但日志未清、外部改写、两个进程争用同一任务，以及 Agent 自动回滚并重放 in-flight changeset。测试同时检查 schema v2/v3 可迁移到 v4。
 
@@ -161,6 +161,19 @@ python3 scripts/fixture-regression.py \
 ~~~
 
 脚本先在临时副本中确认 CTest 按预期失败，再按 fixture policy 启动 Agent。模型只能修改 `src/calculator.cpp` 和 `FIX_REPORT.md`，只能运行三条固定 recipe，并且最后必须通过 verification recipe。Agent 结束后，脚本会用另一个全新构建目录独立复测。JSON 证据只保留 profile、内容摘要、轮次、工具、Token、改动文件和验证状态；模型回答、diff、response id、事件原文和密钥不会写入。
+
+两份结果的 `status` 都为 `passed` 后，把它们加入当前版本的发布证据，再运行一次离线校验：
+
+~~~bash
+mkdir -p release/evidence/v1.5.0
+cp build/provider-regression-v1.5.json \
+  release/evidence/v1.5.0/provider-regression.json
+cp build/openai-responses-fixture-v1.5.json \
+  release/evidence/v1.5.0/fixture-regression.json
+python3 scripts/validate-version.py --release-evidence
+~~~
+
+证据会绑定生成它的功能源码、provider 配置和 fixture。之后只允许修改 Changelog、这份测试记录、Roadmap 和证据文件；其他功能改动会使校验失败并要求重新运行真实回归。正式 tag 会自动执行相同检查，缺少证据、离线结果、失败结果或包含原始响应字段的文件都不能发布。
 
 ## 测试覆盖到哪里
 

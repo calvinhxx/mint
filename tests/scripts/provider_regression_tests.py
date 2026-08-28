@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts" / "provider-regression.py"
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location("provider_regression", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 provider_regression = importlib.util.module_from_spec(SPEC)
@@ -109,6 +113,58 @@ class ProviderRegressionTests(unittest.TestCase):
                 provider_regression.write_report(output, {"status": "failed"})
 
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["status"], "passed")
+
+    def test_live_report_is_bound_to_the_release_sources(self) -> None:
+        profiles = provider_regression.load_manifest(
+            ROOT / "configs" / "provider-regression.json"
+        )
+        inspections = {
+            profile.id: {
+                "operation": "inspect",
+                "provider": profile.id.split("-", 1)[0],
+                "adapter": "responses" if profile.id == "openai-responses" else "chat_completions",
+                "api_key_env": {
+                    "openai-responses": "OPENAI_API_KEY",
+                    "groq-chat": "GROQ_API_KEY",
+                    "deepseek-chat": "DEEPSEEK_API_KEY",
+                }[profile.id],
+            }
+            for profile in profiles
+        }
+
+        def run_provider(_executable: Path, profile, live: bool = False):
+            report = dict(inspections[profile.id])
+            if live:
+                report["status"] = "passed"
+            return 0, report
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "live.json"
+            args = Namespace(
+                mint=Path("mint"),
+                manifest=ROOT / "configs" / "provider-regression.json",
+                live=True,
+                output=output,
+            )
+            environment = {
+                "OPENAI_API_KEY": "set",
+                "GROQ_API_KEY": "set",
+                "DEEPSEEK_API_KEY": "set",
+            }
+            with (
+                mock.patch.object(provider_regression, "mint_version", return_value="1.5.0"),
+                mock.patch.object(provider_regression, "run_provider", side_effect=run_provider),
+                mock.patch.object(
+                    provider_regression, "release_source_digest", return_value="a" * 64
+                ),
+                mock.patch.dict(os.environ, environment, clear=True),
+            ):
+                exit_code = provider_regression.execute(args)
+
+            report = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["source_sha256"], "a" * 64)
+            self.assertEqual([item["status"] for item in report["profiles"]], ["passed"] * 3)
 
 
 if __name__ == "__main__":

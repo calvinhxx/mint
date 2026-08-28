@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from release_evidence import EvidenceError, release_source_digest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "configs" / "provider-regression.json"
@@ -243,6 +245,11 @@ def execute(args: argparse.Namespace) -> int:
         result["missing_environment"] = missing
         write_report(args.output, result)
         return 2
+
+    try:
+        result["source_sha256"] = release_source_digest(ROOT)
+    except EvidenceError as error:
+        raise RegressionError(str(error)) from error
 
     live_reports: list[dict] = []
     for index, (profile, inspection) in enumerate(zip(profiles, inspections)):

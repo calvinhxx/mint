@@ -130,6 +130,13 @@ add_test(
 set_tests_properties(fixture_regression_script_unit PROPERTIES LABELS "unit;v1.5")
 
 add_test(
+    NAME release_evidence_script_unit
+    COMMAND "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/tests/scripts/release_evidence_tests.py"
+)
+set_tests_properties(release_evidence_script_unit PROPERTIES LABELS "unit;v1.5")
+
+add_test(
     NAME provider_regression_offline
     COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/scripts/provider-regression.py"

@@ -15,6 +15,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts" / "fixture-regression.py"
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location("fixture_regression", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 fixture_regression = importlib.util.module_from_spec(SPEC)
@@ -214,6 +215,7 @@ class FixtureRegressionTests(unittest.TestCase):
             serialized = json.dumps(report)
             self.assertEqual(exit_code, 0)
             self.assertEqual(report["status"], "passed")
+            self.assertRegex(report["source_sha256"], r"^[0-9a-f]{64}$")
             self.assertEqual(report["baseline"]["test"], "failed_as_expected")
             self.assertEqual(report["independent_verification"]["test"], "passed")
             self.assertNotIn("must not be retained", serialized)
