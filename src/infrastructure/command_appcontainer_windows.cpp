@@ -140,7 +140,7 @@ runtime_read_paths(const std::filesystem::path& workspace,
         paths.push_back(executable.parent_path());
     }
 
-    for (const auto* name : {L"PATH", L"INCLUDE", L"LIB", L"LIBPATH", L"CMAKE_PREFIX_PATH"}) {
+    for (const auto* name : {L"INCLUDE", L"LIB", L"LIBPATH", L"CMAKE_PREFIX_PATH"}) {
         append_path_list(paths, name);
     }
     for (const auto* name : {L"VCPKG_ROOT", L"VCPKG_INSTALLATION_ROOT", L"CMAKE_TOOLCHAIN_FILE",
@@ -149,10 +149,20 @@ runtime_read_paths(const std::filesystem::path& workspace,
         append_single_path(paths, name);
     }
 
+    std::vector<std::filesystem::path> system_roots;
+    for (const auto* name :
+         {L"SYSTEMROOT", L"PROGRAMFILES", L"PROGRAMFILES(X86)", L"PROGRAMW6432", L"PROGRAMDATA"}) {
+        append_single_path(system_roots, name);
+    }
+
     paths.erase(std::remove_if(paths.begin(), paths.end(),
                                [&](const auto& path) {
                                    return path.empty() || is_inside(workspace, path) ||
-                                          is_inside(path, workspace);
+                                          is_inside(path, workspace) ||
+                                          std::any_of(system_roots.begin(), system_roots.end(),
+                                                      [&](const auto& system_root) {
+                                                          return is_inside(system_root, path);
+                                                      });
                                }),
                 paths.end());
     std::sort(paths.begin(), paths.end(), [](const auto& left, const auto& right) {
@@ -169,7 +179,7 @@ std::wstring unique_profile_name() {
            std::to_wstring(stamp) + L"." + std::to_wstring(sequence);
 }
 
-bool is_directory(const std::filesystem::path& path) {
+bool path_is_directory(const std::filesystem::path& path) {
     std::error_code error;
     return std::filesystem::is_directory(path, error) && !error;
 }
@@ -211,13 +221,13 @@ void update_acl(const std::filesystem::path& path, PSID sid, ACCESS_MODE mode, D
 
 void grant_path(const std::filesystem::path& path, PSID sid, DWORD access) {
     const DWORD inheritance =
-        is_directory(path) ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
+        path_is_directory(path) ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
     update_acl(path, sid, GRANT_ACCESS, access, inheritance);
 }
 
 void deny_path(const std::filesystem::path& path, PSID sid) {
     const DWORD inheritance =
-        is_directory(path) ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
+        path_is_directory(path) ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
     update_acl(path, sid, DENY_ACCESS, denied_access, inheritance);
 }
 
@@ -266,7 +276,7 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
                                      std::vector<std::filesystem::path> allowed_executables,
                                      std::vector<std::filesystem::path> denied_paths) {
     const auto resolved_workspace = canonical_existing_path(workspace, "命令工作区");
-    if (!is_directory(resolved_workspace)) {
+    if (!path_is_directory(resolved_workspace)) {
         throw std::invalid_argument("命令工作区不是目录: " + resolved_workspace.string());
     }
 
