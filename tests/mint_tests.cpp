@@ -42,7 +42,9 @@
 #define MINT_TEST_ADDRESS_SANITIZED 0
 #endif
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <cerrno>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -58,6 +60,26 @@ namespace {
 #define MINT_EXPECT(condition, message) EXPECT_TRUE(condition) << (message)
 
 std::filesystem::path test_executable;
+
+void set_secret_environment() {
+#if defined(_WIN32)
+    if (::_putenv_s("MINT_TEST_SECRET", "must-not-reach-child") != 0) {
+        throw std::runtime_error("could not set test environment variable");
+    }
+#else
+    if (::setenv("MINT_TEST_SECRET", "must-not-reach-child", 1) != 0) {
+        throw std::runtime_error("could not set test environment variable");
+    }
+#endif
+}
+
+void clear_secret_environment() {
+#if defined(_WIN32)
+    (void)::_putenv_s("MINT_TEST_SECRET", "");
+#else
+    (void)::unsetenv("MINT_TEST_SECRET");
+#endif
+}
 
 int run_command_helper(int argc, char** argv) {
     if (argc < 3) {
@@ -149,7 +171,48 @@ int run_command_helper(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::seconds(2));
         return memory.empty() ? 17 : 0;
     }
-#if !defined(_WIN32)
+#if defined(_WIN32)
+    if (mode == "handle") {
+        if (argc != 7) {
+            return 65;
+        }
+        const auto value = static_cast<std::uintptr_t>(std::stoull(argv[3]));
+        const auto handle = reinterpret_cast<HANDLE>(value);
+        BY_HANDLE_FILE_INFORMATION metadata{};
+        if (!::GetFileInformationByHandle(handle, &metadata)) {
+            return 0;
+        }
+        const bool same_file = metadata.dwVolumeSerialNumber == std::stoul(argv[4]) &&
+                               metadata.nFileIndexHigh == std::stoul(argv[5]) &&
+                               metadata.nFileIndexLow == std::stoul(argv[6]);
+        return same_file ? 15 : 0;
+    }
+    if (mode == "spawn") {
+        std::array<wchar_t, 32768> executable{};
+        const auto capacity = static_cast<DWORD>(executable.size());
+        const auto length = ::GetModuleFileNameW(nullptr, executable.data(), capacity);
+        if (length == 0 || length == capacity) {
+            return 18;
+        }
+        std::wstring line = L"\"";
+        line.append(executable.data(), length);
+        line += L"\" --command-helper sleep";
+        std::vector<wchar_t> mutable_line(line.begin(), line.end());
+        mutable_line.push_back(L'\0');
+
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION child{};
+        if (!::CreateProcessW(executable.data(), mutable_line.data(), nullptr, nullptr, FALSE,
+                              CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child)) {
+            return 0;
+        }
+        (void)::CloseHandle(child.hThread);
+        (void)::WaitForSingleObject(child.hProcess, 5000);
+        (void)::CloseHandle(child.hProcess);
+        return 19;
+    }
+#else
     if (mode == "limits") {
         const auto print_limit = [](std::string_view name, int resource) {
             struct rlimit limit{};
@@ -1365,9 +1428,6 @@ TEST(ToolRegistryTest, ApplyChangeSet) {
 }
 
 TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     const auto program = test_executable.generic_string();
@@ -1400,6 +1460,19 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
     MINT_EXPECT(echoed.at("output").get<std::string>().find("arg=hello") != std::string::npos,
                 "combined command output is captured");
 
+    const auto quoted = mint::Json::parse(
+        tools.execute({"command-quoting",
+                       "run_command",
+                       {{"program", program},
+                        {"args", mint::Json::array({"--command-helper", "echo", "with spaces",
+                                                    R"(quote"inside)", R"(trailing\\)"})}}}));
+    const auto quoted_output = quoted.at("output").get<std::string>();
+    MINT_EXPECT(quoted.at("exit_code") == 0 &&
+                    quoted_output.find("arg=with spaces\n") != std::string::npos &&
+                    quoted_output.find("arg=quote\"inside\n") != std::string::npos &&
+                    quoted_output.find("arg=trailing\\\\\n") != std::string::npos,
+                "argv preserves spaces, quotes and trailing backslashes without a shell");
+
     const auto failed = mint::Json::parse(tools.execute(
         {"command-fail",
          "run_command",
@@ -1421,13 +1494,13 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
     MINT_EXPECT(truncated.at("output").get<std::string>().size() == 256,
                 "captured output respects the byte limit");
 
-    (void)::setenv("MINT_TEST_SECRET", "must-not-reach-child", 1);
+    set_secret_environment();
     const auto filtered_environment = mint::Json::parse(
         tools.execute({"command-environment",
                        "run_command",
                        {{"program", program},
                         {"args", mint::Json::array({"--command-helper", "environment"})}}}));
-    (void)::unsetenv("MINT_TEST_SECRET");
+    clear_secret_environment();
     MINT_EXPECT(filtered_environment.at("exit_code") == 0,
                 "command child receives the filtered environment");
     MINT_EXPECT(filtered_environment.at("output").get<std::string>().find("environment filtered") !=
@@ -1436,6 +1509,29 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
 
     const auto inherited_path = workspace / "inherited.txt";
     write_text(inherited_path, "must not be inherited\n");
+#if defined(_WIN32)
+    SECURITY_ATTRIBUTES inherited_attributes{};
+    inherited_attributes.nLength = sizeof(inherited_attributes);
+    inherited_attributes.bInheritHandle = TRUE;
+    const auto inherited_handle =
+        ::CreateFileW(inherited_path.c_str(), GENERIC_READ,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &inherited_attributes,
+                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(inherited_handle, INVALID_HANDLE_VALUE);
+    BY_HANDLE_FILE_INFORMATION inherited_metadata{};
+    ASSERT_TRUE(::GetFileInformationByHandle(inherited_handle, &inherited_metadata));
+    const auto filtered_descriptor = mint::Json::parse(tools.execute(
+        {"command-handle",
+         "run_command",
+         {{"program", program},
+          {"args",
+           mint::Json::array({"--command-helper", "handle",
+                              std::to_string(reinterpret_cast<std::uintptr_t>(inherited_handle)),
+                              std::to_string(inherited_metadata.dwVolumeSerialNumber),
+                              std::to_string(inherited_metadata.nFileIndexHigh),
+                              std::to_string(inherited_metadata.nFileIndexLow)})}}}));
+    (void)::CloseHandle(inherited_handle);
+#else
     const auto inherited_descriptor = ::open(inherited_path.c_str(), O_RDONLY);
     ASSERT_GE(inherited_descriptor, 3);
     struct stat inherited_metadata{};
@@ -1449,8 +1545,9 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
                                       std::to_string(inherited_metadata.st_dev),
                                       std::to_string(inherited_metadata.st_ino)})}}}));
     (void)::close(inherited_descriptor);
+#endif
     MINT_EXPECT(filtered_descriptor.at("exit_code") == 0,
-                "command child cannot inherit unrelated mint file descriptors");
+                "command child cannot inherit unrelated mint handles");
 
     const auto timed_out = mint::Json::parse(
         tools.execute({"command-timeout",
@@ -1474,7 +1571,12 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
     MINT_EXPECT(!unapproved.at("ok").get<bool>(),
                 "run_command rejects programs not approved by the user");
 
-    for (const std::string launcher : {"sh", "bwrap"}) {
+#if defined(_WIN32)
+    const std::array blocked_launchers = {"cmd.exe", "powershell.exe"};
+#else
+    const std::array blocked_launchers = {"sh", "bwrap"};
+#endif
+    for (const std::string launcher : blocked_launchers) {
         bool blocked_launcher = false;
         try {
             mint::ToolRegistry blocked(workspace,
@@ -1485,13 +1587,9 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
         MINT_EXPECT(blocked_launcher,
                     "the command policy refuses shells and general-purpose launchers");
     }
-#endif
 }
 
 TEST(CommandRunnerTest, EnforcesResourceLimits) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     const auto program = test_executable.generic_string();
@@ -1501,18 +1599,30 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
         .cpu_seconds = 10,
         .memory_bytes = MINT_TEST_ADDRESS_SANITIZED ? 0 : std::size_t{128} * 1024 * 1024,
         .max_processes = 128,
+#if defined(_WIN32)
+        .file_size_bytes = 0};
+#else
         .file_size_bytes = 1024};
+#endif
     mint::ToolRegistry tools(
         workspace, mint::ToolRegistryOptions{.allowed_programs = {program}, .runtime = runtime});
 
-    const auto reported = mint::Json::parse(tools.execute(
-        {"command-limits",
-         "run_command",
-         {{"program", program}, {"args", mint::Json::array({"--command-helper", "limits"})}}}));
+    const auto reported = mint::Json::parse(
+        tools.execute({"command-limits",
+                       "run_command",
+                       {{"program", program},
+                        {"args", mint::Json::array({"--command-helper", "echo", "limits"})}}}));
     EXPECT_EQ(reported.at("exit_code"), 0) << reported.dump(2);
     EXPECT_EQ(reported.at("resource_limits"),
               mint::command_resource_limits_to_json(runtime.command_resources));
-    const auto output = reported.at("output").get<std::string>();
+
+#if !defined(_WIN32)
+    const auto inspected = mint::Json::parse(tools.execute(
+        {"command-limit-inspection",
+         "run_command",
+         {{"program", program}, {"args", mint::Json::array({"--command-helper", "limits"})}}}));
+    EXPECT_EQ(inspected.at("exit_code"), 0) << inspected.dump(2);
+    const auto output = inspected.at("output").get<std::string>();
     EXPECT_NE(output.find("cpu=10\n"), std::string::npos);
     EXPECT_NE(output.find("processes=128\n"), std::string::npos);
     EXPECT_NE(output.find("file=1024\n"), std::string::npos);
@@ -1535,6 +1645,7 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
     EXPECT_LE(written, runtime.command_resources.file_size_bytes);
     EXPECT_EQ(limited.at("status"), "resource_limited");
     EXPECT_EQ(limited.at("resource_limit"), "file_size");
+#endif
 
     if (runtime.command_resources.memory_bytes != 0) {
         const auto memory_limited = mint::Json::parse(
@@ -1545,7 +1656,7 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
                                                         std::to_string(256 * 1024 * 1024)})},
                             {"timeout_seconds", 5}}}));
         EXPECT_FALSE(memory_limited.at("timed_out").get<bool>());
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
         EXPECT_TRUE(memory_limited.at("resource_limited").get<bool>()) << memory_limited.dump(2);
         EXPECT_EQ(memory_limited.at("resource_limit"), "memory");
 #else
@@ -1567,6 +1678,28 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
                             {"timeout_seconds", 5}}}));
     EXPECT_EQ(cpu_limited.at("status"), "resource_limited");
     EXPECT_EQ(cpu_limited.at("resource_limit"), "cpu");
+
+#if defined(_WIN32)
+    mint::ToolRuntimeSettings process_runtime;
+    process_runtime.command_resources.max_processes = 1;
+    mint::ToolRegistry process_tools(
+        workspace,
+        mint::ToolRegistryOptions{.allowed_programs = {program}, .runtime = process_runtime});
+    const auto process_limited = mint::Json::parse(
+        process_tools.execute({"command-process-limit",
+                               "run_command",
+                               {{"program", program},
+                                {"args", mint::Json::array({"--command-helper", "spawn"})},
+                                {"timeout_seconds", 5}}}));
+    EXPECT_EQ(process_limited.at("status"), "resource_limited") << process_limited.dump(2);
+    EXPECT_EQ(process_limited.at("resource_limit"), "processes");
+
+    auto unsupported_runtime = mint::ToolRuntimeSettings{};
+    unsupported_runtime.command_resources.file_size_bytes = 1024;
+    EXPECT_THROW((void)mint::ToolRegistry(
+                     workspace, mint::ToolRegistryOptions{.allowed_programs = {program},
+                                                          .runtime = unsupported_runtime}),
+                 std::invalid_argument);
 #endif
 }
 
@@ -1585,14 +1718,15 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
         },
         "task policy rejects unsafe tool budget values");
 
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
-
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     const auto policy_path = temporary.path() / "policy.json";
     const auto program = test_executable.generic_string();
+#if defined(_WIN32)
+    constexpr std::size_t policy_file_size_bytes = 0;
+#else
+    constexpr std::size_t policy_file_size_bytes = 1048576;
+#endif
     write_text(
         policy_path,
         mint::Json{
@@ -1621,7 +1755,7 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
                {{"cpu_seconds", 30},
                 {"memory_bytes", 0},
                 {"max_processes", 256},
-                {"file_size_bytes", 1048576}}}}}}
+                {"file_size_bytes", policy_file_size_bytes}}}}}}
             .dump(2));
 
     const auto policy = mint::load_task_policy(policy_path);
@@ -1640,7 +1774,7 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
                     policy.tool_limits.command_resources.cpu_seconds == 30 &&
                     policy.tool_limits.command_resources.memory_bytes == 0 &&
                     policy.tool_limits.command_resources.max_processes == 256 &&
-                    policy.tool_limits.command_resources.file_size_bytes == 1048576,
+                    policy.tool_limits.command_resources.file_size_bytes == policy_file_size_bytes,
                 "task policy loads configurable tool performance budgets");
     const auto second_load = mint::load_task_policy(policy_path);
     MINT_EXPECT(second_load.fingerprint == policy.fingerprint,
@@ -1719,7 +1853,6 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
     }
     MINT_EXPECT(rejected_unverifiable,
                 "verification policy requires a verification-eligible recipe");
-#endif
 }
 
 TEST(ToolRegistryTest, EnforcesWritePathAllowlist) {
@@ -1770,9 +1903,6 @@ TEST(ToolRegistryTest, EnforcesWritePathAllowlist) {
 }
 
 TEST(CommandRunnerTest, EnforcesRuntimeControls) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     const auto program = test_executable.generic_string();
@@ -1831,12 +1961,17 @@ TEST(CommandRunnerTest, EnforcesRuntimeControls) {
                     timed_out.at("task_timed_out").get<bool>(),
                 "total task budget has a distinct command outcome");
     MINT_EXPECT(elapsed < 1500, "total task budget terminates the running process group promptly");
-#endif
 }
 
 TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
 #if defined(_WIN32)
-    GTEST_SKIP() << "a secure Windows command backend is not implemented yet";
+    TemporaryDirectory temporary;
+    const auto workspace = temporary.path() / "workspace";
+    const auto program = test_executable.generic_string();
+    EXPECT_THROW((void)mint::ToolRegistry(
+                     workspace, mint::ToolRegistryOptions{.allowed_programs = {program},
+                                                          .require_command_sandbox = true}),
+                 std::invalid_argument);
 #else
     TemporaryDirectory temporary(std::filesystem::path{"/var/tmp"});
     const auto workspace = temporary.path() / "workspace";
@@ -2169,9 +2304,6 @@ TEST(AgentLoopTest, CompletesWriteTask) {
 }
 
 TEST(AgentLoopTest, PatchesThenVerifies) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     write_text(workspace / "README.md", "# Broken\n");
@@ -2216,13 +2348,9 @@ TEST(AgentLoopTest, PatchesThenVerifies) {
                 "end-to-end tool-call logs do not dump patch or command arguments");
     MINT_EXPECT(e2e_log.find("+# Fixed") != std::string::npos,
                 "end-to-end final state prints the audited diff");
-#endif
 }
 
 TEST(AgentLoopTest, FailedVerificationRequiresRepair) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     write_text(workspace / "README.md", "# Broken\n");
@@ -2264,13 +2392,9 @@ TEST(AgentLoopTest, FailedVerificationRequiresRepair) {
                 "intermediate failed contents do not pollute the final diff");
     MINT_EXPECT(log.str().find("[继续]") != std::string::npos,
                 "console trace records the rejected premature completion");
-#endif
 }
 
 TEST(AgentLoopTest, LatestCommandControlsVerificationStatus) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     write_text(workspace / "README.md", "# Broken\n");
@@ -2297,13 +2421,9 @@ TEST(AgentLoopTest, LatestCommandControlsVerificationStatus) {
                 "regression scenario records the later failure");
     MINT_EXPECT(log.str().find("[继续]") != std::string::npos,
                 "verification gate rejects completion after the later failure");
-#endif
 }
 
 TEST(AgentLoopTest, DeniedCommandCannotSatisfyVerification) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     const auto program = test_executable.generic_string();
@@ -2330,13 +2450,9 @@ TEST(AgentLoopTest, DeniedCommandCannotSatisfyVerification) {
                 "execution summary counts the denied command separately");
     MINT_EXPECT(log.str().find("[继续]") != std::string::npos,
                 "verification gate requests continuation after denial");
-#endif
 }
 
 TEST(AgentLoopTest, CancellationStopsRunningCommand) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     const auto program = test_executable.generic_string();
@@ -2372,13 +2488,9 @@ TEST(AgentLoopTest, CancellationStopsRunningCommand) {
     const auto machine = mint::agent_result_to_json(result);
     MINT_EXPECT(machine.at("status") == "cancelled" && !machine.at("completed").get<bool>(),
                 "machine result preserves cancellation without pretending completion");
-#endif
 }
 
 TEST(SessionTest, CheckpointsAndResumes) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "controlled command execution is not implemented on Windows";
-#else
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     const auto session_path = temporary.path() / "session.json";
@@ -2596,7 +2708,6 @@ TEST(SessionTest, CheckpointsAndResumes) {
                 "restored change journal preserves the original-to-final diff");
     MINT_EXPECT(session.load().at("status") == "completed",
                 "final stable checkpoint records terminal completion");
-#endif
 }
 
 TEST(ModelConfigTest, LoadsAndValidatesJson) {
