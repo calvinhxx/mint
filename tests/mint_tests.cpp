@@ -104,14 +104,12 @@ int run_command_helper(int argc, char** argv) {
         return 0;
     }
     if (mode == "spin") {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         volatile std::uint64_t accumulator = 1;
-        while (std::chrono::steady_clock::now() < deadline) {
+        while (true) {
             for (std::size_t iteration = 0; iteration < 1'000'000; ++iteration) {
                 accumulator = accumulator * 1664525U + 1013904223U;
             }
         }
-        return accumulator == 0 ? 17 : 0;
     }
     if (mode == "flood") {
         std::cout << std::string(4096, 'x');
@@ -1679,7 +1677,7 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
                            "run_command",
                            {{"program", program},
                             {"args", mint::Json::array({"--command-helper", "spin"})},
-                            {"timeout_seconds", 5}}}));
+                            {"timeout_seconds", 15}}}));
     EXPECT_EQ(cpu_limited.at("status"), "resource_limited");
     EXPECT_EQ(cpu_limited.at("resource_limit"), "cpu");
 
