@@ -16,7 +16,7 @@
 | 构建矩阵 | Windows / macOS / Linux × x64 / ARM64 |
 | 安装包 | v1.5 生成六平台归档与 SHA-256；尚未打正式 tag |
 | 平台验收 | 六组合原生 CI；三个系统都默认启用 OS 命令隔离 |
-| 本地测试 | Debug 和 Sanitizer CTest 67/67 |
+| 本地测试 | Debug 和 Sanitizer CTest 69/69 |
 | 持续集成 | 六组合原生构建矩阵；macOS ARM64 深度门禁 |
 | 最近真实模型验收 | v1.4 Chat Completions 隔离修复任务 |
 
@@ -37,6 +37,7 @@
 - provider 能力目录、官方端点识别和代理显式配置；请求按 profile 选择 token 字段、stream usage 和推理续传；
 - OpenAI Responses、Groq Chat、DeepSeek Chat 和 custom Chat 四份无密钥回归配置，以及离线 `mint provider` 检查命令；
 - 显式 `mint provider test` 真实兼容性握手：固定两轮请求验证 function call、参数和工具结果续接，限制重试与输出额度，只报告脱敏统计；
+- 声明式 provider 回归批次：一次检查 OpenAI Responses、Groq Chat 和 DeepSeek Chat，live 模式先校验全部密钥，再保存不可覆盖的脱敏证据；
 - 跨平台回环 HTTP 验收：Windows、macOS、Linux 共用 Chat 重试、Responses SSE、Agent 工具循环和 provider test 契约，不因 Windows 跳过网络路径；
 - 支持从环境变量读取 API Key，检查命令不会读取或输出密钥，endpoint 查询参数也不会出现在报告中；
 - vcpkg 依赖、spdlog 诊断日志和 GoogleTest 单元测试；
@@ -73,7 +74,7 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 
 ## 下一步
 
-1. 有模型额度时，用固定配置分别运行 OpenAI Responses、Groq Chat 和 DeepSeek Chat 的 `provider test`，保存脱敏结果；
+1. 有模型额度时，运行固定 provider 回归批次，一次完成 OpenAI Responses、Groq Chat 和 DeepSeek Chat 握手并保存脱敏结果；
 2. OpenAI Responses 握手通过后，再用 Responses + SSE 跑一次隔离修复 fixture；
 3. 上述兼容性证据补齐后，为 v1.5.0 定稿 Changelog 并打 tag，验收六个平台的正式下载包；
 4. 根据真实构建负载决定是否增加 Linux cgroup 等硬资源后端；内核稳定后再做持续聊天和 GUI。

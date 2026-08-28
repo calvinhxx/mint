@@ -12,6 +12,7 @@
 - Added centralized OpenAI, Groq, DeepSeek, and custom provider profiles with endpoint detection, capability-driven request fields, and explicit proxy configuration.
 - Added secret-free fixed provider configurations and an offline `mint provider` command that reports the resolved adapter and capabilities without reading or printing API keys.
 - Added an explicit, spend-bounded `mint provider test` handshake that validates a two-request tool round trip and emits only sanitized compatibility metrics.
+- Added a manifest-driven provider regression batch that preflights every credential before live requests and writes non-overwriting, allowlisted evidence for the three official profiles.
 - Runs Chat retry, Responses SSE, tool continuation, and sanitized provider acceptance through the same loopback HTTP fixture on Windows, macOS, and Linux instead of skipping the Windows transport path.
 - Added API key environment-variable loading and redacted endpoint query parameters from configuration reports.
 - Added standard CMake installation and versioned CPack archives for six platform/architecture combinations, including provider templates, checksums, runtime dependencies, and license files.

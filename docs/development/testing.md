@@ -52,7 +52,7 @@ ctest --preset PRESET
 
 ## 本地全量验证
 
-需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。
+需要 CMake 3.24+、Ninja、C++20 编译器、Python 3.10+ 和 vcpkg。Python 只用于测试与发版脚本。
 
 ~~~bash
 export VCPKG_ROOT=/path/to/vcpkg
@@ -98,14 +98,14 @@ ctest --preset vcpkg-sanitize
 
 2026-08-28 在 macOS arm64、AppleClang 17 上的结果：
 
-- Debug：67/67 tests passed；
-- ASan + UBSan：67/67 tests passed；
+- Debug：69/69 tests passed；
+- ASan + UBSan：69/69 tests passed；
 - Release：构建通过，且未安装 GoogleTest；
 - Release 包：macOS ARM64 归档、SHA-256、文件布局和解包运行通过；
 - clang-format：通过；
 - GitHub Actions 会运行六平台矩阵和发布门禁；最新结果见 [Actions](https://github.com/calvinhxx/mint/actions)。
 
-67 个测试包括 11 个单元测试、30 个集成测试、21 个契约测试、3 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
+69 个测试包括 12 个单元测试、30 个集成测试、21 个契约测试、3 个 CLI smoke 和 3 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
 
 changeset 恢复测试会真实写两个文件并重建 `ToolRegistry`，覆盖：完整写入后崩溃、只完成部分文件、checkpoint 已确认但日志未清、外部改写、两个进程争用同一任务，以及 Agent 自动回滚并重放 in-flight changeset。测试同时检查 schema v2/v3 可迁移到 v4。
 
@@ -123,6 +123,21 @@ export GROQ_API_KEY='你的密钥'
 ~~~
 
 `provider test` 发出两个逻辑请求，检查唯一 function call、参数、call id、工具结果续接、流式状态和 usage。它不读取工作区；成功报告只保留协议、耗时、重试和 token 统计。输出上限固定为配置值与 1024 的较小者，每个逻辑请求最多尝试两次。仓库测试用一份跨平台回环 HTTP 服务运行 Chat 重试、Responses SSE、Agent 工具循环和同一条 provider 验收路径；六条平台流水线都会执行，不消耗外部额度。
+
+发版前用同一条命令检查三份官方配置：
+
+~~~bash
+# 默认只做离线检查
+python3 scripts/provider-regression.py --mint ./build/vcpkg-dev/mint
+
+# 显式 --live 才会请求服务；结果文件不会覆盖已有文件
+python3 scripts/provider-regression.py \
+  --mint ./build/vcpkg-dev/mint \
+  --live \
+  --output build/provider-regression-v1.5.json
+~~~
+
+批次由 `configs/provider-regression.json` 声明。live 模式会先确认三份配置对应的 API Key 环境变量均已设置，避免执行到一半才发现缺少密钥。证据只保存白名单中的 profile、协议和统计字段，并记录配置矩阵的 SHA-256；原始响应、错误正文、密钥和本机配置路径不会写入文件。
 
 ## 测试覆盖到哪里
 
