@@ -14,7 +14,7 @@ namespace mint::test {
 struct ScriptedHttpResponse {
     int status = 200;
     std::string content_type = "application/json";
-    std::vector<std::pair<std::string, std::string>> headers;
+    std::vector<std::pair<std::string, std::string>> headers{};
     std::string body;
     std::size_t fragment_bytes = 0;
 };
