@@ -78,13 +78,15 @@ ctest --preset vcpkg-sanitize
 
 2026-08-28 在 macOS arm64、AppleClang 17 上的结果：
 
-- Debug：51/51 tests passed；
-- ASan + UBSan：51/51 tests passed；
+- Debug：57/57 tests passed；
+- ASan + UBSan：57/57 tests passed；
 - Release：构建通过，且未安装 GoogleTest；
 - clang-format：通过；
 - GitHub Actions 六平台与发布门禁：[运行 33148572493](https://github.com/calvinhxx/mint/actions/runs/33148572493)，全部通过。
 
-51 个测试包括 11 个单元测试、24 个集成测试、12 个契约测试、2 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
+57 个测试包括 11 个单元测试、30 个集成测试、12 个契约测试、2 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
+
+changeset 恢复测试会真实写两个文件并重建 `ToolRegistry`，覆盖：完整写入后崩溃、只完成部分文件、checkpoint 已确认但日志未清、外部改写、两个进程争用同一任务，以及 Agent 自动回滚并重放 in-flight changeset。测试同时检查 schema v2/v3 可迁移到 v4。
 
 ## 测试覆盖到哪里
 
@@ -132,4 +134,4 @@ ctest --preset vcpkg-sanitize
 - 六组合矩阵覆盖原生构建和适用测试，Linux Bubblewrap 和 Windows AppContainer 后端在 x64 / ARM64 验收；
 - Windows AppContainer 不是虚拟机；工作区外的自定义工具链可能因未授权而失败；
 - 本地测试证明确定性行为，不替代真实 provider 回归；
-- checkpoint 保证从稳定点恢复，不承诺跨进程 exactly-once。
+- session 管理的 `apply_changeset` 通过事务日志避免跨进程重复提交；`apply_patch`、命令和任意扩展工具不承诺 exactly-once。

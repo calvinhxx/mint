@@ -22,7 +22,9 @@ flowchart TD
     model --> reply{"返回类型"}
     reply -- "工具请求" --> registry["ToolRegistry<br/>检查并执行"]
     registry --> local["文件工具或固定命令"]
+    registry --> transaction["ChangeTransactionStore<br/>多文件事务日志"]
     local --> loop
+    transaction -.->|事务 ID| store
     reply -- "最终回答" --> gate{"最新修改已验证？"}
     gate -- "否" --> loop
     gate -- "是或无需验证" --> result["输出结果并保存状态"]
@@ -65,6 +67,7 @@ flowchart TD
 | [`src/application/agent_cycle.cpp`](../../src/application/agent_cycle.cpp) | 模型调用、工具执行和验证门禁 |
 | [`src/application/agent_checkpoint.cpp`](../../src/application/agent_checkpoint.cpp) | checkpoint schema 校验与恢复 |
 | [`src/tools/tool_registry.cpp`](../../src/tools/tool_registry.cpp) | 工具路由和执行前检查 |
+| [`src/tools/change_transaction.cpp`](../../src/tools/change_transaction.cpp) | changeset 事务格式、回滚和 checkpoint 确认 |
 | [`src/infrastructure/model_client.cpp`](../../src/infrastructure/model_client.cpp) | 模型客户端公共门面和配置校验 |
 | [`src/infrastructure/model_request.cpp`](../../src/infrastructure/model_request.cpp) | 请求重试、进度事件和结果元数据 |
 | [`src/infrastructure/model_http_transport.cpp`](../../src/infrastructure/model_http_transport.cpp) | 单次 libcurl 请求、响应头和 SSE 数据接收 |
@@ -75,6 +78,7 @@ flowchart TD
 | [`src/infrastructure/command_process_windows.cpp`](../../src/infrastructure/command_process_windows.cpp) | Windows `CreateProcessW`、AppContainer 启动属性、句柄隔离和 Job Object |
 | [`src/infrastructure/command_appcontainer_windows.cpp`](../../src/infrastructure/command_appcontainer_windows.cpp) | Windows AppContainer profile、路径 DACL 和生命周期 |
 | [`src/infrastructure/session_store.cpp`](../../src/infrastructure/session_store.cpp) | checkpoint 读写 |
+| [`src/infrastructure/change_transaction_store.cpp`](../../src/infrastructure/change_transaction_store.cpp) | 事务日志原子写入和跨进程锁 |
 | [`src/tools/workspace_tools.cpp`](../../src/tools/workspace_tools.cpp) | 工作区文件读取与修改 |
 | [`src/tools/change_set.cpp`](../../src/tools/change_set.cpp) | 多文件变更、预检和回滚 |
 | [`src/infrastructure/diagnostic_log.cpp`](../../src/infrastructure/diagnostic_log.cpp) | 不进入 stdout 的诊断日志 |
@@ -93,4 +97,6 @@ main.cpp
   -> ToolRegistry / ModelClient
 ~~~
 
-恢复逻辑集中在 `agent_checkpoint.cpp`。阅读循环时，在 `agent_run.hpp` 中先关注四个状态：`messages_` 是模型上下文，`pending_calls_` 是尚未执行的工具请求，`in_flight_call_` 是已经开始但结果未确认的请求，`result_` 保存轮数、工具记录、验证状态和最终回答。
+恢复逻辑从 `agent_checkpoint.cpp` 进入。普通工具根据 `in_flight_tool_call` 判断是否可重试；`apply_changeset` 再交给 `change_transaction.cpp` 对照事务日志和 checkpoint 中的事务 ID。
+
+阅读循环时，在 `agent_run.hpp` 中先关注四个状态：`messages_` 是模型上下文，`pending_calls_` 是尚未执行的工具请求，`in_flight_call_` 是已经开始但结果未确认的请求，`result_` 保存轮数、工具记录、验证状态和最终回答。
