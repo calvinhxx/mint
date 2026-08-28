@@ -24,15 +24,15 @@
 
 ## 平台构建矩阵
 
-六个 preset 都在对应架构的原生系统上配置、编译并运行适用的 CTest：
+每个平台各有测试和 Release preset。两者使用独立构建目录，正式包不会继承 GoogleTest 等测试依赖：
 
-| 系统 | x64 | ARM64 |
+| 系统 | x64 测试 / Release | ARM64 测试 / Release |
 |---|---|---|
-| Windows | `vcpkg-windows` | `vcpkg-windows-arm64` |
-| macOS | `vcpkg-osx-x64` | `vcpkg-osx` |
-| Linux | `vcpkg-linux` | `vcpkg-linux-arm64` |
+| Windows | `vcpkg-windows` / `vcpkg-windows-release` | `vcpkg-windows-arm64` / `vcpkg-windows-arm64-release` |
+| macOS | `vcpkg-osx-x64` / `vcpkg-osx-x64-release` | `vcpkg-osx` / `vcpkg-osx-release` |
+| Linux | `vcpkg-linux` / `vcpkg-linux-release` | `vcpkg-linux-arm64` / `vcpkg-linux-arm64-release` |
 
-替换下面的 `PRESET` 即可本地复现：
+选择表里的测试 preset，即可本地复现构建和 CTest：
 
 ~~~bash
 cmake --preset PRESET
@@ -40,7 +40,7 @@ cmake --build --preset PRESET
 ctest --preset PRESET
 ~~~
 
-这些 preset 面向同架构原生构建，例如 `vcpkg-linux-arm64` 应在 ARM64 Linux 上运行。CI 从 [`.github/build-matrix.json`](../../.github/build-matrix.json) 读取 runner、vcpkg triplet、CMake preset 和平台运行时依赖；校验脚本会检查它们是否一致。
+Release preset 只用于生成正式包，不注册 CTest。所有 preset 都面向同架构原生构建，例如 `vcpkg-linux-arm64` 应在 ARM64 Linux 上运行。CI 从 [`.github/build-matrix.json`](../../.github/build-matrix.json) 读取 runner、vcpkg triplet、测试 preset、Release preset 和平台运行时依赖；校验脚本会检查它们是否一致，并拒绝 Release preset 启用测试 feature。
 
 2026-08-28，Windows、macOS、Linux 的 x64 / ARM64 六条原生流水线均会构建并运行适用测试。Linux 两条流水线验收 Bubblewrap；Windows 两条流水线验收 AppContainer、无 shell 启动、argv、环境与句柄过滤、超时、取消、恢复和 Job Object 资源限制。
 
