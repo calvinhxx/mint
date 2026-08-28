@@ -10,6 +10,7 @@
         "runner": "windows-2022",
         "runner_arch": "X64",
         "preset": "vcpkg-windows",
+        "release_preset": "vcpkg-windows-release",
         "system_packages": []
       },
       {
@@ -20,6 +21,7 @@
         "runner": "windows-11-arm",
         "runner_arch": "ARM64",
         "preset": "vcpkg-windows-arm64",
+        "release_preset": "vcpkg-windows-arm64-release",
         "system_packages": []
       },
       {
@@ -30,6 +32,7 @@
         "runner": "macos-15-intel",
         "runner_arch": "X64",
         "preset": "vcpkg-osx-x64",
+        "release_preset": "vcpkg-osx-x64-release",
         "system_packages": []
       },
       {
@@ -40,6 +43,7 @@
         "runner": "macos-15",
         "runner_arch": "ARM64",
         "preset": "vcpkg-osx",
+        "release_preset": "vcpkg-osx-release",
         "system_packages": []
       },
       {
@@ -50,6 +54,7 @@
         "runner": "ubuntu-24.04",
         "runner_arch": "X64",
         "preset": "vcpkg-linux",
+        "release_preset": "vcpkg-linux-release",
         "system_packages": ["bubblewrap"]
       },
       {
@@ -60,6 +65,7 @@
         "runner": "ubuntu-24.04-arm",
         "runner_arch": "ARM64",
         "preset": "vcpkg-linux-arm64",
+        "release_preset": "vcpkg-linux-arm64-release",
         "system_packages": ["bubblewrap"]
       }
     ]

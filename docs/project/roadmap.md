@@ -48,7 +48,7 @@
 - policy 可声明工作区外的只读工具链路径，Windows AppContainer 会按路径补充只读 DACL，macOS / Linux 会在隐藏目录中重新暴露该路径；
 - policy 可配置命令资源上限：三平台限制进程树总数并巡检工作区磁盘用量；POSIX 另支持 CPU、内存和单文件大小，Windows Job Object 支持 CPU 和内存；
 - 本地与 GitHub Actions 共用一条发布检查，覆盖版本、格式、Debug、Release、Sanitizer、CTest 和离线 CLI；
-- 标准 CMake 安装规则和 CPack 归档，包含 CLI、provider 模板、Windows 运行时 DLL、项目与依赖许可证；六平台都会解包运行版本冒烟，正式 tag 才上传 GitHub Release；
+- 标准 CMake 安装规则和 CPack 归档，包含 CLI、provider 模板、Windows 运行时 DLL、项目与依赖许可证；测试与 Release 使用独立 preset，六平台都会解包运行版本冒烟，正式 tag 才上传 GitHub Release；
 - v1.4 真实 Chat Completions 回归，包含工具调用、限流等待、修改、验证和独立复测；
 - 文本输出、JSON 输出和诊断信息分流。
 
