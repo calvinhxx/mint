@@ -32,11 +32,13 @@ test      -> ctest --test-dir build --output-on-failure
 |---|---|
 | macOS | Seatbelt：限制宿主写入、敏感文件和网络 |
 | Linux | Bubblewrap：工作区可写，其余宿主路径只读或隐藏；使用独立网络和运行时目录 |
-| Windows | 默认拒绝；尚无文件与网络沙箱 |
+| Windows | AppContainer：工作区和已登记程序可用；受保护路径与网络不可用 |
 
 Linux 缺少 `bwrap` 时会直接拒绝命令，不会自动退回到无沙箱模式。非标准安装位置可以用 `MINT_BWRAP_PATH=/absolute/path/to/bwrap` 指定。
 
-Windows 已使用 `CreateProcessW` 直接启动程序，不经过 shell；只继承标准输入输出句柄，过滤环境变量，并用 Job Object 控制整棵进程树的结束、CPU、内存和进程数。它仍能访问用户有权访问的文件和网络，因此只有显式传入 `--unsafe-no-command-sandbox` 才会启用。macOS / Linux 传入同一参数也会关闭各自的 OS 沙箱。
+Windows 使用 `CreateProcessW` 直接启动程序，不经过 shell。每个 `CommandRunner` 拥有独立的无网络 capability AppContainer；DACL 只向工作区、已登记程序及其同目录运行文件授权，受保护路径保持不可读。Job Object 再限制进程树、CPU、内存和进程数。
+
+AppContainer 不是虚拟机，仍可见部分 Windows 公共系统资源。如果工具还依赖工作区和程序同目录之外的用户文件，命令会以无权访问失败。`--unsafe-no-command-sandbox` 会关闭当前平台的 OS 隔离，只应由信任工作区和命令的本地操作者显式使用。
 
 ## 命令资源上限
 
@@ -84,9 +86,9 @@ Agent 会在工具执行前后保存 checkpoint。恢复时按动作是否有副
 
 ## 当前边界
 
-- macOS 和 Linux 已在 x64 / ARM64 原生 CI 完成适用测试；
-- Linux Bubblewrap 后端已在两种架构完成沙箱边界验收；
-- Windows 受控进程和 Job Object 已实现，但文件与网络隔离仍缺；
+- 三个系统都在 x64 / ARM64 原生 CI 运行适用测试；
+- Linux Bubblewrap 和 Windows AppContainer 在两种架构验收工作区写入、越界写入、受保护读取和网络四个边界；
+- Windows 对工作区外的自定义工具链仍缺可配置的只读路径；
 - POSIX 进程树总资源和工作区总磁盘配额仍待补充。
 
 这些限制属于当前实现范围，不应由提示词代替。

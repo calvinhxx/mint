@@ -14,7 +14,7 @@
 | 命令 | `init / run / resume / status` |
 | 模型接口 | Chat Completions、Responses、可选 SSE |
 | 构建矩阵 | Windows / macOS / Linux × x64 / ARM64 |
-| 平台验收 | 六组合原生 CI；macOS / Linux 有 OS 沙箱，Windows 有受控进程后端 |
+| 平台验收 | 六组合原生 CI；三个系统都默认启用 OS 命令隔离 |
 | 本地测试 | Debug 和 Sanitizer CTest 51/51 |
 | 持续集成 | 六组合原生构建矩阵；macOS ARM64 深度门禁 |
 | 最近真实模型验收 | v1.4 Chat Completions 隔离修复任务 |
@@ -35,7 +35,7 @@
 - vcpkg 依赖、spdlog 诊断日志和 GoogleTest 单元测试；
 - Windows、macOS、Linux 的 x64 / ARM64 CMake preset、原生 CI runner 和矩阵一致性校验，六组合均已通过；
 - Linux Bubblewrap 安全命令后端，隔离宿主写入、用户目录、运行时套接字、网络和继承文件描述符；
-- Windows 无 shell 命令后端，使用 `CreateProcessW`、继承句柄白名单、过滤环境和 Job Object；
+- Windows AppContainer 命令后端，隔离越界写入、受保护文件和网络，并使用 `CreateProcessW`、继承句柄白名单、过滤环境和 Job Object；
 - policy 可配置命令资源上限：POSIX 支持 CPU、内存、进程数和单文件大小，Windows Job Object 支持进程树 CPU、内存和进程数；
 - 本地与 GitHub Actions 共用一条发布检查，覆盖版本、格式、Debug、Release、Sanitizer、CTest 和离线 CLI；
 - v1.4 真实 Chat Completions 回归，包含工具调用、限流等待、修改、验证和独立复测；
@@ -55,7 +55,7 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 
 | 方向 | 缺口 |
 |---|---|
-| 平台运行时 | Windows 仍缺文件与网络沙箱，默认拒绝命令；显式 unsafe 模式才启用受控进程后端 |
+| 平台运行时 | Windows 还不能在 policy 中声明工作区外的自定义只读工具链路径 |
 | 资源限制 | 还缺 POSIX 进程树总量、跨平台工作区磁盘配额；Windows 不支持单文件大小限制 |
 | 恢复 | 多文件修改缺少跨进程事务日志 |
 | 模型兼容 | Responses、SSE 和更多 provider 尚未做真实回归 |
@@ -63,10 +63,9 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 
 ## 下一步
 
-1. 为 Windows 增加文件与网络隔离，去掉默认拒绝；
-2. 为多文件修改增加跨进程事务日志；
-3. 增加 provider 能力识别和固定回归配置；
-4. 补 POSIX 进程树与跨平台工作区磁盘配额；
-5. 内核稳定后再增加持续聊天和 GUI。
+1. 为多文件修改增加跨进程事务日志；
+2. 增加 provider 能力识别和固定回归配置；
+3. 增加 Windows 外部只读工具链路径，补 POSIX 进程树与跨平台磁盘配额；
+4. 内核稳定后再增加持续聊天和 GUI。
 
-历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议，v1.5 补齐六平台构建、Linux 沙箱、跨平台受控进程和资源限制。
+历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议，v1.5 补齐六平台构建、三平台命令隔离和资源限制。
