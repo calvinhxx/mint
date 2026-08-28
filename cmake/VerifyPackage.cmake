@@ -75,7 +75,9 @@ if(NOT version_result EQUAL 0 OR NOT version_output STREQUAL "mint ${CPACK_PACKA
 endif()
 
 if(CMAKE_HOST_APPLE AND CPACK_PACKAGE_FILE_NAME MATCHES "-macos-")
-    include("${CMAKE_CURRENT_LIST_DIR}/MintPlatformDefaults.cmake")
+    if(NOT DEFINED CPACK_MINT_MACOS_DEPLOYMENT_TARGET)
+        message(FATAL_ERROR "Package has no recorded macOS deployment target")
+    endif()
     find_program(otool_program otool REQUIRED)
     execute_process(
         COMMAND "${otool_program}" -l "${executable}"
@@ -83,12 +85,12 @@ if(CMAKE_HOST_APPLE AND CPACK_PACKAGE_FILE_NAME MATCHES "-macos-")
         OUTPUT_VARIABLE load_commands
         ERROR_VARIABLE otool_error
     )
-    string(REPLACE "." "\\." deployment_pattern "${MINT_MACOS_DEPLOYMENT_TARGET}")
+    string(REPLACE "." "\\." deployment_pattern "${CPACK_MINT_MACOS_DEPLOYMENT_TARGET}")
     if(NOT otool_result EQUAL 0 OR
        NOT load_commands MATCHES "minos[ \t]+${deployment_pattern}([ \t\r\n]|$)")
         message(FATAL_ERROR
             "Packaged executable has the wrong macOS deployment target: "
-            "expected=${MINT_MACOS_DEPLOYMENT_TARGET}, stderr='${otool_error}'"
+            "expected=${CPACK_MINT_MACOS_DEPLOYMENT_TARGET}, stderr='${otool_error}'"
         )
     endif()
 endif()

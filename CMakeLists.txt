@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.24)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     include(cmake/MintPlatformDefaults.cmake)
-    if(CMAKE_HOST_APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL "")
+    if(CMAKE_HOST_APPLE)
+        set(MINT_MACOS_DEPLOYMENT_TARGET "${MINT_MACOS_DEPLOYMENT_TARGET}"
+            CACHE STRING "Minimum supported macOS version"
+        )
         set(CMAKE_OSX_DEPLOYMENT_TARGET "${MINT_MACOS_DEPLOYMENT_TARGET}"
             CACHE STRING "Minimum supported macOS version" FORCE
         )
