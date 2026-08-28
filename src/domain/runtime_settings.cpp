@@ -12,8 +12,8 @@ constexpr std::array<std::string_view, 7> setting_names = {
     "read_file_bytes",  "list_max_entries",     "search_file_bytes", "search_max_hits",
     "search_max_files", "command_output_bytes", "command_resources"};
 
-constexpr std::array<std::string_view, 4> resource_names = {"cpu_seconds", "memory_bytes",
-                                                            "max_processes", "file_size_bytes"};
+constexpr std::array<std::string_view, 5> resource_names = {
+    "cpu_seconds", "memory_bytes", "max_processes", "file_size_bytes", "workspace_disk_bytes"};
 
 std::size_t bounded_size(const Json& document, std::string_view field, std::size_t fallback,
                          std::size_t minimum, std::size_t maximum, std::string_view context) {
@@ -85,6 +85,10 @@ CommandResourceLimits parse_command_resource_limits(const Json& document,
     limits.file_size_bytes = optional_limit(document, "file_size_bytes", limits.file_size_bytes,
                                             runtime_bounds::min_command_file_size_bytes,
                                             runtime_bounds::max_command_file_size_bytes, context);
+    limits.workspace_disk_bytes =
+        optional_limit(document, "workspace_disk_bytes", limits.workspace_disk_bytes,
+                       runtime_bounds::min_command_workspace_disk_bytes,
+                       runtime_bounds::max_command_workspace_disk_bytes, context);
     return limits;
 }
 
@@ -100,6 +104,9 @@ void validate_command_resource_limits(const CommandResourceLimits& limits,
                            "max_processes", context);
     require_optional_range(limits.file_size_bytes, runtime_bounds::min_command_file_size_bytes,
                            runtime_bounds::max_command_file_size_bytes, "file_size_bytes", context);
+    require_optional_range(
+        limits.workspace_disk_bytes, runtime_bounds::min_command_workspace_disk_bytes,
+        runtime_bounds::max_command_workspace_disk_bytes, "workspace_disk_bytes", context);
 }
 
 void validate_tool_runtime_settings(const ToolRuntimeSettings& settings, std::string_view context) {
@@ -159,7 +166,8 @@ Json command_resource_limits_to_json(const CommandResourceLimits& limits) {
     return {{"cpu_seconds", limits.cpu_seconds},
             {"memory_bytes", limits.memory_bytes},
             {"max_processes", limits.max_processes},
-            {"file_size_bytes", limits.file_size_bytes}};
+            {"file_size_bytes", limits.file_size_bytes},
+            {"workspace_disk_bytes", limits.workspace_disk_bytes}};
 }
 
 Json tool_runtime_settings_to_json(const ToolRuntimeSettings& settings) {

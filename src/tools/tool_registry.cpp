@@ -130,6 +130,7 @@ ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions optio
                                  .task_control = std::move(options.task_control),
                                  .approval = std::move(options.command_approval),
                                  .require_os_sandbox = options.require_command_sandbox,
+                                 .read_only_paths = std::move(options.command_read_paths),
                                  .denied_read_paths = std::move(command_denied_paths)});
     }
 }

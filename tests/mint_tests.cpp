@@ -20,6 +20,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -240,6 +241,20 @@ int run_command_helper(int argc, char** argv) {
         return 19;
     }
 #else
+    if (mode == "spawn") {
+        const auto child = ::fork();
+        if (child < 0) {
+            return 18;
+        }
+        if (child == 0) {
+            ::execl(argv[0], argv[0], "--command-helper", "sleep", nullptr);
+            ::_exit(18);
+        }
+        int status = 0;
+        while (::waitpid(child, &status, 0) < 0 && errno == EINTR) {
+        }
+        return 19;
+    }
     if (mode == "limits") {
         const auto print_limit = [](std::string_view name, int resource) {
             struct rlimit limit{};
@@ -1711,12 +1726,32 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
     EXPECT_EQ(inspected.at("exit_code"), 0) << inspected.dump(2);
     const auto output = inspected.at("output").get<std::string>();
     EXPECT_NE(output.find("cpu=10\n"), std::string::npos);
-    EXPECT_NE(output.find("processes=128\n"), std::string::npos);
     EXPECT_NE(output.find("file=1024\n"), std::string::npos);
 #if defined(__linux__)
     if (runtime.command_resources.memory_bytes != 0) {
         EXPECT_NE(output.find("memory=134217728\n"), std::string::npos);
     }
+
+    mint::ToolRuntimeSettings workspace_runtime;
+    workspace_runtime.command_resources.workspace_disk_bytes = 1024;
+    mint::ToolRegistry workspace_tools(
+        workspace,
+        mint::ToolRegistryOptions{.allowed_programs = {program}, .runtime = workspace_runtime});
+    const auto workspace_limited = mint::Json::parse(workspace_tools.execute(
+        {"command-workspace-limit",
+         "run_command",
+         {{"program", program},
+          {"args",
+           mint::Json::array({"--command-helper", "write-large", "workspace-limit.bin"})}}}));
+    EXPECT_EQ(workspace_limited.at("status"), "resource_limited") << workspace_limited.dump(2);
+    EXPECT_EQ(workspace_limited.at("resource_limit"), "workspace_disk");
+    const auto preflight_limited = mint::Json::parse(workspace_tools.execute(
+        {"command-workspace-preflight",
+         "run_command",
+         {{"program", program},
+          {"args", mint::Json::array({"--command-helper", "echo", "must-not-run"})}}}));
+    EXPECT_EQ(preflight_limited.at("status"), "resource_limited") << preflight_limited.dump(2);
+    EXPECT_TRUE(preflight_limited.at("output").get<std::string>().empty());
 #endif
 
     const auto limited_path = workspace / "limited.bin";
@@ -1766,7 +1801,6 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
     EXPECT_EQ(cpu_limited.at("status"), "resource_limited");
     EXPECT_EQ(cpu_limited.at("resource_limit"), "cpu");
 
-#if defined(_WIN32)
     mint::ToolRuntimeSettings process_runtime;
     process_runtime.command_resources.max_processes = 1;
     mint::ToolRegistry process_tools(
@@ -1781,6 +1815,7 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
     EXPECT_EQ(process_limited.at("status"), "resource_limited") << process_limited.dump(2);
     EXPECT_EQ(process_limited.at("resource_limit"), "processes");
 
+#if defined(_WIN32)
     auto unsupported_runtime = mint::ToolRuntimeSettings{};
     unsupported_runtime.command_resources.file_size_bytes = 1024;
     EXPECT_THROW((void)mint::ToolRegistry(
@@ -1804,6 +1839,25 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
                 {{"schema_version", 1}, {"tool_limits", {{"search_max_hits", 0}}}});
         },
         "task policy rejects unsafe tool budget values");
+#if defined(_WIN32)
+    const std::filesystem::path external_policy_path = R"(C:\toolchain)";
+#else
+    const std::filesystem::path external_policy_path = "/opt/toolchain";
+#endif
+    const auto external_policy = mint::parse_task_policy(
+        {{"schema_version", 1},
+         {"command_read_paths", mint::Json::array({external_policy_path.generic_string()})}});
+    MINT_EXPECT(external_policy.command_read_paths ==
+                    std::vector<std::filesystem::path>{external_policy_path.lexically_normal()},
+                "task policy preserves explicit external command read paths");
+    MINT_EXPECT(external_policy.fingerprint != legacy_defaults.fingerprint,
+                "external command read paths participate in the policy fingerprint");
+    expect_failure(
+        [] {
+            (void)mint::parse_task_policy(
+                {{"schema_version", 1}, {"command_read_paths", mint::Json::array({"relative"})}});
+        },
+        "task policy rejects relative external command read paths");
 
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -2113,6 +2167,67 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
                                       protected_secret.generic_string(), "sandbox secret\n"})}}}));
     MINT_EXPECT(blocked_read.at("exit_code") != 0,
                 "sandbox blocks command reads of protected runtime files");
+
+#if defined(_WIN32)
+    const auto external_directory = temporary.path() / "external-toolchain";
+#else
+    const char* previous_home_value = std::getenv("HOME");
+    const std::optional<std::string> previous_home =
+        previous_home_value == nullptr ? std::nullopt
+                                       : std::optional(std::string(previous_home_value));
+    const auto isolated_home = temporary.path() / "home";
+    const auto external_directory = isolated_home / "external-toolchain";
+    ASSERT_EQ(::setenv("HOME", isolated_home.c_str(), 1), 0);
+#endif
+    const auto external_file = external_directory / "metadata.txt";
+    std::filesystem::create_directories(external_directory);
+    write_text(external_file, "toolchain metadata\n");
+    EXPECT_THROW(
+        (void)mint::ToolRegistry(
+            workspace, mint::ToolRegistryOptions{.command_read_paths = {external_directory},
+                                                 .allowed_programs = {program}}),
+        std::invalid_argument);
+    EXPECT_THROW((void)mint::ToolRegistry(
+                     workspace, mint::ToolRegistryOptions{.command_read_paths = {workspace},
+                                                          .allowed_programs = {program},
+                                                          .require_command_sandbox = true}),
+                 std::invalid_argument);
+    EXPECT_THROW(
+        (void)mint::ToolRegistry(
+            workspace, mint::ToolRegistryOptions{.protected_paths = {external_file},
+                                                 .command_read_paths = {external_directory},
+                                                 .allowed_programs = {program},
+                                                 .require_command_sandbox = true}),
+        std::invalid_argument);
+    mint::ToolRegistry external_tools(
+        workspace, mint::ToolRegistryOptions{.command_read_paths = {external_directory},
+                                             .allowed_programs = {program},
+                                             .require_command_sandbox = true});
+    const auto external_read = mint::Json::parse(external_tools.execute(
+        {"sandbox-external-read",
+         "run_command",
+         {{"program", program},
+          {"args", mint::Json::array({"--command-helper", "verify", external_file.generic_string(),
+                                      "toolchain metadata\n"})}}}));
+    MINT_EXPECT(external_read.at("exit_code") == 0,
+                "sandbox exposes explicitly authorized external paths for reads: " +
+                    external_read.dump());
+    const auto external_write = mint::Json::parse(external_tools.execute(
+        {"sandbox-external-write",
+         "run_command",
+         {{"program", program},
+          {"args",
+           mint::Json::array({"--command-helper", "write", external_file.generic_string()})}}}));
+    MINT_EXPECT(external_write.at("exit_code") != 0 &&
+                    read_text(external_file) == "toolchain metadata\n",
+                "external command paths remain read-only: " + external_write.dump());
+#if !defined(_WIN32)
+    if (previous_home.has_value()) {
+        ASSERT_EQ(::setenv("HOME", previous_home->c_str(), 1), 0);
+    } else {
+        ASSERT_EQ(::unsetenv("HOME"), 0);
+    }
+#endif
 
     LoopbackListener host_listener;
     const auto blocked_network = mint::Json::parse(

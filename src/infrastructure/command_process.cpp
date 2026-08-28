@@ -1,5 +1,8 @@
 #include "command_process.hpp"
 
+#include "command_process_tree.hpp"
+#include "command_resource_monitor.hpp"
+
 #include "mint/runtime/task_control.hpp"
 
 #include <algorithm>
@@ -132,7 +135,7 @@ bool set_cpu_limit(std::size_t seconds) noexcept {
     return ::setrlimit(RLIMIT_CPU, &bounds) == 0;
 }
 
-enum class ResourceLimitError { none, cpu, memory, processes, file_size };
+enum class ResourceLimitError { none, cpu, memory, file_size };
 
 ResourceLimitError apply_resource_limits(const CommandResourceLimits& limits) noexcept {
     if (!set_cpu_limit(limits.cpu_seconds)) {
@@ -154,15 +157,6 @@ ResourceLimitError apply_resource_limits(const CommandResourceLimits& limits) no
         return ResourceLimitError::memory;
     }
 #endif
-#if defined(RLIMIT_NPROC)
-    if (!set_resource_limit(RLIMIT_NPROC, limits.max_processes)) {
-        return ResourceLimitError::processes;
-    }
-#else
-    if (limits.max_processes != 0) {
-        return ResourceLimitError::processes;
-    }
-#endif
     return ResourceLimitError::none;
 }
 
@@ -172,8 +166,6 @@ std::string_view resource_limit_error_message(ResourceLimitError error) noexcept
         return "mint: failed to apply cpu resource limit\n";
     case ResourceLimitError::memory:
         return "mint: failed to apply memory resource limit\n";
-    case ResourceLimitError::processes:
-        return "mint: failed to apply process resource limit\n";
     case ResourceLimitError::file_size:
         return "mint: failed to apply file-size resource limit\n";
     case ResourceLimitError::none:
@@ -219,6 +211,17 @@ ProcessResult execute_process(ProcessRequest request) {
     auto environment_storage = filtered_environment();
     auto environment = mutable_pointers(environment_storage);
 
+    const auto started_at = std::chrono::steady_clock::now();
+    if (workspace_disk_limit_exceeded(request.workspace_root,
+                                      request.resource_limits.workspace_disk_bytes)) {
+        return {.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - started_at)
+                                   .count(),
+                .status = "resource_limited",
+                .resource_limited = true,
+                .resource_limit = "workspace_disk"};
+    }
+
     std::array<int, 2> output_pipe{};
     if (::pipe(output_pipe.data()) != 0) {
         throw std::runtime_error("无法创建命令输出管道: " + std::string(std::strerror(errno)));
@@ -232,7 +235,6 @@ ProcessResult execute_process(ProcessRequest request) {
         throw std::runtime_error("无法配置命令输出管道: " + message);
     }
 
-    const auto started_at = std::chrono::steady_clock::now();
     const auto process = ::fork();
     if (process < 0) {
         const auto message = std::string(std::strerror(errno));
@@ -270,8 +272,10 @@ ProcessResult execute_process(ProcessRequest request) {
 
     ProcessResult result;
     result.output.reserve(std::min<std::size_t>(request.max_output_bytes, 16 * 1024));
-    bool exited = false;
+    bool root_exited = false;
     int wait_status = 0;
+    ProcessTreeMonitor process_tree(process);
+    auto next_workspace_check = started_at + std::chrono::milliseconds(100);
 
     const auto drain_output = [&]() {
         std::array<char, 4096> buffer{};
@@ -290,41 +294,57 @@ ProcessResult execute_process(ProcessRequest request) {
     };
 
     const auto terminate_process = [&]() {
-        (void)::kill(-process, SIGTERM);
+        process_tree.signal_all(SIGTERM);
         const auto grace_deadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
         while (std::chrono::steady_clock::now() < grace_deadline) {
             drain_output();
-            const auto grace_wait = ::waitpid(process, &wait_status, WNOHANG);
-            if (grace_wait == process) {
-                exited = true;
-                break;
+            if (!root_exited) {
+                const auto grace_wait = ::waitpid(process, &wait_status, WNOHANG);
+                if (grace_wait == process) {
+                    root_exited = true;
+                }
+            }
+            if (root_exited && process_tree.refresh() == 0) {
+                return;
             }
             pollfd descriptor{output_pipe[0], POLLIN | POLLHUP, 0};
             (void)::poll(&descriptor, 1, 10);
         }
-        if (!exited) {
-            (void)::kill(-process, SIGKILL);
+        process_tree.signal_all(SIGKILL);
+        if (!root_exited) {
             while (::waitpid(process, &wait_status, 0) < 0 && errno == EINTR) {
             }
-            exited = true;
+            root_exited = true;
+        }
+        const auto kill_deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        while (process_tree.refresh() != 0 && std::chrono::steady_clock::now() < kill_deadline) {
+            process_tree.signal_all(SIGKILL);
+            pollfd descriptor{output_pipe[0], POLLIN | POLLHUP, 0};
+            (void)::poll(&descriptor, 1, 10);
         }
     };
 
     const auto deadline = started_at + std::chrono::seconds(request.timeout_seconds);
-    while (!exited) {
+    while (true) {
         drain_output();
-        const auto waited = ::waitpid(process, &wait_status, WNOHANG);
-        if (waited == process) {
-            exited = true;
-            break;
+        if (!root_exited) {
+            const auto waited = ::waitpid(process, &wait_status, WNOHANG);
+            if (waited == process) {
+                root_exited = true;
+            } else if (waited < 0 && errno != EINTR) {
+                const auto message = std::string(std::strerror(errno));
+                process_tree.signal_all(SIGKILL);
+                (void)::waitpid(process, &wait_status, 0);
+                ::close(output_pipe[0]);
+                throw std::runtime_error("等待命令进程失败: " + message);
+            }
         }
-        if (waited < 0 && errno != EINTR) {
-            const auto message = std::string(std::strerror(errno));
-            (void)::kill(-process, SIGKILL);
-            (void)::waitpid(process, &wait_status, 0);
-            ::close(output_pipe[0]);
-            throw std::runtime_error("等待命令进程失败: " + message);
+
+        const auto live_processes = process_tree.refresh();
+        if (root_exited && live_processes == 0) {
+            break;
         }
 
         if (request.task_control != nullptr && request.task_control->cancellation_requested()) {
@@ -346,6 +366,25 @@ ProcessResult execute_process(ProcessRequest request) {
                 break;
             }
         }
+        if (request.resource_limits.max_processes != 0 &&
+            live_processes > request.resource_limits.max_processes) {
+            result.resource_limited = true;
+            result.resource_limit = "processes";
+            terminate_process();
+            break;
+        }
+        if (request.resource_limits.workspace_disk_bytes != 0 &&
+            std::chrono::steady_clock::now() >= next_workspace_check) {
+            next_workspace_check =
+                std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            if (workspace_disk_limit_exceeded(request.workspace_root,
+                                              request.resource_limits.workspace_disk_bytes)) {
+                result.resource_limited = true;
+                result.resource_limit = "workspace_disk";
+                terminate_process();
+                break;
+            }
+        }
         if (std::chrono::steady_clock::now() >= deadline) {
             result.timed_out = true;
             terminate_process();
@@ -361,6 +400,14 @@ ProcessResult execute_process(ProcessRequest request) {
     result.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                              std::chrono::steady_clock::now() - started_at)
                              .count();
+
+    if (!result.cancelled && !result.task_timed_out && !result.timed_out &&
+        !result.resource_limited &&
+        workspace_disk_limit_exceeded(request.workspace_root,
+                                      request.resource_limits.workspace_disk_bytes)) {
+        result.resource_limited = true;
+        result.resource_limit = "workspace_disk";
+    }
 
     if (!result.cancelled && !result.task_timed_out && !result.timed_out &&
         !result.resource_limited && WIFSIGNALED(wait_status)) {

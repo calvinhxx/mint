@@ -23,6 +23,7 @@ struct CommandRecipe {
 struct TaskPolicy {
     std::filesystem::path source_path{};
     std::vector<std::filesystem::path> write_paths{};
+    std::vector<std::filesystem::path> command_read_paths{};
     std::vector<CommandRecipe> recipes{};
     bool require_verification = false;
     std::size_t max_turns = runtime_defaults::max_turns;

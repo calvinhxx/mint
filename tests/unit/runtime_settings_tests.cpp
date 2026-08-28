@@ -39,7 +39,8 @@ TEST(RuntimeSettings, JsonRoundTripPreservesEveryField) {
     expected.command_resources = {.cpu_seconds = 30,
                                   .memory_bytes = 512 * 1024 * 1024,
                                   .max_processes = 64,
-                                  .file_size_bytes = 8 * 1024 * 1024};
+                                  .file_size_bytes = 8 * 1024 * 1024,
+                                  .workspace_disk_bytes = 64 * 1024 * 1024};
 
     const auto actual =
         mint::parse_tool_runtime_settings(mint::tool_runtime_settings_to_json(expected));
@@ -57,6 +58,9 @@ TEST(RuntimeSettings, RejectsUnknownAndOutOfRangeValues) {
     EXPECT_THROW(
         (void)mint::parse_tool_runtime_settings({{"command_resources", {{"memory_bytes", 1024}}}}),
         std::invalid_argument);
+    EXPECT_THROW((void)mint::parse_tool_runtime_settings(
+                     {{"command_resources", {{"workspace_disk_bytes", 1}}}}),
+                 std::invalid_argument);
     EXPECT_THROW(
         (void)mint::parse_tool_runtime_settings({{"command_resources", {{"unexpected", 1}}}}),
         std::invalid_argument);

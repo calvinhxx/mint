@@ -9,6 +9,8 @@
 #include "command_appcontainer_windows.hpp"
 #include "command_process.hpp"
 
+#include "command_resource_monitor.hpp"
+
 #include "mint/runtime/task_control.hpp"
 
 #include <algorithm>
@@ -461,6 +463,17 @@ ProcessResult execute_process(ProcessRequest request) {
     }
     validate_process_resource_support(request.resource_limits);
 
+    const auto started_at = std::chrono::steady_clock::now();
+    if (workspace_disk_limit_exceeded(request.workspace_root,
+                                      request.resource_limits.workspace_disk_bytes)) {
+        return {.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - started_at)
+                                   .count(),
+                .status = "resource_limited",
+                .resource_limited = true,
+                .resource_limit = "workspace_disk"};
+    }
+
     SECURITY_ATTRIBUTES inherited_attributes{};
     inherited_attributes.nLength = sizeof(inherited_attributes);
     inherited_attributes.bInheritHandle = TRUE;
@@ -504,7 +517,6 @@ ProcessResult execute_process(ProcessRequest request) {
     PROCESS_INFORMATION process_information{};
     const DWORD creation_flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW |
                                  EXTENDED_STARTUPINFO_PRESENT;
-    const auto started_at = std::chrono::steady_clock::now();
     if (!::CreateProcessW(executable.c_str(), arguments.data(), nullptr, nullptr, TRUE,
                           creation_flags, environment.data(), working_directory.c_str(),
                           &startup.StartupInfo, &process_information)) {
@@ -529,6 +541,7 @@ ProcessResult execute_process(ProcessRequest request) {
     result.output.reserve(std::min<std::size_t>(request.max_output_bytes, 16 * 1024));
     bool root_exited = false;
     bool terminated = false;
+    auto next_workspace_check = started_at + std::chrono::milliseconds(100);
 
     const auto terminate_job = [&]() {
         if (!terminated) {
@@ -548,6 +561,17 @@ ProcessResult execute_process(ProcessRequest request) {
             result.resource_limited = true;
             result.resource_limit = limit;
             terminate_job();
+        }
+        if (!result.resource_limited && request.resource_limits.workspace_disk_bytes != 0 &&
+            std::chrono::steady_clock::now() >= next_workspace_check) {
+            next_workspace_check =
+                std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            if (workspace_disk_limit_exceeded(request.workspace_root,
+                                              request.resource_limits.workspace_disk_bytes)) {
+                result.resource_limited = true;
+                result.resource_limit = "workspace_disk";
+                terminate_job();
+            }
         }
         if (!result.resource_limited && request.task_control != nullptr &&
             request.task_control->cancellation_requested()) {
@@ -588,6 +612,13 @@ ProcessResult execute_process(ProcessRequest request) {
             result.resource_limited = true;
             result.resource_limit = limit;
         }
+    }
+    if (!result.resource_limited && !result.cancelled && !result.task_timed_out &&
+        !result.timed_out &&
+        workspace_disk_limit_exceeded(request.workspace_root,
+                                      request.resource_limits.workspace_disk_bytes)) {
+        result.resource_limited = true;
+        result.resource_limit = "workspace_disk";
     }
     drain_output(output_read.get(), result, request.max_output_bytes);
     result.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(

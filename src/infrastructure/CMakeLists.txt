@@ -4,13 +4,17 @@ if(WIN32)
         command_process_windows.cpp
     )
 else()
-    set(mint_command_process_sources command_process.cpp)
+    set(mint_command_process_sources
+        command_process.cpp
+        command_process_tree.cpp
+    )
 endif()
 
 add_library(mint_infrastructure STATIC
     ${mint_command_process_sources}
     change_transaction_store.cpp
     command_runner.cpp
+    command_resource_monitor.cpp
     command_sandbox.cpp
     config.cpp
     demo_model_client.cpp
