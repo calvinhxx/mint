@@ -35,6 +35,20 @@ if(NOT actual_checksum STREQUAL expected_checksum)
     message(FATAL_ERROR "Package checksum does not match ${checksum_path}")
 endif()
 
+get_filename_component(package_name "${package_path}" NAME)
+set(canonical_checksum_contents "${actual_checksum}  ${package_name}\n")
+file(CONFIGURE
+    OUTPUT "${checksum_path}"
+    CONTENT "${canonical_checksum_contents}"
+    @ONLY
+    NEWLINE_STYLE UNIX
+)
+string(HEX "${canonical_checksum_contents}" canonical_checksum_hex)
+file(READ "${checksum_path}" written_checksum_hex HEX)
+if(NOT written_checksum_hex STREQUAL canonical_checksum_hex)
+    message(FATAL_ERROR "Package checksum file is not portable: ${checksum_path}")
+endif()
+
 set(extract_dir "${MINT_BUILD_DIR}/package-verify")
 file(REMOVE_RECURSE "${extract_dir}")
 file(MAKE_DIRECTORY "${extract_dir}")

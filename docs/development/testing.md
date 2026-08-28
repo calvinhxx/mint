@@ -72,7 +72,7 @@ cpack --config build/vcpkg-release/CPackConfig.cmake
 cmake -DMINT_BUILD_DIR=build/vcpkg-release -P cmake/VerifyPackage.cmake
 ~~~
 
-产物位于 `build/vcpkg-release/packages`。Windows 使用 `.zip`，macOS / Linux 使用 `.tar.gz`；每个包都有 `.sha256`。六平台 CI 都会解包运行 `mint --version`，并检查 provider 模板、项目许可证和依赖许可证。
+产物位于 `build/vcpkg-release/packages`。Windows 使用 `.zip`，macOS / Linux 使用 `.tar.gz`；每个包都有使用 LF 换行的 `.sha256`，可在任意平台校验。六平台 CI 都会解包运行 `mint --version`，并检查 provider 模板、项目许可证和依赖许可证。
 
 macOS 使用 13.0 deployment target。Linux 包由 Ubuntu 24.04 runner 构建，不承诺兼容更旧的 glibc。Windows 和 macOS 归档当前未做商业证书签名或 notarization。
 
@@ -82,7 +82,7 @@ macOS 使用 13.0 deployment target。Linux 包由 Ubuntu 24.04 runner 构建，
 gh workflow run CI --ref main -f release_packages=true
 ~~~
 
-这次运行会用六个独立 Release preset 构建、解包验收并上传保留 7 天的 Actions artifacts，不会创建 GitHub Release。普通 push 和 PR 不上传这些包。
+这次运行会用六个独立 Release preset 构建、解包验收并上传保留 7 天的 Actions artifacts，再由 Ubuntu 汇总检查文件数量和六份 SHA-256；它不会创建 GitHub Release。普通 push 和 PR 不上传这些包。
 
 在主分支提交上推送与 CMake、vcpkg manifest 和 Changelog 日期一致的 `vMAJOR.MINOR.PATCH` tag 后，CI 会执行同一条打包路径。全部测试和包验收通过后才公开 GitHub Release。
 

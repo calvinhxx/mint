@@ -102,6 +102,24 @@ void append_output(std::string& output, const char* data, std::size_t size, std:
     truncated = truncated || accepted < size;
 }
 
+void write_best_effort(int descriptor, std::string_view message) noexcept {
+    auto* data = message.data();
+    auto remaining = message.size();
+    while (remaining > 0) {
+        const auto written = ::write(descriptor, data, remaining);
+        if (written > 0) {
+            const auto accepted = static_cast<std::size_t>(written);
+            data += accepted;
+            remaining -= accepted;
+            continue;
+        }
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
+        return;
+    }
+}
+
 void close_inherited_descriptors() {
 #if defined(__linux__) && defined(SYS_close_range)
     if (::syscall(SYS_close_range, 3U, ~0U, 0U) == 0) {
@@ -250,14 +268,14 @@ ProcessResult execute_process(ProcessRequest request) {
         if (::chdir(request.cwd.c_str()) != 0 || ::dup2(output_pipe[1], STDOUT_FILENO) < 0 ||
             ::dup2(output_pipe[1], STDERR_FILENO) < 0) {
             constexpr char message[] = "mint: failed to prepare approved command\n";
-            (void)::write(output_pipe[1], message, sizeof(message) - 1);
+            write_best_effort(output_pipe[1], std::string_view(message, sizeof(message) - 1));
             ::_exit(126);
         }
         reset_resource_signals();
         const auto limit_error = apply_resource_limits(request.resource_limits);
         if (limit_error != ResourceLimitError::none) {
             const auto message = resource_limit_error_message(limit_error);
-            (void)::write(STDERR_FILENO, message.data(), message.size());
+            write_best_effort(STDERR_FILENO, message);
             ::_exit(126);
         }
         ::close(output_pipe[0]);
@@ -265,7 +283,7 @@ ProcessResult execute_process(ProcessRequest request) {
         close_inherited_descriptors();
         ::execve(request.executable.c_str(), argv.data(), environment.data());
         constexpr char message[] = "mint: failed to execute approved command\n";
-        (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+        write_best_effort(STDERR_FILENO, std::string_view(message, sizeof(message) - 1));
         ::_exit(127);
     }
 
