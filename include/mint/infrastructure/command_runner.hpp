@@ -35,6 +35,7 @@ struct CommandRunnerOptions {
     std::shared_ptr<TaskControl> task_control{};
     CommandApproval approval{};
     bool require_os_sandbox = false;
+    std::vector<std::filesystem::path> read_only_paths{};
     std::vector<std::filesystem::path> denied_read_paths{};
 };
 

@@ -19,6 +19,7 @@ namespace {
 
 constexpr std::size_t max_policy_bytes = 256 * 1024;
 constexpr std::size_t max_recipe_count = 32;
+constexpr std::size_t max_command_read_path_count = 64;
 
 void reject_unknown_fields(const Json& object, const std::set<std::string>& allowed,
                            std::string_view context) {
@@ -188,8 +189,9 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
         throw std::invalid_argument("task policy 顶层必须是 JSON 对象");
     }
     reject_unknown_fields(document,
-                          {"schema_version", "write_paths", "recipes", "require_verification",
-                           "max_turns", "max_context_bytes", "max_seconds", "tool_limits"},
+                          {"schema_version", "write_paths", "command_read_paths", "recipes",
+                           "require_verification", "max_turns", "max_context_bytes", "max_seconds",
+                           "tool_limits"},
                           "task policy");
     if (!document.contains("schema_version") ||
         !document.at("schema_version").is_number_integer() ||
@@ -243,6 +245,29 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
         }
     }
 
+    if (document.contains("command_read_paths")) {
+        if (!document.at("command_read_paths").is_array() ||
+            document.at("command_read_paths").size() > max_command_read_path_count) {
+            throw std::invalid_argument("policy command_read_paths 必须是最多 64 项的字符串数组");
+        }
+        std::set<std::string> unique_paths;
+        for (const auto& item : document.at("command_read_paths")) {
+            if (!item.is_string()) {
+                throw std::invalid_argument("policy command_read_paths 必须全部是字符串");
+            }
+            const auto path_text = item.get<std::string>();
+            const std::filesystem::path read_path(path_text);
+            if (path_text.empty() || path_text.find('\0') != std::string::npos ||
+                !read_path.is_absolute()) {
+                throw std::invalid_argument("policy command_read_paths 只接受绝对路径");
+            }
+            const auto normalized = read_path.lexically_normal().generic_string();
+            if (unique_paths.insert(normalized).second) {
+                policy.command_read_paths.emplace_back(normalized);
+            }
+        }
+    }
+
     if (document.contains("recipes")) {
         if (!document.at("recipes").is_array() ||
             document.at("recipes").size() > max_recipe_count) {
@@ -279,6 +304,12 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
                        {"max_seconds", policy.max_seconds}};
     if (policy.tool_limits != ToolRuntimeSettings{}) {
         normalized["tool_limits"] = tool_runtime_settings_to_json(policy.tool_limits);
+    }
+    if (!policy.command_read_paths.empty()) {
+        normalized["command_read_paths"] = Json::array();
+        for (const auto& read_path : policy.command_read_paths) {
+            normalized["command_read_paths"].push_back(read_path.generic_string());
+        }
     }
     for (const auto& write_path : policy.write_paths) {
         normalized["write_paths"].push_back(write_path.generic_string());

@@ -10,6 +10,9 @@
 
 #if !defined(_WIN32)
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <strings.h>
+#endif
 #endif
 
 namespace mint::command_detail {
@@ -50,11 +53,52 @@ bool is_inside(const std::filesystem::path& root, const std::filesystem::path& c
     auto root_part = root.begin();
     auto candidate_part = candidate.begin();
     for (; root_part != root.end(); ++root_part, ++candidate_part) {
-        if (candidate_part == candidate.end() || *root_part != *candidate_part) {
+        if (candidate_part == candidate.end()) {
             return false;
         }
+#if defined(__APPLE__)
+        if (::strcasecmp((*root_part).c_str(), (*candidate_part).c_str()) != 0) {
+            return false;
+        }
+#else
+        if (*root_part != *candidate_part) {
+            return false;
+        }
+#endif
     }
     return true;
+}
+
+std::vector<std::filesystem::path>
+normalize_read_only_paths(const std::filesystem::path& workspace,
+                          std::vector<std::filesystem::path> paths,
+                          const std::vector<std::filesystem::path>& denied_paths) {
+    std::vector<std::filesystem::path> normalized;
+    normalized.reserve(paths.size());
+    for (auto& path : paths) {
+        std::error_code error;
+        path = std::filesystem::weakly_canonical(std::move(path), error);
+        if (error || path.empty() || !path.is_absolute() || !std::filesystem::exists(path, error) ||
+            error) {
+            throw std::invalid_argument("命令外部只读路径不存在或不是绝对路径");
+        }
+        if (is_inside(workspace, path) || is_inside(path, workspace)) {
+            throw std::invalid_argument("命令外部只读路径不能位于工作区内或包含工作区: " +
+                                        path.generic_string());
+        }
+        for (const auto& denied_input : denied_paths) {
+            error.clear();
+            const auto denied = std::filesystem::weakly_canonical(denied_input, error);
+            if (!error && !denied.empty() && (is_inside(path, denied) || is_inside(denied, path))) {
+                throw std::invalid_argument("命令外部只读路径不能与保护路径重叠: " +
+                                            path.generic_string());
+            }
+        }
+        normalized.push_back(std::move(path));
+    }
+    std::sort(normalized.begin(), normalized.end());
+    normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
+    return normalized;
 }
 
 bool is_executable_file(const std::filesystem::path& path) {
@@ -333,7 +377,10 @@ std::vector<std::filesystem::path> sandbox_tool_paths(
 SandboxConfig linux_sandbox_config(
     const std::filesystem::path& root,
     const std::unordered_map<std::string, std::filesystem::path>& resolved_programs,
+    std::vector<std::filesystem::path> read_only_paths,
     std::vector<std::filesystem::path> denied_read_paths) {
+    read_only_paths =
+        normalize_read_only_paths(root, std::move(read_only_paths), denied_read_paths);
     SandboxConfig config{.executable = bubblewrap_executable(),
                          .arguments = {"bwrap", "--die-with-parent", "--new-session",
                                        "--unshare-user", "--unshare-ipc", "--unshare-pid",
@@ -368,6 +415,12 @@ SandboxConfig linux_sandbox_config(
             continue;
         }
         append_bind(config.arguments, "--ro-bind", path, path);
+    }
+
+    for (const auto& path : read_only_paths) {
+        if (is_covered_by(masked_roots, path)) {
+            append_bind(config.arguments, "--ro-bind", path, path);
+        }
     }
 
     append_bind(config.arguments, "--bind", root, root);
@@ -432,12 +485,18 @@ std::filesystem::path resolve_program(const std::string& requested) {
 SandboxConfig build_sandbox_config(
     bool required, const std::filesystem::path& root,
     const std::unordered_map<std::string, std::filesystem::path>& resolved_programs,
+    std::vector<std::filesystem::path> read_only_paths,
     std::vector<std::filesystem::path> denied_read_paths) {
     if (!required) {
+        if (!read_only_paths.empty()) {
+            throw std::invalid_argument("命令外部只读路径需要启用操作系统沙箱");
+        }
         return {};
     }
 
 #if defined(__APPLE__)
+    read_only_paths =
+        normalize_read_only_paths(root, std::move(read_only_paths), denied_read_paths);
     SandboxConfig config{.executable = "/usr/bin/sandbox-exec", .backend = "macos-seatbelt"};
     if (!is_executable_file(config.executable)) {
         throw std::invalid_argument("当前主机缺少 /usr/bin/sandbox-exec，拒绝无 OS 沙箱执行命令");
@@ -464,6 +523,14 @@ SandboxConfig build_sandbox_config(
                                sandbox_string(executable.generic_string()) + "\"))";
                 }
             }
+            for (const auto& path : read_only_paths) {
+                if (is_inside(home, path)) {
+                    profile +=
+                        " (require-not (" +
+                        std::string(std::filesystem::is_directory(path) ? "subpath" : "literal") +
+                        " \"" + sandbox_string(path.generic_string()) + "\"))";
+                }
+            }
             profile += "))";
         }
     }
@@ -482,11 +549,13 @@ SandboxConfig build_sandbox_config(
     config.arguments = {"sandbox-exec", "-p", std::move(profile)};
     return config;
 #elif defined(__linux__)
-    return linux_sandbox_config(root, resolved_programs, std::move(denied_read_paths));
+    return linux_sandbox_config(root, resolved_programs, std::move(read_only_paths),
+                                std::move(denied_read_paths));
 #elif defined(_WIN32)
     (void)root;
     SandboxConfig config{.backend = "windows-appcontainer",
                          .uses_native_process_sandbox = true,
+                         .read_only_paths = std::move(read_only_paths),
                          .denied_paths = std::move(denied_read_paths)};
     config.allowed_executables.reserve(resolved_programs.size());
     for (const auto& [label, executable] : resolved_programs) {
@@ -497,6 +566,7 @@ SandboxConfig build_sandbox_config(
 #else
     (void)root;
     (void)resolved_programs;
+    (void)read_only_paths;
     (void)denied_read_paths;
     throw std::invalid_argument(
         "当前主机没有已实现的命令 OS 沙箱后端；若确实接受风险，显式关闭该策略");

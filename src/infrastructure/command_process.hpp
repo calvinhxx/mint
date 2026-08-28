@@ -22,6 +22,7 @@ class WindowsAppContainer;
 struct ProcessRequest {
     std::filesystem::path executable;
     std::vector<std::string> argv;
+    std::filesystem::path workspace_root;
     std::filesystem::path cwd;
     long timeout_seconds = 0;
     std::size_t max_output_bytes = 0;

@@ -20,6 +20,7 @@ std::optional<TaskPolicy> apply_task_policy(CommandLine& command_line) {
     auto policy = load_task_policy(command_line.policy);
     command_line.allow_write = !policy.write_paths.empty();
     command_line.allowed_write_paths = policy.write_paths;
+    command_line.command_read_paths = policy.command_read_paths;
     command_line.command_recipes = policy.recipes;
     command_line.require_verification = policy.require_verification;
     command_line.max_turns = policy.max_turns;
@@ -36,6 +37,7 @@ void force_managed_demo_read_only(CommandLine& command_line, bool managed_demo) 
     }
     command_line.allow_write = false;
     command_line.allowed_write_paths.clear();
+    command_line.command_read_paths.clear();
     command_line.command_recipes.clear();
     command_line.require_verification = false;
     command_line.policy_fingerprint.clear();
@@ -69,6 +71,9 @@ void validate_execution_options(const CommandLine& command_line, bool has_comman
     }
     if (command_line.unsafe_no_command_sandbox && !has_commands) {
         throw std::invalid_argument("--unsafe-no-command-sandbox 只在同时授权命令时有意义");
+    }
+    if (!command_line.command_read_paths.empty() && !has_commands) {
+        throw std::invalid_argument("command_read_paths 需要至少一个命令或 recipe");
     }
     if (command_line.require_verification && (!command_line.allow_write || !has_commands)) {
         throw std::invalid_argument("验证门禁需要同时启用写入和至少一个命令或 recipe");
@@ -156,6 +161,7 @@ ToolRegistryOptions tool_options(const CommandLine& command_line,
     return {.protected_paths = std::move(protected_files),
             .allow_write = command_line.allow_write,
             .allowed_write_paths = command_line.allowed_write_paths,
+            .command_read_paths = command_line.command_read_paths,
             .allowed_programs = command_line.allowed_programs,
             .command_recipes = command_line.command_recipes,
             .policy_fingerprint = command_line.policy_fingerprint,

@@ -226,15 +226,15 @@ Json process_result_json(const CommandInvocation& invocation, command_detail::Pr
     return result;
 }
 
-command_detail::ProcessRequest process_request(const CommandInvocation& invocation,
-                                               bool wraps_command,
-                                               const std::filesystem::path& sandbox_executable,
-                                               const std::vector<std::string>& sandbox_arguments,
-                                               bool sandbox_sets_working_directory,
-                                               std::size_t max_output_bytes,
-                                               const std::shared_ptr<TaskControl>& task_control) {
+command_detail::ProcessRequest
+process_request(const CommandInvocation& invocation, const std::filesystem::path& workspace_root,
+                bool wraps_command, const std::filesystem::path& sandbox_executable,
+                const std::vector<std::string>& sandbox_arguments,
+                bool sandbox_sets_working_directory, std::size_t max_output_bytes,
+                const std::shared_ptr<TaskControl>& task_control) {
     command_detail::ProcessRequest request;
     request.executable = wraps_command ? sandbox_executable : invocation.executable;
+    request.workspace_root = workspace_root;
     request.argv.reserve(invocation.arguments.size() + sandbox_arguments.size() + 4);
     if (wraps_command) {
         request.argv = sandbox_arguments;
@@ -335,9 +335,9 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
     recipe_indices_ = std::move(catalog.recipe_indices);
     recipe_names_ = std::move(catalog.recipe_names);
 
-    auto sandbox =
-        command_detail::build_sandbox_config(options.require_os_sandbox, root_, resolved_programs_,
-                                             std::move(options.denied_read_paths));
+    auto sandbox = command_detail::build_sandbox_config(
+        options.require_os_sandbox, root_, resolved_programs_, std::move(options.read_only_paths),
+        std::move(options.denied_read_paths));
     sandbox_executable_ = std::move(sandbox.executable);
     sandbox_arguments_ = std::move(sandbox.arguments);
     sandbox_backend_ = std::move(sandbox.backend);
@@ -347,7 +347,8 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
 #if defined(_WIN32)
         native_sandbox_ = std::make_unique<NativeSandboxState>();
         native_sandbox_->windows_appcontainer = command_detail::WindowsAppContainer::create(
-            root_, std::move(sandbox.allowed_executables), std::move(sandbox.denied_paths));
+            root_, std::move(sandbox.allowed_executables), std::move(sandbox.read_only_paths),
+            std::move(sandbox.denied_paths));
 #else
         throw std::logic_error("当前平台未实现声明的原生进程沙箱");
 #endif
@@ -498,9 +499,9 @@ Json CommandRunner::run_command(const Json& arguments) const {
         return *stopped;
     }
 
-    auto request =
-        process_request(invocation, sandbox_wraps_command_, sandbox_executable_, sandbox_arguments_,
-                        sandbox_sets_working_directory_, max_output_bytes_, task_control_);
+    auto request = process_request(invocation, root_, sandbox_wraps_command_, sandbox_executable_,
+                                   sandbox_arguments_, sandbox_sets_working_directory_,
+                                   max_output_bytes_, task_control_);
 #if defined(_WIN32)
     if (native_sandbox_ != nullptr) {
         request.windows_appcontainer = native_sandbox_->windows_appcontainer;

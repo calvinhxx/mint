@@ -40,7 +40,8 @@
 - Windows、macOS、Linux 的 x64 / ARM64 CMake preset、原生 CI runner 和矩阵一致性校验，六组合均已通过；
 - Linux Bubblewrap 安全命令后端，隔离宿主写入、用户目录、运行时套接字、网络和继承文件描述符；
 - Windows AppContainer 命令后端，隔离越界写入、受保护文件和网络，并使用 `CreateProcessW`、继承句柄白名单、过滤环境和 Job Object；
-- policy 可配置命令资源上限：POSIX 支持 CPU、内存、进程数和单文件大小，Windows Job Object 支持进程树 CPU、内存和进程数；
+- policy 可声明工作区外的只读工具链路径，Windows AppContainer 会按路径补充只读 DACL，macOS / Linux 会在隐藏目录中重新暴露该路径；
+- policy 可配置命令资源上限：三平台限制进程树总数并巡检工作区磁盘用量；POSIX 另支持 CPU、内存和单文件大小，Windows Job Object 支持 CPU 和内存；
 - 本地与 GitHub Actions 共用一条发布检查，覆盖版本、格式、Debug、Release、Sanitizer、CTest 和离线 CLI；
 - v1.4 真实 Chat Completions 回归，包含工具调用、限流等待、修改、验证和独立复测；
 - 文本输出、JSON 输出和诊断信息分流。
@@ -60,16 +61,15 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 
 | 方向 | 缺口 |
 |---|---|
-| 平台运行时 | Windows 还不能在 policy 中声明工作区外的自定义只读工具链路径 |
-| 资源限制 | 还缺 POSIX 进程树总量、跨平台工作区磁盘配额；Windows 不支持单文件大小限制 |
+| 资源限制 | Windows 不支持单文件大小限制；POSIX CPU / 内存不是进程树汇总；工作区磁盘限制是巡检而非文件系统硬配额 |
 | 恢复 | changeset 已可自动恢复；单文件写和命令仍按副作用工具处理，需要用户确认不确定结果 |
 | 模型兼容 | Responses、SSE 和更多 provider 尚未做真实回归 |
 | 交互 | 没有持续聊天、多任务 GUI 和多 Agent 编排 |
 
 ## 下一步
 
-1. 增加 Windows 外部只读工具链路径，补 POSIX 进程树总量与跨平台工作区磁盘配额；
-2. 有模型额度时，按固定配置分别跑 OpenAI Responses、Groq Chat 和 DeepSeek Chat 真实回归；
+1. 有模型额度时，按固定配置分别跑 OpenAI Responses、Groq Chat 和 DeepSeek Chat 真实回归；
+2. 根据真实构建负载决定是否增加 Linux cgroup 等硬资源后端；
 3. 内核稳定后再增加持续聊天和 GUI。
 
 历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议，v1.5 补齐六平台构建、三平台命令隔离、资源限制、多文件事务恢复和 provider profile。

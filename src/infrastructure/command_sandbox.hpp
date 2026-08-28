@@ -14,6 +14,7 @@ struct SandboxConfig {
     bool sets_working_directory = false;
     bool uses_native_process_sandbox = false;
     std::vector<std::filesystem::path> allowed_executables{};
+    std::vector<std::filesystem::path> read_only_paths{};
     std::vector<std::filesystem::path> denied_paths{};
 };
 
@@ -22,6 +23,7 @@ struct SandboxConfig {
 [[nodiscard]] SandboxConfig build_sandbox_config(
     bool required, const std::filesystem::path& root,
     const std::unordered_map<std::string, std::filesystem::path>& resolved_programs,
+    std::vector<std::filesystem::path> read_only_paths,
     std::vector<std::filesystem::path> denied_read_paths);
 
 } // namespace mint::command_detail

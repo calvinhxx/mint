@@ -296,16 +296,20 @@ void restore_path(const std::filesystem::path& path,
 std::shared_ptr<WindowsAppContainer>
 WindowsAppContainer::create(const std::filesystem::path& workspace,
                             std::vector<std::filesystem::path> allowed_executables,
+                            std::vector<std::filesystem::path> read_only_paths,
                             std::vector<std::filesystem::path> denied_paths) {
-    return std::shared_ptr<WindowsAppContainer>(new WindowsAppContainer(
-        workspace, std::move(allowed_executables), std::move(denied_paths)));
+    return std::shared_ptr<WindowsAppContainer>(
+        new WindowsAppContainer(workspace, std::move(allowed_executables),
+                                std::move(read_only_paths), std::move(denied_paths)));
 }
 
 WindowsAppContainer::WindowsAppContainer(const std::filesystem::path& workspace,
                                          std::vector<std::filesystem::path> allowed_executables,
+                                         std::vector<std::filesystem::path> read_only_paths,
                                          std::vector<std::filesystem::path> denied_paths) {
     try {
-        initialize(workspace, std::move(allowed_executables), std::move(denied_paths));
+        initialize(workspace, std::move(allowed_executables), std::move(read_only_paths),
+                   std::move(denied_paths));
     } catch (...) {
         cleanup();
         throw;
@@ -330,6 +334,7 @@ const std::filesystem::path& WindowsAppContainer::temp_directory() const noexcep
 
 void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
                                      std::vector<std::filesystem::path> allowed_executables,
+                                     std::vector<std::filesystem::path> read_only_paths,
                                      std::vector<std::filesystem::path> denied_paths) {
     const auto resolved_workspace = canonical_existing_path(workspace, "命令工作区");
     if (!path_is_directory(resolved_workspace)) {
@@ -349,6 +354,27 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
         state.security_descriptor = read_security_descriptor(state.path, state.dacl_protected);
         protected_paths_.push_back(std::move(state));
     }
+
+    for (auto& path : read_only_paths) {
+        path = canonical_existing_path(path, "命令外部只读路径");
+        if (is_inside(resolved_workspace, path) || is_inside(path, resolved_workspace)) {
+            throw std::invalid_argument("命令外部只读路径不能位于工作区内或包含工作区: " +
+                                        path.string());
+        }
+        for (const auto& protected_path : protected_paths_) {
+            if (is_inside(path, protected_path.path) || is_inside(protected_path.path, path)) {
+                throw std::invalid_argument("命令外部只读路径不能与保护路径重叠: " + path.string());
+            }
+        }
+    }
+    std::sort(read_only_paths.begin(), read_only_paths.end(),
+              [](const auto& left, const auto& right) {
+                  return ::CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) ==
+                         CSTR_LESS_THAN;
+              });
+    read_only_paths.erase(
+        std::unique(read_only_paths.begin(), read_only_paths.end(), path_component_equal),
+        read_only_paths.end());
 
     profile_name_ = unique_profile_name();
     const HRESULT create_result =
@@ -380,7 +406,17 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
     acl_paths_.push_back(resolved_workspace);
     grant_path(resolved_workspace, sid_, workspace_access, true);
 
+    for (const auto& path : read_only_paths) {
+        acl_paths_.push_back(path);
+        grant_path(path, sid_, readonly_access, true);
+    }
+
     for (const auto& path : executable_read_paths(resolved_workspace, allowed_executables)) {
+        const bool covered = std::any_of(read_only_paths.begin(), read_only_paths.end(),
+                                         [&](const auto& root) { return is_inside(root, path); });
+        if (covered) {
+            continue;
+        }
         acl_paths_.push_back(path);
         grant_path(path, sid_, readonly_access, false);
     }

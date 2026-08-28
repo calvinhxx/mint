@@ -88,6 +88,6 @@ $env:GROQ_API_KEY = '你的密钥'
 
 三个平台都默认要求操作系统隔离。Linux 会隐藏用户目录和任务配置，只把工作区映射为宿主机可写路径，并断开宿主网络。缺少 Bubblewrap 时，mint 会拒绝运行项目命令。
 
-Windows 会在 AppContainer 中直接启动登记程序，不经过 shell。命令可访问工作区和已授权的程序，不能读受保护文件、越界写入或使用网络。
+Windows 会在 AppContainer 中直接启动登记程序，不经过 shell。命令可访问工作区和已授权的程序，不能读受保护文件、越界写入或使用网络。工具链需要工作区外文件时，可在 policy 中增加 `command_read_paths`；格式和边界见[安全与恢复](../guides/safety-and-recovery.md#命令权限)。
 
 `--unsafe-no-command-sandbox` 会关闭当前平台的这层保护，不是日常运行所需的参数。

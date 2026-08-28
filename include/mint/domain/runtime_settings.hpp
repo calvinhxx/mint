@@ -29,6 +29,7 @@ inline constexpr std::size_t command_cpu_seconds = 0;
 inline constexpr std::size_t command_memory_bytes = 0;
 inline constexpr std::size_t command_max_processes = 0;
 inline constexpr std::size_t command_file_size_bytes = 0;
+inline constexpr std::size_t command_workspace_disk_bytes = 0;
 
 } // namespace runtime_defaults
 
@@ -56,6 +57,9 @@ inline constexpr std::size_t max_command_memory_bytes = std::size_t{64} * 1024 *
 inline constexpr std::size_t max_command_processes = 1024;
 inline constexpr std::size_t min_command_file_size_bytes = 1024;
 inline constexpr std::size_t max_command_file_size_bytes = std::size_t{8} * 1024 * 1024 * 1024;
+inline constexpr std::size_t min_command_workspace_disk_bytes = 1024;
+inline constexpr std::size_t max_command_workspace_disk_bytes =
+    std::size_t{1024} * 1024 * 1024 * 1024;
 
 } // namespace runtime_bounds
 
@@ -65,6 +69,7 @@ struct CommandResourceLimits {
     std::size_t memory_bytes = runtime_defaults::command_memory_bytes;
     std::size_t max_processes = runtime_defaults::command_max_processes;
     std::size_t file_size_bytes = runtime_defaults::command_file_size_bytes;
+    std::size_t workspace_disk_bytes = runtime_defaults::command_workspace_disk_bytes;
 
     bool operator==(const CommandResourceLimits&) const = default;
 };

@@ -32,6 +32,7 @@ struct ToolRegistryOptions {
     std::vector<std::filesystem::path> protected_paths{};
     bool allow_write = false;
     std::vector<std::filesystem::path> allowed_write_paths{};
+    std::vector<std::filesystem::path> command_read_paths{};
     std::vector<std::string> allowed_programs{};
     std::vector<CommandRecipe> command_recipes{};
     std::string policy_fingerprint{};

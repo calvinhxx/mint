@@ -19,6 +19,7 @@ class WindowsAppContainer final {
     static std::shared_ptr<WindowsAppContainer>
     create(const std::filesystem::path& workspace,
            std::vector<std::filesystem::path> allowed_executables,
+           std::vector<std::filesystem::path> read_only_paths,
            std::vector<std::filesystem::path> denied_paths);
 
     ~WindowsAppContainer();
@@ -40,10 +41,12 @@ class WindowsAppContainer final {
 
     WindowsAppContainer(const std::filesystem::path& workspace,
                         std::vector<std::filesystem::path> allowed_executables,
+                        std::vector<std::filesystem::path> read_only_paths,
                         std::vector<std::filesystem::path> denied_paths);
 
     void initialize(const std::filesystem::path& workspace,
                     std::vector<std::filesystem::path> allowed_executables,
+                    std::vector<std::filesystem::path> read_only_paths,
                     std::vector<std::filesystem::path> denied_paths);
     void cleanup() noexcept;
 
