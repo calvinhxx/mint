@@ -6,6 +6,12 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_packages:
+        description: Build and upload six Release archives without publishing a release
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +27,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      release_packages: ${{ steps.release-mode.outputs.enabled }}
 
     steps:
       - name: Checkout
@@ -42,6 +49,19 @@ jobs:
           git merge-base --is-ancestor \
             "$GITHUB_SHA" \
             "origin/${{ github.event.repository.default_branch }}"
+
+      - name: Select release package mode
+        id: release-mode
+        shell: bash
+        env:
+          MINT_TAG_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          MINT_MANUAL_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_packages }}
+        run: |
+          if [[ "$MINT_TAG_RELEASE" == "true" || "$MINT_MANUAL_RELEASE" == "true" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Export build matrix
         id: matrix
@@ -126,21 +146,21 @@ jobs:
           cmake -DMINT_BUILD_DIR=build/${{ matrix.preset }} -P cmake/VerifyPackage.cmake
 
       - name: Configure release package
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.build-plan.outputs.release_packages == 'true'
         run: cmake --preset ${{ matrix.release_preset }}
 
       - name: Build release package
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.build-plan.outputs.release_packages == 'true'
         run: cmake --build --preset ${{ matrix.release_preset }}
 
       - name: Create and verify release package
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.build-plan.outputs.release_packages == 'true'
         run: |
           cpack --config build/${{ matrix.release_preset }}/CPackConfig.cmake
           cmake -DMINT_BUILD_DIR=build/${{ matrix.release_preset }} -P cmake/VerifyPackage.cmake
 
       - name: Upload release package
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.build-plan.outputs.release_packages == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mint-${{ matrix.id }}

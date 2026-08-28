@@ -18,6 +18,7 @@
 - Added API key environment-variable loading and redacted endpoint query parameters from configuration reports.
 - Added standard CMake installation and versioned CPack archives for six platform/architecture combinations, including provider templates, checksums, runtime dependencies, and license files.
 - Separated test and Release presets for every platform so published archives omit GoogleTest and vcpkg build helpers.
+- Added an opt-in workflow dispatch that builds and uploads all six Release archives without creating a tag or GitHub Release.
 - Added package extraction and launch checks to every platform lane; matching version tags publish only after the full matrix and quality gate pass.
 - Fixed Windows file replacement and multi-config fixture handling exposed by the native test lanes.
 - Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
