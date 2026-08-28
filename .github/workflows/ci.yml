@@ -82,9 +82,8 @@ jobs:
 
       - name: Activate MSVC
         if: matrix.platform == 'windows'
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-        with:
-          arch: ${{ matrix.arch == 'arm64' && 'amd64_arm64' || 'amd64' }}
+        shell: pwsh
+        run: ./.github/scripts/setup-msvc.ps1 -TargetArchitecture "${{ matrix.arch }}"
 
       - name: Cache vcpkg packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
