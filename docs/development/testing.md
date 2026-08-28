@@ -109,7 +109,7 @@ ctest --preset vcpkg-sanitize
 
 changeset 恢复测试会真实写两个文件并重建 `ToolRegistry`，覆盖：完整写入后崩溃、只完成部分文件、checkpoint 已确认但日志未清、外部改写、两个进程争用同一任务，以及 Agent 自动回滚并重放 in-flight changeset。测试同时检查 schema v2/v3 可迁移到 v4。
 
-provider 契约测试会加载 `configs/providers` 下四份固定配置，检查端点识别、代理声明、能力冲突、token 字段、流式 usage、Responses 推理续传和报告脱敏。下面的命令不访问网络：
+provider 契约测试会加载 `configs/providers` 下四份固定配置，检查端点识别、代理声明、能力冲突、token 字段、流式 usage、Responses 推理续传、DeepSeek Chat 的 `reasoning_content` 续传和报告脱敏。下面的命令不访问网络：
 
 ~~~bash
 ./build/vcpkg-dev/mint provider --config configs/providers/groq-chat.json --json

@@ -74,7 +74,7 @@ flowchart LR
 2. 代理地址在配置中明确写 `provider`；
 3. 其他地址按 `custom` 处理，可以显式填写 `capabilities`。
 
-能力目录集中在 `model_provider_profile.cpp`，目前决定工具调用、流式输出、流式 usage、无状态推理续传和 token 上限字段。它描述的是 API 方言，不承诺某个模型始终可用。
+能力目录集中在 `model_provider_profile.cpp`，决定工具调用、`tool_choice`、流式 usage、推理续传和 token 上限字段。DeepSeek V4 默认思考模式会保留并回传 `reasoning_content`、补齐工具消息的空 `content`，同时省略它不接受的显式 `tool_choice`；协议层不按域名写分支。能力目录描述的是 API 方言，不承诺某个模型始终可用。
 
 `mint provider --config ...` 只离线解析配置，不读取密钥。`mint provider test --config ...` 才会读取密钥并发出请求；它绕过 Agent Loop 和工作区工具，用固定的两轮握手检查 function call、参数解析和工具结果续接。
 
