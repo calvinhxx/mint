@@ -484,6 +484,7 @@ SandboxConfig build_sandbox_config(
 #elif defined(__linux__)
     return linux_sandbox_config(root, resolved_programs, std::move(denied_read_paths));
 #elif defined(_WIN32)
+    (void)root;
     SandboxConfig config{.backend = "windows-appcontainer",
                          .uses_native_process_sandbox = true,
                          .denied_paths = std::move(denied_read_paths)};
