@@ -13,6 +13,8 @@
 - Added secret-free fixed provider configurations and an offline `mint provider` command that reports the resolved adapter and capabilities without reading or printing API keys.
 - Added an explicit, spend-bounded `mint provider test` handshake that validates a two-request tool round trip and emits only sanitized compatibility metrics.
 - Added API key environment-variable loading and redacted endpoint query parameters from configuration reports.
+- Added standard CMake installation and versioned CPack archives for six platform/architecture combinations, including provider templates, checksums, runtime dependencies, and license files.
+- Added package extraction and launch checks to every platform lane; matching version tags publish only after the full matrix and quality gate pass.
 - Fixed Windows file replacement and multi-config fixture handling exposed by the native test lanes.
 - Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
 - Added a security policy, immutable workflow action pins, a pin-validation gate, and weekly Dependabot updates.

@@ -6,6 +6,10 @@ mint 是一个轻量的通用 AI Agent 工具。它提供模型循环、工具�
 
 ## 快速试用
 
+预编译包从 v1.5.0 开始提供，可在 [Releases](https://github.com/calvinhxx/mint/releases) 下载 Windows、macOS 或 Linux 的 x64 / ARM64 版本。解压后，程序在 `bin` 目录。
+
+也可以从源码构建。
+
 需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。macOS / Linux 用 `export VCPKG_ROOT=/path/to/vcpkg`，Windows PowerShell 用 `$env:VCPKG_ROOT = 'C:\src\vcpkg'`。
 
 ~~~bash
