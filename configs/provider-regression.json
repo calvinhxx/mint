@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "openai-responses",
+      "config": "providers/openai-responses.json"
+    },
+    {
+      "id": "groq-chat",
+      "config": "providers/groq-chat.json"
+    },
+    {
+      "id": "deepseek-chat",
+      "config": "providers/deepseek-chat.json"
+    }
+  ]
+}
