@@ -1,4 +1,5 @@
 find_package(GTest CONFIG REQUIRED)
+find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
 include(MintTesting)
 
 add_library(mint_test_support STATIC
@@ -112,6 +113,27 @@ set_tests_properties(
     PROPERTIES
         LABELS "v1.5;smoke"
         PASS_REGULAR_EXPRESSION "\"provider\":\"groq\""
+)
+
+add_test(
+    NAME provider_regression_script_unit
+    COMMAND "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/tests/scripts/provider_regression_tests.py"
+)
+set_tests_properties(provider_regression_script_unit PROPERTIES LABELS "unit;v1.5")
+
+add_test(
+    NAME provider_regression_offline
+    COMMAND "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/scripts/provider-regression.py"
+        --mint $<TARGET_FILE:mint>
+        --manifest "${PROJECT_SOURCE_DIR}/configs/provider-regression.json"
+)
+set_tests_properties(
+    provider_regression_offline
+    PROPERTIES
+        LABELS "v1.5;acceptance"
+        PASS_REGULAR_EXPRESSION "\"operation\": \"provider_regression\""
 )
 
 add_test(
