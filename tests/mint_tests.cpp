@@ -2118,6 +2118,27 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
                     blocked_network.dump());
 }
 
+#if defined(_WIN32)
+TEST(CommandRunnerTest, RunsCMakeInAppContainer) {
+    TemporaryDirectory temporary;
+    const auto workspace = temporary.path() / "workspace";
+    write_text(workspace / "README.md", "# AppContainer smoke test\n");
+
+    mint::ToolRegistry tools(workspace, mint::ToolRegistryOptions{.allowed_programs = {"cmake"},
+                                                                  .require_command_sandbox = true});
+    const auto result = mint::Json::parse(
+        tools.execute({"cmake-version",
+                       "run_command",
+                       {{"program", "cmake"}, {"args", mint::Json::array({"--version"})}}}));
+
+    MINT_EXPECT(result.at("sandbox_backend") == "windows-appcontainer",
+                "CMake runs through the Windows AppContainer backend");
+    const auto output = result.at("output").get<std::string>();
+    MINT_EXPECT(result.at("exit_code") == 0 && output.find("cmake version") != std::string::npos,
+                "installed CMake remains usable in the AppContainer: " + result.dump());
+}
+#endif
+
 TEST(AgentLoopTest, CompletesReadOnlyTask) {
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
