@@ -72,3 +72,9 @@ cp config.responses.example.json config.json
 模型不能执行任意 shell，只能选择 `init` 登记的命令。文件访问受项目根目录和任务 policy 限制，任务记录保存在项目之外。
 
 macOS 和 Linux 默认要求操作系统沙箱。Linux 会隐藏用户目录和任务配置，只把当前工作区映射为宿主机可写路径，并断开宿主网络。缺少 Bubblewrap 时，mint 会拒绝运行项目命令。
+
+Windows 已能无 shell 地运行登记过的程序，并限制继承句柄、环境、进程树、CPU 和内存；但它还不能隔离文件和网络。默认仍会拒绝项目命令。只有明确接受该风险时才使用：
+
+~~~powershell
+.\build\vcpkg-release\mint.exe run --root . --unsafe-no-command-sandbox "运行测试"
+~~~
