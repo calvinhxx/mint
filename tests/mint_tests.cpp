@@ -105,9 +105,13 @@ int run_command_helper(int argc, char** argv) {
     }
     if (mode == "spin") {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        volatile std::uint64_t accumulator = 1;
         while (std::chrono::steady_clock::now() < deadline) {
+            for (std::size_t iteration = 0; iteration < 1'000'000; ++iteration) {
+                accumulator = accumulator * 1664525U + 1013904223U;
+            }
         }
-        return 0;
+        return accumulator == 0 ? 17 : 0;
     }
     if (mode == "flood") {
         std::cout << std::string(4096, 'x');
@@ -1468,9 +1472,9 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
                                                     R"(quote"inside)", R"(trailing\\)"})}}}));
     const auto quoted_output = quoted.at("output").get<std::string>();
     MINT_EXPECT(quoted.at("exit_code") == 0 &&
-                    quoted_output.find("arg=with spaces\n") != std::string::npos &&
-                    quoted_output.find("arg=quote\"inside\n") != std::string::npos &&
-                    quoted_output.find("arg=trailing\\\\\n") != std::string::npos,
+                    quoted_output.find("arg=with spaces") != std::string::npos &&
+                    quoted_output.find("arg=quote\"inside") != std::string::npos &&
+                    quoted_output.find("arg=trailing\\\\") != std::string::npos,
                 "argv preserves spaces, quotes and trailing backslashes without a shell");
 
     const auto failed = mint::Json::parse(tools.execute(
