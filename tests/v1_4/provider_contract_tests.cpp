@@ -809,6 +809,109 @@ TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
 #endif
 }
 
+TEST(ProviderCliContractTest, RunsSanitizedLiveProviderAcceptance) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
+#else
+    if (mint_executable.empty()) {
+        GTEST_SKIP() << "mint executable was not supplied";
+    }
+    constexpr auto challenge = "mint-provider-acceptance-v1";
+    constexpr auto receipt = "MINT_PROVIDER_ACCEPTANCE_OK";
+    constexpr auto api_key = "acceptance-test-secret";
+
+    const mint::Json tool_response = {
+        {"id", "resp_acceptance_1"},
+        {"status", "completed"},
+        {"model", "responses-acceptance-test"},
+        {"output", mint::Json::array({{{"id", "fc_acceptance"},
+                                       {"type", "function_call"},
+                                       {"call_id", "call_acceptance"},
+                                       {"name", "mint_acceptance_echo"},
+                                       {"arguments", mint::Json({{"challenge", challenge}}).dump()},
+                                       {"status", "completed"}}})},
+        {"usage", {{"input_tokens", 7}, {"output_tokens", 3}, {"total_tokens", 10}}}};
+    std::string first_stream;
+    first_stream += sse({{"type", "response.function_call_arguments.delta"},
+                         {"item_id", "fc_acceptance"},
+                         {"output_index", 0},
+                         {"delta", mint::Json({{"challenge", challenge}}).dump()}});
+    first_stream += sse({{"type", "response.completed"}, {"response", tool_response}});
+
+    const mint::Json final_response = {
+        {"id", "resp_acceptance_2"},
+        {"status", "completed"},
+        {"model", "responses-acceptance-test"},
+        {"output",
+         mint::Json::array(
+             {{{"id", "msg_acceptance"},
+               {"type", "message"},
+               {"role", "assistant"},
+               {"status", "completed"},
+               {"content", mint::Json::array({{{"type", "output_text"}, {"text", receipt}}})}}})},
+        {"usage", {{"input_tokens", 12}, {"output_tokens", 2}, {"total_tokens", 14}}}};
+    std::string second_stream;
+    second_stream += sse({{"type", "response.output_text.delta"},
+                          {"item_id", "msg_acceptance"},
+                          {"output_index", 0},
+                          {"content_index", 0},
+                          {"delta", receipt}});
+    second_stream += sse({{"type", "response.completed"}, {"response", final_response}});
+    ScriptedHttpServer server({std::move(first_stream), std::move(second_stream)});
+
+    TemporaryDirectory temporary;
+    const auto config_path = temporary.path() / "provider.json";
+    write_text(config_path, mint::Json({{"adapter", "responses"},
+                                        {"api_url", server.url()},
+                                        {"api_key", api_key},
+                                        {"model", "responses-acceptance-test"},
+                                        {"connect_timeout_seconds", 2},
+                                        {"request_timeout_seconds", 2},
+                                        {"max_retries", 4},
+                                        {"max_completion_tokens", 4096},
+                                        {"stream", true}})
+                                .dump(2));
+
+    const auto [exit_code, output] = run_process(
+        {mint_executable, "provider", "test", "--config", config_path.generic_string(), "--json"});
+    server.wait();
+    MINT_EXPECT(exit_code == 0, "provider acceptance exits successfully: " + output);
+
+    mint::Json result;
+    ASSERT_NO_THROW(result = mint::Json::parse(output))
+        << "provider acceptance stdout is not one JSON document: " << output;
+    MINT_EXPECT(result.at("operation") == "test" && result.at("status") == "passed" &&
+                    result.at("provider") == "custom" && result.at("adapter") == "responses",
+                "provider acceptance reports the tested protocol profile");
+    MINT_EXPECT(result.at("limits").at("max_completion_tokens") == 1024 &&
+                    result.at("limits").at("max_attempts_per_request") == 2,
+                "provider acceptance caps output and retry spend");
+    const auto& acceptance = result.at("acceptance");
+    MINT_EXPECT(acceptance.at("requests") == 2 && acceptance.at("attempts") == 2 &&
+                    acceptance.at("retries") == 0 && acceptance.at("streamed_requests") == 2 &&
+                    acceptance.at("stream_events") == 4,
+                "provider acceptance reports the two streamed requests");
+    MINT_EXPECT(acceptance.at("usage").at("reported_requests") == 2 &&
+                    acceptance.at("usage").at("total_tokens") == 24 &&
+                    acceptance.at("checks").at("function_call") &&
+                    acceptance.at("checks").at("arguments_round_trip") &&
+                    acceptance.at("checks").at("tool_result_continuation"),
+                "provider acceptance proves tool calling, continuation, and usage parsing");
+    MINT_EXPECT(output.find(api_key) == std::string::npos &&
+                    output.find(receipt) == std::string::npos &&
+                    output.find(challenge) == std::string::npos,
+                "provider acceptance output excludes credentials and raw prompt or model content");
+    MINT_EXPECT(server.request(0).find(R"("name":"mint_acceptance_echo")") != std::string::npos &&
+                    server.request(0).find(challenge) != std::string::npos &&
+                    server.request(0).find(R"("max_output_tokens":1024)") != std::string::npos,
+                "first provider acceptance request advertises the fixed low-cost tool contract");
+    MINT_EXPECT(server.request(1).find(R"("type":"function_call_output")") != std::string::npos &&
+                    server.request(1).find(R"("call_id":"call_acceptance")") != std::string::npos &&
+                    server.request(1).find(receipt) != std::string::npos,
+                "second provider acceptance request returns the tool result with call linkage");
+#endif
+}
+
 } // namespace
 
 #undef MINT_EXPECT

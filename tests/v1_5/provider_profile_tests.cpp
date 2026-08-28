@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -270,15 +271,24 @@ TEST(ProviderCliContractTest, ReportsCapabilitiesWithoutReadingOrPrintingApiKeys
     EXPECT_EQ(output.str().find("url-secret"), std::string::npos);
 }
 
-TEST(ProviderCliContractTest, AcceptsOnlyOfflineInspectionOptions) {
-    const auto command = parse_command({"mint", "provider", "--config", "provider.json", "--json"});
-    EXPECT_EQ(command.mode, mint::cli::CommandMode::provider);
-    EXPECT_EQ(command.config, "provider.json");
-    EXPECT_TRUE(command.json_output);
+TEST(ProviderCliContractTest, DistinguishesOfflineInspectionFromExplicitLiveTest) {
+    const auto inspect = parse_command({"mint", "provider", "--config", "provider.json", "--json"});
+    EXPECT_EQ(inspect.mode, mint::cli::CommandMode::provider);
+    EXPECT_EQ(inspect.provider_action, mint::cli::ProviderCommandAction::inspect);
+    EXPECT_EQ(inspect.config, "provider.json");
+    EXPECT_TRUE(inspect.json_output);
+
+    const auto live =
+        parse_command({"mint", "provider", "test", "--config", "provider.json", "--json"});
+    EXPECT_EQ(live.mode, mint::cli::CommandMode::provider);
+    EXPECT_EQ(live.provider_action, mint::cli::ProviderCommandAction::test);
+    EXPECT_EQ(live.config, "provider.json");
+    EXPECT_TRUE(live.json_output);
 
     EXPECT_THROW((void)parse_command({"mint", "provider", "--allow-write"}), std::invalid_argument);
     EXPECT_THROW((void)parse_command({"mint", "provider", "--root", "."}), std::invalid_argument);
     EXPECT_THROW((void)parse_command({"mint", "provider", "run a task"}), std::invalid_argument);
+    EXPECT_THROW((void)parse_command({"mint", "provider", "probe"}), std::invalid_argument);
 }
 
 } // namespace
