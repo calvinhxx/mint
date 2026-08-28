@@ -76,7 +76,15 @@ cmake -DMINT_BUILD_DIR=build/vcpkg-release -P cmake/VerifyPackage.cmake
 
 macOS 使用 13.0 deployment target。Linux 包由 Ubuntu 24.04 runner 构建，不承诺兼容更旧的 glibc。Windows 和 macOS 归档当前未做商业证书签名或 notarization。
 
-在主分支提交上推送与 CMake、vcpkg manifest 和 Changelog 日期一致的 `vMAJOR.MINOR.PATCH` tag 后，CI 会重新构建六个 Release 包。全部测试和包验收通过后才公开 GitHub Release。普通分支和 PR 不上传包。
+正式打 tag 前，可以在主分支手动跑一次六平台候选包：
+
+~~~bash
+gh workflow run CI --ref main -f release_packages=true
+~~~
+
+这次运行会用六个独立 Release preset 构建、解包验收并上传保留 7 天的 Actions artifacts，不会创建 GitHub Release。普通 push 和 PR 不上传这些包。
+
+在主分支提交上推送与 CMake、vcpkg manifest 和 Changelog 日期一致的 `vMAJOR.MINOR.PATCH` tag 后，CI 会执行同一条打包路径。全部测试和包验收通过后才公开 GitHub Release。
 
 只排查某一种构建时，可以单独运行 preset：
 
