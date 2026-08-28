@@ -1,6 +1,7 @@
 #include "mint/application/agent.hpp"
 #include "mint/infrastructure/session_store.hpp"
 #include "mint/tools/tool_registry.hpp"
+#include "mint/version.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -271,8 +272,10 @@ TEST(RecoveryContractTest, ReadOnlyInflightAutomaticallyReplays) {
     MINT_EXPECT(result.completed && result.answer == "resumed safely" &&
                     result.execution.tool_calls == 1,
                 "read-only in-flight work is replayed automatically and exactly once in this run");
-    MINT_EXPECT(session.load().at("in_flight_tool_call").is_null(),
-                "completed replay clears the durable in-flight barrier");
+    const auto migrated = session.load();
+    MINT_EXPECT(migrated.at("in_flight_tool_call").is_null() &&
+                    migrated.at("schema_version") == mint::session_schema_version,
+                "completed replay clears the barrier and migrates schema v3");
 }
 
 } // namespace
