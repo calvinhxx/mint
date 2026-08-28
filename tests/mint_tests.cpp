@@ -8,6 +8,7 @@
 #include "mint/tools.hpp"
 
 #include "agent_support.hpp"
+#include "scripted_http_server.hpp"
 
 #include <algorithm>
 #include <array>
@@ -61,6 +62,8 @@
 namespace {
 
 #define MINT_EXPECT(condition, message) EXPECT_TRUE(condition) << (message)
+
+using mint::test::ScriptedHttpServer;
 
 std::filesystem::path test_executable;
 
@@ -435,145 +438,6 @@ class LoopbackListener final {
     std::uint16_t port_ = 0;
 };
 
-class RetryHttpServer final {
-  public:
-    RetryHttpServer() {
-        listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (listener_ < 0) {
-            throw std::runtime_error("retry test could not create socket");
-        }
-        int reuse = 1;
-        (void)::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        address.sin_port = 0;
-        if (::bind(listener_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
-            ::listen(listener_, 4) != 0) {
-            ::close(listener_);
-            throw std::runtime_error("retry test could not bind loopback server");
-        }
-        socklen_t length = sizeof(address);
-        if (::getsockname(listener_, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
-            ::close(listener_);
-            throw std::runtime_error("retry test could not inspect loopback port");
-        }
-        port_ = ntohs(address.sin_port);
-        thread_ = std::thread([this] { serve(); });
-    }
-
-    ~RetryHttpServer() {
-        if (listener_ >= 0) {
-            ::shutdown(listener_, SHUT_RDWR);
-            ::close(listener_);
-        }
-        if (thread_.joinable()) {
-            thread_.join();
-        }
-    }
-
-    RetryHttpServer(const RetryHttpServer&) = delete;
-    RetryHttpServer& operator=(const RetryHttpServer&) = delete;
-
-    [[nodiscard]] std::string url() const {
-        return "http://127.0.0.1:" + std::to_string(port_) + "/v1/chat/completions";
-    }
-
-    [[nodiscard]] int requests() const noexcept {
-        return requests_.load();
-    }
-
-    [[nodiscard]] bool saw_completion_limit() const noexcept {
-        return saw_completion_limit_.load();
-    }
-
-  private:
-    static void send_all(int descriptor, const std::string& response) {
-        std::size_t offset = 0;
-        while (offset < response.size()) {
-            const auto sent =
-                ::send(descriptor, response.data() + offset, response.size() - offset, 0);
-            if (sent <= 0) {
-                return;
-            }
-            offset += static_cast<std::size_t>(sent);
-        }
-    }
-
-    static std::size_t request_content_length(const std::string& request) {
-        const std::string header = "Content-Length:";
-        const auto position = request.find(header);
-        if (position == std::string::npos) {
-            return 0;
-        }
-        const auto value_start = request.find_first_not_of(" \t", position + header.size());
-        const auto value_end = request.find("\r\n", value_start);
-        return static_cast<std::size_t>(
-            std::stoul(request.substr(value_start, value_end - value_start)));
-    }
-
-    void serve() {
-        for (int index = 0; index < 3; ++index) {
-            pollfd ready{listener_, POLLIN, 0};
-            if (::poll(&ready, 1, 5000) <= 0) {
-                return;
-            }
-            const auto connection = ::accept(listener_, nullptr, nullptr);
-            if (connection < 0) {
-                return;
-            }
-            std::string request;
-            std::array<char, 4096> buffer{};
-            while (request.find("\r\n\r\n") == std::string::npos) {
-                const auto received = ::recv(connection, buffer.data(), buffer.size(), 0);
-                if (received <= 0) {
-                    break;
-                }
-                request.append(buffer.data(), static_cast<std::size_t>(received));
-            }
-            const auto header_end = request.find("\r\n\r\n");
-            if (header_end != std::string::npos) {
-                const auto expected_size = header_end + 4 + request_content_length(request);
-                while (request.size() < expected_size) {
-                    const auto received = ::recv(connection, buffer.data(), buffer.size(), 0);
-                    if (received <= 0) {
-                        break;
-                    }
-                    request.append(buffer.data(), static_cast<std::size_t>(received));
-                }
-            }
-            if (request.find(R"("max_completion_tokens":321)") != std::string::npos) {
-                saw_completion_limit_ = true;
-            }
-            ++requests_;
-            const bool succeed = index == 2;
-            const std::string body =
-                succeed
-                    ? R"({"choices":[{"message":{"role":"assistant","content":"retry passed"}}],)"
-                      R"("usage":{"prompt_tokens":120,"completion_tokens":8,"total_tokens":128,)"
-                      R"("prompt_tokens_details":{"cached_tokens":96}}})"
-                    : R"({"error":{"message":"transient test failure"}})";
-            const std::string status = index == 0
-                                           ? "429 Too Many Requests"
-                                           : (succeed ? "200 OK" : "503 Service Unavailable");
-            const std::string rate_limit_headers =
-                index == 0 ? "Retry-After: 0.02\r\nX-RateLimit-Reset-Tokens: 20ms\r\n" : "";
-            const auto response =
-                std::string("HTTP/1.1 ") + status + "\r\n" + rate_limit_headers +
-                "Content-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
-                "\r\nConnection: close\r\n\r\n" + body;
-            send_all(connection, response);
-            ::shutdown(connection, SHUT_RDWR);
-            ::close(connection);
-        }
-    }
-
-    int listener_ = -1;
-    unsigned short port_ = 0;
-    std::atomic<int> requests_{0};
-    std::atomic<bool> saw_completion_limit_{false};
-    std::thread thread_;
-};
 #endif
 
 void write_text(const std::filesystem::path& path, const std::string& content) {
@@ -2972,13 +2836,20 @@ TEST(ModelConfigTest, LoadsAndValidatesJson) {
 }
 
 TEST(ModelClientTest, RetriesWithServerDirectedBackoff) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
-#else
-    RetryHttpServer server;
+    const std::string transient_error = R"({"error":{"message":"transient test failure"}})";
+    const std::string success =
+        R"({"choices":[{"message":{"role":"assistant","content":"retry passed"}}],)"
+        R"("usage":{"prompt_tokens":120,"completion_tokens":8,"total_tokens":128,)"
+        R"("prompt_tokens_details":{"cached_tokens":96}}})";
+    ScriptedHttpServer server(
+        {{.status = 429,
+          .headers = {{"Retry-After", "0.02"}, {"X-RateLimit-Reset-Tokens", "20ms"}},
+          .body = transient_error},
+         {.status = 503, .body = transient_error},
+         {.body = success}});
     std::vector<mint::ModelProgress> progress;
     mint::ChatCompletionsClient client(
-        {.api_url = server.url(),
+        {.api_url = server.url("/v1/chat/completions"),
          .model = "retry-test-model",
          .connect_timeout_seconds = 2,
          .request_timeout_seconds = 2,
@@ -2993,14 +2864,18 @@ TEST(ModelClientTest, RetriesWithServerDirectedBackoff) {
                         mint::Json::array());
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started);
+    server.wait();
     MINT_EXPECT(reply.text == "retry passed",
                 "model client returns the successful response after transient failures");
-    MINT_EXPECT(server.requests() == 3,
+    MINT_EXPECT(server.request_count() == 3,
                 "model client retries exactly the configured transient failures");
     MINT_EXPECT(elapsed.count() >= 50,
                 "model client honors the server-provided token reset delay for HTTP 429");
-    MINT_EXPECT(server.saw_completion_limit(),
-                "model request carries the configured completion token ceiling");
+    for (std::size_t index = 0; index < server.request_count(); ++index) {
+        MINT_EXPECT(server.request(index).find(R"("max_completion_tokens":321)") !=
+                        std::string::npos,
+                    "every model retry carries the configured completion token ceiling");
+    }
     MINT_EXPECT(reply.usage.available && reply.usage.prompt_tokens == 120 &&
                     reply.usage.completion_tokens == 8 && reply.usage.cached_tokens == 96,
                 "model client exposes prompt, completion and cached token usage");
@@ -3025,7 +2900,6 @@ TEST(ModelClientTest, RetriesWithServerDirectedBackoff) {
     MINT_EXPECT(progress_json.at("kind") == "retry_scheduled" && progress_json.at("attempt") == 1 &&
                     progress_json.at("http_status") == 429,
                 "model progress has a stable event-log JSON contract");
-#endif
 }
 
 } // namespace

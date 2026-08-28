@@ -122,7 +122,7 @@ export GROQ_API_KEY='你的密钥'
 ./build/vcpkg-dev/mint provider test --config configs/providers/groq-chat.json --json
 ~~~
 
-`provider test` 发出两个逻辑请求，检查唯一 function call、参数、call id、工具结果续接、流式状态和 usage。它不读取工作区；成功报告只保留协议、耗时、重试和 token 统计。输出上限固定为配置值与 1024 的较小者，每个逻辑请求最多尝试两次。仓库测试用本地回环 HTTP 服务运行同一条 CLI 路径，因此不会消耗外部额度。
+`provider test` 发出两个逻辑请求，检查唯一 function call、参数、call id、工具结果续接、流式状态和 usage。它不读取工作区；成功报告只保留协议、耗时、重试和 token 统计。输出上限固定为配置值与 1024 的较小者，每个逻辑请求最多尝试两次。仓库测试用一份跨平台回环 HTTP 服务运行 Chat 重试、Responses SSE、Agent 工具循环和同一条 provider 验收路径；六条平台流水线都会执行，不消耗外部额度。
 
 ## 测试覆盖到哪里
 
