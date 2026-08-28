@@ -84,6 +84,8 @@ gh workflow run CI --ref main -f release_packages=true
 
 这次运行会用六个独立 Release preset 构建、解包验收并上传保留 7 天的 Actions artifacts，再由 Ubuntu 汇总检查文件数量和六份 SHA-256；它不会创建 GitHub Release。普通 push 和 PR 不上传这些包。
 
+2026-08-29 的 [v1.5 六平台发布演练](https://github.com/calvinhxx/mint/actions/runs/33203112654) 已通过。汇总 job 验证了 6 个归档和 6 个 SHA-256；下载后再次核对，六份二进制分别为 Linux ELF x86-64 / AArch64、macOS Mach-O x86_64 / arm64 和 Windows PE x86-64 / AArch64。发布 job 按预期跳过，没有创建 tag 或 GitHub Release。
+
 在主分支提交上推送与 CMake、vcpkg manifest 和 Changelog 日期一致的 `vMAJOR.MINOR.PATCH` tag 后，CI 会执行同一条打包路径。tag 还必须包含当前版本的两份真实回归证据；全部门禁和包验收通过后才公开 GitHub Release。
 
 只排查某一种构建时，可以单独运行 preset：
@@ -111,7 +113,7 @@ ctest --preset vcpkg-sanitize
 - Release：构建通过，且未安装 GoogleTest；
 - Release 包：macOS ARM64 归档、SHA-256、文件布局和解包运行通过；
 - clang-format：通过；
-- GitHub Actions 会运行六平台矩阵和发布门禁；最新结果见 [Actions](https://github.com/calvinhxx/mint/actions)。
+- GitHub Actions 六平台矩阵、发布门禁和候选包汇总均通过；最新发布演练见 [Actions #33203112654](https://github.com/calvinhxx/mint/actions/runs/33203112654)。
 
 72 个测试包括 14 个单元测试、30 个集成测试、21 个契约测试、3 个 CLI smoke 和 4 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
 

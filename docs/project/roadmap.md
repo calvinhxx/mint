@@ -14,7 +14,7 @@
 | 命令 | `init / run / resume / status / provider / provider test` |
 | 模型接口 | OpenAI、Groq、DeepSeek 与 custom profile；Chat Completions、Responses、可选 SSE |
 | 构建矩阵 | Windows / macOS / Linux × x64 / ARM64 |
-| 安装包 | v1.5 生成六平台归档与 SHA-256；尚未打正式 tag |
+| 安装包 | v1.5 六平台 Release 归档与 SHA-256 演练通过；尚未打正式 tag |
 | 平台验收 | 六组合原生 CI；三个系统都默认启用 OS 命令隔离 |
 | 本地测试 | Debug 和 Sanitizer CTest 72/72 |
 | 持续集成 | 六组合原生构建矩阵；macOS ARM64 深度门禁 |
@@ -51,6 +51,7 @@
 - policy 可配置命令资源上限：三平台限制进程树总数并巡检工作区磁盘用量；POSIX 另支持 CPU、内存和单文件大小，Windows Job Object 支持 CPU 和内存；
 - 本地与 GitHub Actions 共用一条发布检查，覆盖版本、格式、Debug、Release、Sanitizer、CTest 和离线 CLI；
 - 标准 CMake 安装规则和 CPack 归档，包含 CLI、provider 模板、Windows 运行时 DLL、项目与依赖许可证；测试与 Release 使用独立 preset，六平台都会解包运行版本冒烟，正式 tag 才上传 GitHub Release；
+- v1.5 六平台发布演练已生成并汇总验证 6 个 Release 归档和 6 个 SHA-256，二进制架构与 Windows / macOS / Linux 的 x64 / ARM64 目标一致；
 - v1.4 真实 Chat Completions 回归，包含工具调用、限流等待、修改、验证和独立复测；
 - 文本输出、JSON 输出和诊断信息分流。
 
