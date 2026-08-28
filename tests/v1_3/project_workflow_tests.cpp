@@ -45,12 +45,15 @@ bool contains_string(const mint::Json& array, const std::string& expected) {
 class TemporaryDirectory final {
   public:
     TemporaryDirectory() {
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ =
-            std::filesystem::temp_directory_path() / ("mint-v1-3-tests-" + std::to_string(stamp));
-        if (!std::filesystem::create_directories(path_)) {
-            throw std::runtime_error("could not create temporary test directory");
+        for (int attempt = 0; attempt < 16; ++attempt) {
+            const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+            path_ = std::filesystem::temp_directory_path() /
+                    ("mint-v1-3-tests-" + std::to_string(stamp) + "-" + std::to_string(attempt));
+            if (std::filesystem::create_directories(path_)) {
+                return;
+            }
         }
+        throw std::runtime_error("could not create temporary test directory");
     }
 
     ~TemporaryDirectory() {
