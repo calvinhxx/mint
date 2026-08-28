@@ -1,22 +1,13 @@
 #include "mint/infrastructure/model_provider_client.hpp"
 
 #include "model_http_transport.hpp"
+#include "model_provider_profile.hpp"
 #include "model_request.hpp"
 
 #include <stdexcept>
 #include <utility>
 
 namespace mint {
-
-std::string_view model_adapter_name(ModelAdapter adapter) noexcept {
-    switch (adapter) {
-    case ModelAdapter::chat_completions:
-        return "chat_completions";
-    case ModelAdapter::responses:
-        return "responses";
-    }
-    return "unknown";
-}
 
 std::string_view model_progress_kind_name(ModelProgressKind kind) noexcept {
     switch (kind) {
@@ -62,6 +53,8 @@ ModelProviderClient::ModelProviderClient(ModelProviderConfig config) : config_(s
         config_.max_completion_tokens > model_provider_bounds::max_completion_tokens) {
         throw std::invalid_argument("模型超时或重试配置超出允许范围");
     }
+    (void)resolve_model_provider_profile(config_);
+    model_detail::resolve_model_provider_credentials(config_);
     model_detail::ensure_http_runtime();
 }
 

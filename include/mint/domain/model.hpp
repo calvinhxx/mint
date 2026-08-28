@@ -26,6 +26,7 @@ struct ModelUsage {
 
 struct ModelCallMetadata {
     std::string adapter{};
+    std::string provider{};
     std::string response_id{};
     std::string model{};
     std::size_t attempts = 1;

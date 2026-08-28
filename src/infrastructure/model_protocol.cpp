@@ -354,17 +354,24 @@ struct StreamToolCall {
 
 Json build_provider_request(const ModelProviderConfig& config, const Json& messages,
                             const Json& tools) {
-    if (config.adapter == ModelAdapter::chat_completions) {
-        Json request = {{"model", config.model},
-                        {"messages", sanitized_chat_messages(messages)},
-                        {"max_completion_tokens", config.max_completion_tokens}};
+    const auto profile = resolve_model_provider_profile(config);
+    if (!tools.empty() && !profile.capabilities.function_tools) {
+        throw std::invalid_argument("当前 provider profile 不支持 function tools");
+    }
+
+    if (profile.adapter == ModelAdapter::chat_completions) {
+        Json request = {{"model", config.model}, {"messages", sanitized_chat_messages(messages)}};
+        request[std::string(model_token_limit_parameter_name(
+            profile.capabilities.token_limit_parameter))] = config.max_completion_tokens;
         if (!tools.empty()) {
             request["tools"] = tools;
             request["tool_choice"] = "auto";
         }
         if (config.stream) {
             request["stream"] = true;
-            request["stream_options"] = {{"include_usage", true}};
+            if (profile.capabilities.stream_usage) {
+                request["stream_options"] = {{"include_usage", true}};
+            }
         }
         return request;
     }
@@ -372,8 +379,10 @@ Json build_provider_request(const ModelProviderConfig& config, const Json& messa
     Json request = {{"model", config.model},
                     {"input", responses_input(messages)},
                     {"max_output_tokens", config.max_completion_tokens},
-                    {"store", false},
-                    {"include", Json::array({"reasoning.encrypted_content"})}};
+                    {"store", false}};
+    if (profile.capabilities.stateless_reasoning_replay) {
+        request["include"] = Json::array({"reasoning.encrypted_content"});
+    }
     if (!tools.empty()) {
         request["tools"] = responses_tools(tools);
         request["tool_choice"] = "auto";

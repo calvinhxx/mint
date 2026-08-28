@@ -5,6 +5,7 @@ add_library(mint_cli STATIC
     command_line.cpp
     console.cpp
     project_commands.cpp
+    provider_command.cpp
 )
 
 mint_configure_target(mint_cli)

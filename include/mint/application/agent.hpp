@@ -66,6 +66,7 @@ struct ModelSummary {
     std::size_t streamed_bytes = 0;
     long long duration_ms = 0;
     std::string adapter;
+    std::string provider;
     std::string model;
     std::string last_response_id;
 };

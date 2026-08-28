@@ -1,6 +1,7 @@
 #include "agent_command.hpp"
 #include "command_line.hpp"
 #include "console.hpp"
+#include "provider_command.hpp"
 
 #include "mint/domain/model.hpp"
 #include "mint/version.hpp"
@@ -25,6 +26,9 @@ int main(int argc, char** argv) {
         if (command_line.version) {
             console.write_line("mint ", mint::version);
             return 0;
+        }
+        if (command_line.mode == mint::cli::CommandMode::provider) {
+            return mint::cli::run_provider_command(command_line, console);
         }
         return mint::cli::run_agent_command(std::move(command_line), managed_task, console);
     } catch (const std::exception& error) {

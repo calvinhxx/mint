@@ -1,7 +1,8 @@
 {
+  "provider": "openai",
   "adapter": "responses",
   "api_url": "https://api.openai.com/v1/responses",
-  "api_key": "",
-  "model": "your-model-id",
+  "api_key_env": "OPENAI_API_KEY",
+  "model": "gpt-5.4-mini-2026-03-17",
   "stream": true
 }

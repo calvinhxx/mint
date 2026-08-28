@@ -226,8 +226,9 @@ void ensure_http_runtime() {
 HttpAttempt perform_http_attempt(const ModelProviderConfig& config, std::string_view request_body) {
     HttpAttempt attempt;
     if (config.stream) {
+        const auto profile = resolve_model_provider_profile(config);
         attempt.stream =
-            std::make_unique<detail::ModelStreamDecoder>(config.adapter, config.stream_event);
+            std::make_unique<detail::ModelStreamDecoder>(profile.adapter, config.stream_event);
     }
 
     std::array<char, CURL_ERROR_SIZE> error_buffer{};

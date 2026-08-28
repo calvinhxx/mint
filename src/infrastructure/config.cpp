@@ -1,9 +1,14 @@
 #include "mint/infrastructure/config.hpp"
 
+#include "model_provider_profile.hpp"
+
+#include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace mint {
 namespace {
@@ -61,13 +66,90 @@ bool optional_boolean(const Json& document, const char* field, bool fallback,
     return document.at(field).get<bool>();
 }
 
+ModelAdapter optional_adapter(const Json& document, const std::filesystem::path& config_path) {
+    if (!document.contains("adapter")) {
+        return ModelAdapter::chat_completions;
+    }
+    const auto adapter = required_string(document, "adapter", config_path);
+    if (const auto parsed = model_detail::parse_model_adapter(adapter)) {
+        return *parsed;
+    }
+    throw std::runtime_error("配置文件 " + config_path.string() +
+                             " 中的 \"adapter\" 只能是 chat_completions 或 responses");
+}
+
+ModelProvider optional_provider(const Json& document, const std::filesystem::path& config_path) {
+    if (!document.contains("provider")) {
+        return ModelProvider::automatic;
+    }
+    const auto provider = required_string(document, "provider", config_path);
+    if (const auto parsed = model_detail::parse_model_provider(provider)) {
+        return *parsed;
+    }
+    throw std::runtime_error("配置文件 " + config_path.string() +
+                             " 中的 \"provider\" 只能是 auto、custom、openai、groq 或 "
+                             "deepseek");
+}
+
+ModelTokenLimitParameter token_limit_parameter(const Json& capabilities, ModelAdapter adapter,
+                                               const std::filesystem::path& config_path) {
+    const auto fallback =
+        adapter == ModelAdapter::responses ? "max_output_tokens" : "max_completion_tokens";
+    const auto parameter = capabilities.contains("token_limit_parameter")
+                               ? required_string(capabilities, "token_limit_parameter", config_path)
+                               : std::string(fallback);
+    if (const auto parsed = model_detail::parse_model_token_limit_parameter(parameter)) {
+        return *parsed;
+    }
+    throw std::runtime_error("配置文件 " + config_path.string() +
+                             " 中 capabilities.token_limit_parameter 无效");
+}
+
+std::optional<ModelProviderCapabilities>
+optional_capabilities(const Json& document, ModelAdapter adapter,
+                      const std::filesystem::path& config_path) {
+    if (!document.contains("capabilities")) {
+        return std::nullopt;
+    }
+    const auto& capabilities = document.at("capabilities");
+    if (!capabilities.is_object()) {
+        throw std::runtime_error("配置文件 " + config_path.string() +
+                                 " 中的 \"capabilities\" 必须是对象");
+    }
+    constexpr std::string_view allowed[] = {"function_tools", "streaming", "stream_usage",
+                                            "stateless_reasoning_replay", "token_limit_parameter"};
+    for (auto item = capabilities.begin(); item != capabilities.end(); ++item) {
+        if (std::find(allowed, std::end(allowed), item.key()) == std::end(allowed)) {
+            throw std::runtime_error("配置文件 " + config_path.string() +
+                                     " 包含未知 capability: " + item.key());
+        }
+    }
+
+    ModelProviderCapabilities result;
+    if (adapter == ModelAdapter::responses) {
+        result.stream_usage = false;
+        result.stateless_reasoning_replay = true;
+        result.token_limit_parameter = ModelTokenLimitParameter::max_output_tokens;
+    }
+    result.function_tools =
+        optional_boolean(capabilities, "function_tools", result.function_tools, config_path);
+    result.streaming = optional_boolean(capabilities, "streaming", result.streaming, config_path);
+    result.stream_usage =
+        optional_boolean(capabilities, "stream_usage", result.stream_usage, config_path);
+    result.stateless_reasoning_replay = optional_boolean(
+        capabilities, "stateless_reasoning_replay", result.stateless_reasoning_replay, config_path);
+    result.token_limit_parameter = token_limit_parameter(capabilities, adapter, config_path);
+    return result;
+}
+
 } // namespace
 
 ModelProviderConfig load_model_provider_config(const std::filesystem::path& config_path) {
     std::ifstream input(config_path, std::ios::binary);
     if (!input) {
         throw std::runtime_error("找不到配置文件 " + config_path.string() +
-                                 "。请复制 config.example.json 为 config.json，然后填写 API Key。");
+                                 "。请复制一份 provider 配置为 config.json，并设置对应的 API Key "
+                                 "环境变量。");
     }
 
     Json document;
@@ -83,19 +165,11 @@ ModelProviderConfig load_model_provider_config(const std::filesystem::path& conf
     }
 
     ModelProviderConfig config;
-    if (document.contains("adapter")) {
-        const auto adapter = required_string(document, "adapter", config_path);
-        if (adapter == "chat_completions") {
-            config.adapter = ModelAdapter::chat_completions;
-        } else if (adapter == "responses") {
-            config.adapter = ModelAdapter::responses;
-        } else {
-            throw std::runtime_error("配置文件 " + config_path.string() +
-                                     " 中的 \"adapter\" 只能是 chat_completions 或 responses");
-        }
-    }
+    config.adapter = optional_adapter(document, config_path);
+    config.provider = optional_provider(document, config_path);
     config.api_url = required_string(document, "api_url", config_path);
     config.api_key = optional_string(document, "api_key", config_path);
+    config.api_key_env = optional_string(document, "api_key_env", config_path);
     config.model = required_string(document, "model", config_path);
     constexpr auto max_long = std::numeric_limits<long>::max();
     config.connect_timeout_seconds =
@@ -113,6 +187,13 @@ ModelProviderConfig load_model_provider_config(const std::filesystem::path& conf
         optional_integer(document, "max_completion_tokens", config.max_completion_tokens, 1,
                          model_provider_bounds::max_completion_tokens, config_path);
     config.stream = optional_boolean(document, "stream", config.stream, config_path);
+    config.capabilities = optional_capabilities(document, config.adapter, config_path);
+    try {
+        model_detail::validate_model_provider_credentials(config);
+        (void)resolve_model_provider_profile(config);
+    } catch (const std::invalid_argument& error) {
+        throw std::runtime_error("配置文件 " + config_path.string() + ": " + error.what());
+    }
     return config;
 }
 

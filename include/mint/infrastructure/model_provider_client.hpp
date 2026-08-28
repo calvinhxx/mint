@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -14,7 +15,33 @@ class TaskControl;
 
 enum class ModelAdapter { chat_completions, responses };
 
+enum class ModelProvider { automatic, custom, openai, groq, deepseek };
+
+enum class ModelTokenLimitParameter { max_completion_tokens, max_tokens, max_output_tokens };
+
+enum class ModelProviderSource { explicit_config, endpoint, compatibility_default };
+
+struct ModelProviderCapabilities {
+    bool function_tools = true;
+    bool streaming = true;
+    bool stream_usage = true;
+    bool stateless_reasoning_replay = false;
+    ModelTokenLimitParameter token_limit_parameter =
+        ModelTokenLimitParameter::max_completion_tokens;
+};
+
+struct ModelProviderProfile {
+    ModelProvider provider = ModelProvider::custom;
+    ModelAdapter adapter = ModelAdapter::chat_completions;
+    ModelProviderSource source = ModelProviderSource::compatibility_default;
+    ModelProviderCapabilities capabilities{};
+};
+
 [[nodiscard]] std::string_view model_adapter_name(ModelAdapter adapter) noexcept;
+[[nodiscard]] std::string_view model_provider_name(ModelProvider provider) noexcept;
+[[nodiscard]] std::string_view model_provider_source_name(ModelProviderSource source) noexcept;
+[[nodiscard]] std::string_view
+model_token_limit_parameter_name(ModelTokenLimitParameter parameter) noexcept;
 
 namespace model_provider_defaults {
 
@@ -87,7 +114,14 @@ struct ModelProviderConfig {
     ModelAdapter adapter = ModelAdapter::chat_completions;
     bool stream = false;
     ModelStreamCallback stream_event{};
+    ModelProvider provider = ModelProvider::automatic;
+    std::string api_key_env{};
+    std::optional<ModelProviderCapabilities> capabilities{};
 };
+
+[[nodiscard]] ModelProviderProfile
+resolve_model_provider_profile(const ModelProviderConfig& config);
+[[nodiscard]] Json model_provider_profile_to_json(const ModelProviderProfile& profile);
 
 class ModelProviderClient final : public ModelClient {
   public:

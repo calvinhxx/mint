@@ -1,6 +1,7 @@
 {
+  "provider": "groq",
   "adapter": "chat_completions",
   "api_url": "https://api.groq.com/openai/v1/chat/completions",
-  "api_key": "",
+  "api_key_env": "GROQ_API_KEY",
   "model": "openai/gpt-oss-20b"
 }

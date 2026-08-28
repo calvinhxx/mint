@@ -102,6 +102,7 @@ long retry_delay(const HttpAttempt& attempt, long client_delay_ms) {
 
 ModelReply parse_successful_attempt(const ModelProviderConfig& config, HttpAttempt& attempt,
                                     const ProgressReporter& progress, std::size_t attempt_number) {
+    const auto profile = resolve_model_provider_profile(config);
     Json response;
     std::size_t stream_events = 0;
     std::size_t streamed_bytes = 0;
@@ -113,8 +114,9 @@ ModelReply parse_successful_attempt(const ModelProviderConfig& config, HttpAttem
         response = Json::parse(attempt.body);
     }
 
-    auto reply = detail::parse_provider_response(config.adapter, response);
-    reply.metadata.adapter = model_adapter_name(config.adapter);
+    auto reply = detail::parse_provider_response(profile.adapter, response);
+    reply.metadata.adapter = model_adapter_name(profile.adapter);
+    reply.metadata.provider = model_provider_name(profile.provider);
     if (reply.metadata.model.empty()) {
         reply.metadata.model = config.model;
     }
@@ -149,9 +151,11 @@ ModelReply parse_successful_attempt(const ModelProviderConfig& config, HttpAttem
 ModelReply complete_provider_request(const ModelProviderConfig& config, const Json& messages,
                                      const Json& tools) {
     const ProgressReporter progress(config);
+    const auto profile = resolve_model_provider_profile(config);
     const auto request_body = detail::build_provider_request(config, messages, tools).dump();
     diagnostics::emit(diagnostics::Level::debug, "model.request.started",
-                      {{"adapter", model_adapter_name(config.adapter)},
+                      {{"provider", model_provider_name(profile.provider)},
+                       {"adapter", model_adapter_name(profile.adapter)},
                        {"model", config.model},
                        {"stream", config.stream},
                        {"message_count", messages.size()},

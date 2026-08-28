@@ -12,7 +12,7 @@ namespace mint::cli {
 
 class Console;
 
-enum class CommandMode { legacy, init, run, resume, status };
+enum class CommandMode { legacy, init, run, resume, status, provider };
 
 struct CommandLine {
     CommandMode mode = CommandMode::legacy;
@@ -30,6 +30,7 @@ struct CommandLine {
     bool retry_inflight = false;
     bool policy_conflict = false;
     bool config_specified = false;
+    bool root_specified = false;
     std::filesystem::path config = "config.json";
     std::filesystem::path policy;
     std::filesystem::path root = std::filesystem::current_path();
