@@ -9,7 +9,6 @@
 #include <string_view>
 #include <unordered_set>
 
-#if !defined(_WIN32)
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -28,12 +27,9 @@
 #endif
 
 extern char** environ;
-#endif
 
 namespace mint::command_detail {
 namespace {
-
-#if !defined(_WIN32)
 
 std::vector<std::string> filtered_environment() {
     static const std::unordered_set<std::string> allowed_names = {"PATH",
@@ -208,15 +204,13 @@ std::optional<std::size_t> resident_memory_bytes(pid_t process) noexcept {
 #endif
 }
 
-#endif
-
 } // namespace
 
+void validate_process_resource_support(const CommandResourceLimits& limits) {
+    (void)limits;
+}
+
 ProcessResult execute_process(ProcessRequest request) {
-#if defined(_WIN32)
-    (void)request;
-    throw std::runtime_error("当前受控命令执行暂未支持 Windows");
-#else
     if (request.argv.empty()) {
         throw std::logic_error("内部命令请求缺少 argv");
     }
@@ -402,7 +396,6 @@ ProcessResult execute_process(ProcessRequest request) {
         result.signal = WTERMSIG(wait_status);
     }
     return result;
-#endif
 }
 
 } // namespace mint::command_detail

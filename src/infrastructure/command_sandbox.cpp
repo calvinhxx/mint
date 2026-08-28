@@ -15,11 +15,36 @@
 namespace mint::command_detail {
 namespace {
 
-#if !defined(_WIN32)
-
 bool contains_nul(std::string_view value) {
     return value.find('\0') != std::string_view::npos;
 }
+
+bool is_blocked_launcher(std::string name) {
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    static const std::unordered_set<std::string> blocked = {
+        "sh",           "bash",        "zsh",
+        "fish",         "dash",        "cmd",
+        "cmd.exe",      "powershell",  "powershell.exe",
+        "pwsh",         "pwsh.exe",    "env",
+        "xargs",        "find",        "git",
+        "sudo",         "doas",        "ssh",
+        "scp",          "curl",        "wget",
+        "osascript",    "open",        "busybox",
+        "deno",         "bun",         "bwrap",
+        "sandbox-exec", "unshare",     "nsenter",
+        "chroot",       "systemd-run", "docker",
+        "podman",       "wscript",     "wscript.exe",
+        "cscript",      "cscript.exe", "mshta",
+        "mshta.exe",    "rundll32",    "rundll32.exe",
+        "regsvr32",     "regsvr32.exe"};
+    return blocked.contains(name) || name.starts_with("python") || name.starts_with("pypy") ||
+           name.starts_with("node") || name.starts_with("perl") || name.starts_with("ruby") ||
+           name.starts_with("lua") || name.starts_with("php");
+}
+
+#if !defined(_WIN32)
 
 bool is_inside(const std::filesystem::path& root, const std::filesystem::path& candidate) {
     auto root_part = root.begin();
@@ -30,21 +55,6 @@ bool is_inside(const std::filesystem::path& root, const std::filesystem::path& c
         }
     }
     return true;
-}
-
-bool is_blocked_launcher(std::string name) {
-    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    static const std::unordered_set<std::string> blocked = {
-        "sh",         "bash",           "zsh",     "fish",        "dash",   "cmd",   "cmd.exe",
-        "powershell", "powershell.exe", "pwsh",    "pwsh.exe",    "env",    "xargs", "find",
-        "git",        "sudo",           "doas",    "ssh",         "scp",    "curl",  "wget",
-        "osascript",  "open",           "busybox", "deno",        "bun",    "bwrap", "sandbox-exec",
-        "unshare",    "nsenter",        "chroot",  "systemd-run", "docker", "podman"};
-    return blocked.contains(name) || name.starts_with("python") || name.starts_with("pypy") ||
-           name.starts_with("node") || name.starts_with("perl") || name.starts_with("ruby") ||
-           name.starts_with("lua") || name.starts_with("php");
 }
 
 bool is_executable_file(const std::filesystem::path& path) {
@@ -135,6 +145,83 @@ std::string sandbox_string(std::string_view value) {
     return result;
 }
 #endif
+
+#endif
+
+#if defined(_WIN32)
+
+std::string lowercase_ascii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return value;
+}
+
+bool is_windows_executable_file(const std::filesystem::path& path) {
+    std::error_code error;
+    return std::filesystem::is_regular_file(path, error) && !error;
+}
+
+std::filesystem::path canonical_executable(const std::filesystem::path& candidate,
+                                           const std::string& requested) {
+    std::error_code error;
+    const auto resolved = std::filesystem::weakly_canonical(candidate, error);
+    if (error || !is_windows_executable_file(resolved)) {
+        throw std::invalid_argument("程序不存在或不可执行: " + requested);
+    }
+    return resolved;
+}
+
+std::filesystem::path find_executable(const std::string& requested) {
+    if (requested.empty() || contains_nul(requested)) {
+        throw std::invalid_argument("程序名称不能为空或包含 NUL");
+    }
+
+    const std::filesystem::path input(requested);
+    if (input.has_parent_path()) {
+        if (!input.is_absolute()) {
+            throw std::invalid_argument("带路径的程序必须使用绝对路径: " + requested);
+        }
+        return canonical_executable(input, requested);
+    }
+
+    for (const auto character : requested) {
+        const auto value = static_cast<unsigned char>(character);
+        if (!std::isalnum(value) && character != '_' && character != '-' && character != '+' &&
+            character != '.') {
+            throw std::invalid_argument("程序名称包含不支持的字符: " + requested);
+        }
+    }
+
+    const auto extension = lowercase_ascii(input.extension().string());
+    const std::vector<std::string> suffixes = extension.empty()
+                                                  ? std::vector<std::string>{"", ".exe", ".com"}
+                                                  : std::vector<std::string>{""};
+    const char* path_value = std::getenv("PATH");
+    const std::string search_path = path_value == nullptr ? std::string{} : path_value;
+    std::size_t begin = 0;
+    while (begin <= search_path.size()) {
+        const auto end = search_path.find(';', begin);
+        const auto length = end == std::string::npos ? search_path.size() - begin : end - begin;
+        auto directory = search_path.substr(begin, length);
+        if (directory.size() >= 2 && directory.front() == '"' && directory.back() == '"') {
+            directory = directory.substr(1, directory.size() - 2);
+        }
+        if (!directory.empty()) {
+            for (const auto& suffix : suffixes) {
+                const auto candidate = std::filesystem::path(directory) / (requested + suffix);
+                if (is_windows_executable_file(candidate)) {
+                    return canonical_executable(candidate, requested);
+                }
+            }
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        begin = end + 1;
+    }
+    throw std::invalid_argument("在 PATH 中找不到程序: " + requested);
+}
 
 #endif
 
@@ -314,8 +401,20 @@ SandboxConfig linux_sandbox_config(
 
 std::filesystem::path resolve_program(const std::string& requested) {
 #if defined(_WIN32)
-    (void)requested;
-    throw std::invalid_argument("当前受控命令执行暂未支持 Windows");
+    if (requested.empty() || contains_nul(requested)) {
+        throw std::invalid_argument("授权程序名称不能为空或包含 NUL");
+    }
+    const std::filesystem::path input(requested);
+    const auto extension = lowercase_ascii(input.extension().string());
+    if (extension == ".bat" || extension == ".cmd" || extension == ".ps1" || extension == ".vbs" ||
+        extension == ".js" || extension == ".wsf" || extension == ".hta" || extension == ".lnk") {
+        throw std::invalid_argument("当前版本不允许授权脚本或快捷方式启动器: " + requested);
+    }
+    if (is_blocked_launcher(input.filename().string())) {
+        throw std::invalid_argument("当前版本不允许授权 shell、解释器、git 或通用命令启动器: " +
+                                    requested);
+    }
+    return find_executable(requested);
 #else
     if (requested.empty() || contains_nul(requested)) {
         throw std::invalid_argument("授权程序名称不能为空或包含 NUL");

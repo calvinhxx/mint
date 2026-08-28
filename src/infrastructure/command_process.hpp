@@ -39,6 +39,7 @@ struct ProcessResult {
     std::string output;
 };
 
+void validate_process_resource_support(const CommandResourceLimits& limits);
 [[nodiscard]] ProcessResult execute_process(ProcessRequest request);
 
 } // namespace command_detail

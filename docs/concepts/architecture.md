@@ -70,8 +70,9 @@ flowchart TD
 | [`src/infrastructure/model_http_transport.cpp`](../../src/infrastructure/model_http_transport.cpp) | 单次 libcurl 请求、响应头和 SSE 数据接收 |
 | [`src/infrastructure/model_protocol.cpp`](../../src/infrastructure/model_protocol.cpp) | Chat Completions / Responses 格式转换 |
 | [`src/infrastructure/command_runner.cpp`](../../src/infrastructure/command_runner.cpp) | 固定命令契约、审批和结果组装 |
-| [`src/infrastructure/command_sandbox.cpp`](../../src/infrastructure/command_sandbox.cpp) | macOS Seatbelt 与 Linux Bubblewrap 策略 |
-| [`src/infrastructure/command_process.cpp`](../../src/infrastructure/command_process.cpp) | 子进程、输出、超时、取消和句柄清理 |
+| [`src/infrastructure/command_sandbox.cpp`](../../src/infrastructure/command_sandbox.cpp) | 程序解析、危险启动器拦截和 OS 沙箱策略 |
+| [`src/infrastructure/command_process.cpp`](../../src/infrastructure/command_process.cpp) | POSIX 子进程、资源限制、超时与取消 |
+| [`src/infrastructure/command_process_windows.cpp`](../../src/infrastructure/command_process_windows.cpp) | Windows `CreateProcessW`、句柄隔离和 Job Object |
 | [`src/infrastructure/session_store.cpp`](../../src/infrastructure/session_store.cpp) | checkpoint 读写 |
 | [`src/tools/workspace_tools.cpp`](../../src/tools/workspace_tools.cpp) | 工作区文件读取与修改 |
 | [`src/tools/change_set.cpp`](../../src/tools/change_set.cpp) | 多文件变更、预检和回滚 |
