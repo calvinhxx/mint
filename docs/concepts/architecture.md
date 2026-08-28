@@ -55,6 +55,27 @@ flowchart TD
 
 依赖方向以 application 为中心：application 使用 domain 规则，通过 tools 和 infrastructure 接触文件、进程与网络。CLI 只负责把这些对象组装起来。
 
+## 模型接口怎么适配
+
+`provider` 表示服务方，`adapter` 表示请求协议。两者分开后，代理地址仍可使用 Groq 或 OpenAI 的协议规则，自建接口也可以单独声明能力。
+
+~~~mermaid
+flowchart LR
+    config["config.json"] --> profile["ProviderProfile<br/>服务、协议、能力"]
+    profile --> protocol["model_protocol<br/>统一消息转请求 JSON"]
+    protocol --> http["model_http_transport<br/>libcurl / SSE"]
+    http --> parse["统一 ModelReply"]
+    parse --> agent["Agent Loop"]
+~~~
+
+解析规则只有三条：
+
+1. `api.openai.com`、`api.groq.com` 和 `api.deepseek.com` 会按完整主机名识别；
+2. 代理地址在配置中明确写 `provider`；
+3. 其他地址按 `custom` 处理，可以显式填写 `capabilities`。
+
+能力目录集中在 `model_provider_profile.cpp`，目前决定工具调用、流式输出、流式 usage、无状态推理续传和 token 上限字段。它描述的是 API 方言，不承诺某个模型始终可用。`mint provider --config ...` 可离线查看解析结果，不会探测网络或读取环境变量中的密钥。
+
 ## 关键文件
 
 | 文件 | 负责什么 |
@@ -62,6 +83,7 @@ flowchart TD
 | [`src/cli/agent_command.cpp`](../../src/cli/agent_command.cpp) | 一次命令的主流程 |
 | [`src/cli/agent_command_config.cpp`](../../src/cli/agent_command_config.cpp) | policy、路径和工具配置 |
 | [`src/cli/agent_command_io.cpp`](../../src/cli/agent_command_io.cpp) | 审批、模型进度和运行信息 |
+| [`src/cli/provider_command.cpp`](../../src/cli/provider_command.cpp) | 离线显示 provider 配置和能力 |
 | [`src/application/agent.cpp`](../../src/application/agent.cpp) | 校验 Agent 参数并进入循环 |
 | [`src/application/agent_loop.cpp`](../../src/application/agent_loop.cpp) | 循环推进、任务开始和结束 |
 | [`src/application/agent_cycle.cpp`](../../src/application/agent_cycle.cpp) | 模型调用、工具执行和验证门禁 |
@@ -69,6 +91,7 @@ flowchart TD
 | [`src/tools/tool_registry.cpp`](../../src/tools/tool_registry.cpp) | 工具路由和执行前检查 |
 | [`src/tools/change_transaction.cpp`](../../src/tools/change_transaction.cpp) | changeset 事务格式、回滚和 checkpoint 确认 |
 | [`src/infrastructure/model_client.cpp`](../../src/infrastructure/model_client.cpp) | 模型客户端公共门面和配置校验 |
+| [`src/infrastructure/model_provider_profile.cpp`](../../src/infrastructure/model_provider_profile.cpp) | provider 目录、端点识别、能力与凭据来源 |
 | [`src/infrastructure/model_request.cpp`](../../src/infrastructure/model_request.cpp) | 请求重试、进度事件和结果元数据 |
 | [`src/infrastructure/model_http_transport.cpp`](../../src/infrastructure/model_http_transport.cpp) | 单次 libcurl 请求、响应头和 SSE 数据接收 |
 | [`src/infrastructure/model_protocol.cpp`](../../src/infrastructure/model_protocol.cpp) | Chat Completions / Responses 格式转换 |

@@ -42,23 +42,38 @@ cmake --build --preset vcpkg-release
 
 ## 配置真实模型
 
-Chat Completions：
+仓库带了四份可直接检查的配置：
+
+| 服务 | 配置文件 | API Key 环境变量 |
+|---|---|---|
+| Groq Chat Completions | `configs/providers/groq-chat.json` | `GROQ_API_KEY` |
+| OpenAI Responses | `configs/providers/openai-responses.json` | `OPENAI_API_KEY` |
+| DeepSeek Chat Completions | `configs/providers/deepseek-chat.json` | `DEEPSEEK_API_KEY` |
+| 自定义兼容接口 | `configs/providers/custom-chat.json` | `MINT_MODEL_API_KEY` |
+
+以 Groq 为例：
 
 ~~~bash
-cp config.example.json config.json
+export GROQ_API_KEY='你的密钥'
+cp configs/providers/groq-chat.json config.json
+./build/vcpkg-release/mint provider --config config.json
 ~~~
 
-Responses API：
+Windows PowerShell 设置密钥：
 
-~~~bash
-cp config.responses.example.json config.json
+~~~powershell
+$env:GROQ_API_KEY = '你的密钥'
 ~~~
 
-在 `config.json` 中填写 `api_key`、`api_url` 和 `model`，不要提交这个文件。然后运行：
+`mint provider` 只解析配置并显示 adapter、能力和 token 参数，不会请求模型，也不会输出密钥。使用代理时在配置中明确写 `provider`；只有自定义兼容接口允许覆盖 `capabilities`。
+
+确认配置后运行：
 
 ~~~bash
 ./build/vcpkg-release/mint run --root . "修复失败的测试，改完重新跑测试"
 ~~~
+
+`config.json` 不要提交。根目录的 `config.example.json` 和 `config.responses.example.json` 分别是 Groq 与 OpenAI 的简写入口。
 
 ## 日常命令
 

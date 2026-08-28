@@ -11,11 +11,11 @@
 | 代码版本 | `1.5.0`（开发中） |
 | 产品定位 | 轻量的通用 AI Agent 工具与 C++ 内核 |
 | 形态 | 本地 CLI；一次 `run` 处理一个任务 |
-| 命令 | `init / run / resume / status` |
-| 模型接口 | Chat Completions、Responses、可选 SSE |
+| 命令 | `init / run / resume / status / provider` |
+| 模型接口 | OpenAI、Groq、DeepSeek 与 custom profile；Chat Completions、Responses、可选 SSE |
 | 构建矩阵 | Windows / macOS / Linux × x64 / ARM64 |
 | 平台验收 | 六组合原生 CI；三个系统都默认启用 OS 命令隔离 |
-| 本地测试 | Debug 和 Sanitizer CTest 57/57 |
+| 本地测试 | Debug 和 Sanitizer CTest 64/64 |
 | 持续集成 | 六组合原生构建矩阵；macOS ARM64 深度门禁 |
 | 最近真实模型验收 | v1.4 Chat Completions 隔离修复任务 |
 
@@ -33,6 +33,9 @@
 - Chat Completions / Responses 统一内部格式；
 - 普通响应、SSE、限流重试和请求统计；
 - HTTP 传输、重试编排和模型协议相互独立，成功 SSE 不重复缓存完整响应体；
+- provider 能力目录、官方端点识别和代理显式配置；请求按 profile 选择 token 字段、stream usage 和推理续传；
+- OpenAI Responses、Groq Chat、DeepSeek Chat 和 custom Chat 四份无密钥回归配置，以及离线 `mint provider` 检查命令；
+- 支持从环境变量读取 API Key，检查命令不会读取或输出密钥，endpoint 查询参数也不会出现在报告中；
 - vcpkg 依赖、spdlog 诊断日志和 GoogleTest 单元测试；
 - Windows、macOS、Linux 的 x64 / ARM64 CMake preset、原生 CI runner 和矩阵一致性校验，六组合均已通过；
 - Linux Bubblewrap 安全命令后端，隔离宿主写入、用户目录、运行时套接字、网络和继承文件描述符；
@@ -48,6 +51,7 @@
 |---|---|---|
 | 单元和协议测试 | 权限、消息转换、恢复等确定性行为 | 真实服务始终兼容 |
 | 本地假模型服务 | HTTP、SSE、重试和工具闭环 | 所有 provider 均可用 |
+| 固定 provider 配置 | 配置字段、能力选择和请求 JSON 不漂移 | 对应模型已发起真实请求 |
 | 真实模型验收 | 当时的端点和配置完成了任务 | 其他端点或未来版本也通过 |
 
 v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任务。Responses 和 SSE 仍只有本地协议与回环服务证据。具体结果见 [测试与验收](../development/testing.md)。
@@ -64,8 +68,8 @@ v1.4 已用当前 `config.json` 完成一次隔离的 Chat Completions 修复任
 
 ## 下一步
 
-1. 增加 provider 能力识别和固定回归配置；
-2. 增加 Windows 外部只读工具链路径，补 POSIX 进程树与跨平台磁盘配额；
+1. 增加 Windows 外部只读工具链路径，补 POSIX 进程树总量与跨平台工作区磁盘配额；
+2. 有模型额度时，按固定配置分别跑 OpenAI Responses、Groq Chat 和 DeepSeek Chat 真实回归；
 3. 内核稳定后再增加持续聊天和 GUI。
 
-历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议，v1.5 补齐六平台构建、三平台命令隔离、资源限制和多文件事务恢复。
+历史版本主要变化：v1.0 建立本地工具，v1.1 增加 policy 和 recipe，v1.2 增加恢复与验证，v1.3 补齐日常 CLI，v1.4 收口模型协议，v1.5 补齐六平台构建、三平台命令隔离、资源限制、多文件事务恢复和 provider profile。
