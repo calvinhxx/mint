@@ -18,6 +18,7 @@ add_library(mint_infrastructure STATIC
     event_log.cpp
     model_client.cpp
     model_http_transport.cpp
+    model_provider_profile.cpp
     model_protocol.cpp
     model_request.cpp
     output_path.cpp

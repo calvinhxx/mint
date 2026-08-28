@@ -793,11 +793,12 @@ TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
                 "CLI completes a two-turn Responses tool loop");
     MINT_EXPECT(result.at("answer") == "README 证明项目是本地 Agent。",
                 "CLI keeps the authoritative streamed final answer");
-    MINT_EXPECT(result.at("model").at("adapter") == "responses" &&
+    MINT_EXPECT(result.at("model").at("provider") == "custom" &&
+                    result.at("model").at("adapter") == "responses" &&
                     result.at("model").at("streamed_calls") == 2 &&
                     result.at("model").at("stream_events") == 5 &&
                     result.at("model").at("streamed_bytes").get<std::size_t>() > 0,
-                "CLI JSON reports Responses adapter and aggregate stream metrics");
+                "CLI JSON reports provider, Responses adapter, and aggregate stream metrics");
     MINT_EXPECT(server.request(0).find(R"("tools":[{"description")") != std::string::npos &&
                     server.request(0).find(R"("name":"read_file")") != std::string::npos,
                 "first CLI request advertises flattened Responses tools");

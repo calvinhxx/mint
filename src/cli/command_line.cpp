@@ -37,13 +37,17 @@ CommandMode parse_mode(const std::string& argument) {
     if (argument == "status") {
         return CommandMode::status;
     }
+    if (argument == "provider") {
+        return CommandMode::provider;
+    }
     return CommandMode::legacy;
 }
 
 } // namespace
 
 bool is_managed_mode(CommandMode mode) noexcept {
-    return mode != CommandMode::legacy;
+    return mode == CommandMode::init || mode == CommandMode::run || mode == CommandMode::resume ||
+           mode == CommandMode::status;
 }
 
 void print_help(Console& console, const char* program) {
@@ -56,6 +60,8 @@ void print_help(Console& console, const char* program) {
         << "  " << program
         << " resume [--root 路径] [--state-dir 路径] [--task ID] [--config 路径]\n"
         << "  " << program << " status [--root 路径] [--state-dir 路径] [--task ID] [--json]\n\n"
+        << "模型配置:\n"
+        << "  " << program << " provider [--config 路径] [--json]  离线检查 provider 能力\n\n"
         << "兼容工作流:\n"
         << "  " << program << " --demo [问题]\n"
         << "  " << program
@@ -185,6 +191,7 @@ CommandLine parse_arguments(int argc, char** argv) {
                 throw std::invalid_argument("--root 后面需要一个路径");
             }
             result.root = argv[index];
+            result.root_specified = true;
         } else if (argument == "--state-dir") {
             if (++index >= argc) {
                 throw std::invalid_argument("--state-dir 后面需要一个路径");
@@ -253,6 +260,14 @@ CommandLine parse_arguments(int argc, char** argv) {
     if (result.mode == CommandMode::legacy) {
         if (!result.state_dir.empty() || !result.task_id.empty() || result.force) {
             throw std::invalid_argument("--state-dir、--task 和 --force 只用于日常子命令");
+        }
+    } else if (result.mode == CommandMode::provider) {
+        if (!result.question.empty() || result.demo || result.force || result.resume_session ||
+            result.retry_inflight || result.approve_each_command || result.approve_each_changeset ||
+            result.policy_conflict || !result.policy.empty() || !result.session.empty() ||
+            !result.events_jsonl.empty() || !result.state_dir.empty() || !result.task_id.empty() ||
+            result.root_specified) {
+            throw std::invalid_argument("provider 只接受 --config、--json 和 --log-level");
         }
     } else {
         if (!result.policy.empty() || !result.session.empty() || !result.events_jsonl.empty() ||

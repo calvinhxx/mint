@@ -9,6 +9,9 @@
 - Added policy-configurable CPU, memory, process-count, and per-file size limits for POSIX commands, with resource-limit evidence retained through context compaction.
 - Added a Windows AppContainer command backend with no network capabilities, DACL-scoped workspace and executable access, protected-path denial, strict argv and handle isolation, and Job Object resource limits.
 - Added session schema v4 and a per-task changeset journal with an exclusive process lock, deterministic crash rollback, checkpoint acknowledgement, and fail-closed external-change detection.
+- Added centralized OpenAI, Groq, DeepSeek, and custom provider profiles with endpoint detection, capability-driven request fields, and explicit proxy configuration.
+- Added secret-free fixed provider configurations and an offline `mint provider` command that reports the resolved adapter and capabilities without reading or printing API keys.
+- Added API key environment-variable loading and redacted endpoint query parameters from configuration reports.
 - Fixed Windows file replacement and multi-config fixture handling exposed by the native test lanes.
 - Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
 - Added a security policy, immutable workflow action pins, a pin-validation gate, and weekly Dependabot updates.

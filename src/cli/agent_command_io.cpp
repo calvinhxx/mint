@@ -155,6 +155,7 @@ std::unique_ptr<ModelClient> create_model(const CommandLine& command_line,
     }
 
     auto config = load_model_provider_config(command_line.config);
+    const auto profile = resolve_model_provider_profile(config);
     config.task_control = task_control;
     const auto stream_printer = std::make_shared<ModelStreamPrinter>(console);
     if (config.stream && !command_line.json_output) {
@@ -174,12 +175,15 @@ std::unique_ptr<ModelClient> create_model(const CommandLine& command_line,
         };
     }
     if (!command_line.json_output) {
-        if (config.api_key.empty()) {
+        if (config.api_key.empty() && config.api_key_env.empty()) {
             console.write_line("提示: ", command_line.config.generic_string(),
                                " 中的 api_key 为空；只有不需要密钥的本地接口可以这样运行。");
+        } else if (!config.api_key_env.empty()) {
+            console.write_line("模型认证: 环境变量 ", config.api_key_env);
         }
         console.write_line("模型配置: ", command_line.config.generic_string(), "（",
-                           model_adapter_name(config.adapter), " / ", config.model, " / ",
+                           model_provider_name(profile.provider), " / ",
+                           model_adapter_name(profile.adapter), " / ", config.model, " / ",
                            config.stream ? "stream" : "non-stream", "）");
     }
     return std::make_unique<ModelProviderClient>(std::move(config));

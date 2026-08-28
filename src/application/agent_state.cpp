@@ -42,6 +42,7 @@ Json model_usage_json(const ModelUsage& usage) {
 Json model_metadata_json(const ModelCallMetadata& metadata) {
     return {
         {"adapter", metadata.adapter},
+        {"provider", metadata.provider},
         {"response_id", metadata.response_id.empty() ? Json(nullptr) : Json(metadata.response_id)},
         {"model", metadata.model},
         {"attempts", metadata.attempts},
@@ -65,6 +66,9 @@ void record_model_call(ModelSummary& summary, const ModelReply& reply) {
     }
     if (!reply.metadata.adapter.empty()) {
         summary.adapter = reply.metadata.adapter;
+    }
+    if (!reply.metadata.provider.empty()) {
+        summary.provider = reply.metadata.provider;
     }
     if (!reply.metadata.model.empty()) {
         summary.model = reply.metadata.model;
@@ -95,6 +99,7 @@ Json model_summary_to_json(const ModelSummary& summary) {
             {"streamed_bytes", summary.streamed_bytes},
             {"duration_ms", summary.duration_ms},
             {"adapter", summary.adapter},
+            {"provider", summary.provider},
             {"model", summary.model},
             {"last_response_id",
              summary.last_response_id.empty() ? Json(nullptr) : Json(summary.last_response_id)}};
@@ -138,6 +143,12 @@ ModelSummary model_summary_from_json(const Json& value) {
     }
     summary.duration_ms = value.at("duration_ms").get<long long>();
     summary.adapter = value.at("adapter").get<std::string>();
+    if (value.contains("provider")) {
+        if (!value.at("provider").is_string()) {
+            throw std::invalid_argument("会话模型摘要 provider 无效");
+        }
+        summary.provider = value.at("provider").get<std::string>();
+    }
     summary.model = value.at("model").get<std::string>();
     if (value.contains("last_response_id") && value.at("last_response_id").is_string()) {
         summary.last_response_id = value.at("last_response_id").get<std::string>();
