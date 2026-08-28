@@ -34,6 +34,9 @@ SAFE_REPORT_SCHEMA = {
         "stream_usage": None,
         "stateless_reasoning_replay": None,
         "token_limit_parameter": None,
+        "explicit_tool_choice": None,
+        "chat_reasoning_replay": None,
+        "requires_tool_call_content": None,
     },
     "limits": {"max_completion_tokens": None, "max_attempts_per_request": None},
     "acceptance": {

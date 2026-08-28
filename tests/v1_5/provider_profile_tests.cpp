@@ -122,6 +122,9 @@ TEST(ProviderProfileContractTest, DetectsOfficialEndpointsAndExplicitProxyProfil
     EXPECT_EQ(profile.provider, mint::ModelProvider::deepseek);
     EXPECT_EQ(profile.capabilities.token_limit_parameter,
               mint::ModelTokenLimitParameter::max_tokens);
+    EXPECT_FALSE(profile.capabilities.explicit_tool_choice);
+    EXPECT_TRUE(profile.capabilities.chat_reasoning_replay);
+    EXPECT_TRUE(profile.capabilities.requires_tool_call_content);
 
     auto proxy = config_for("https://gateway.example.test/v1/chat/completions");
     proxy.provider = mint::ModelProvider::groq;
@@ -143,11 +146,26 @@ TEST(ProviderProfileContractTest, BuildsRequestsFromResolvedCapabilities) {
     auto deepseek = config_for("https://api.deepseek.com/chat/completions");
     deepseek.stream = true;
     deepseek.max_completion_tokens = 321;
+    auto continuation = messages();
+    continuation.push_back(
+        {{"role", "assistant"},
+         {"content", nullptr},
+         {"reasoning_content", "opaque reasoning"},
+         {"tool_calls", mint::Json::array({{{"id", "call-1"},
+                                            {"type", "function"},
+                                            {"function",
+                                             {{"name", "read_file"},
+                                              {"arguments", R"({"path":"README.md"})"}}}}})}});
+    continuation.push_back(
+        {{"role", "tool"}, {"tool_call_id", "call-1"}, {"content", R"({"ok":true})"}});
     const auto deepseek_request =
-        mint::detail::build_provider_request(deepseek, messages(), tools());
+        mint::detail::build_provider_request(deepseek, continuation, tools());
     EXPECT_EQ(deepseek_request.at("max_tokens"), 321);
     EXPECT_FALSE(deepseek_request.contains("max_completion_tokens"));
     EXPECT_TRUE(deepseek_request.at("stream_options").at("include_usage"));
+    EXPECT_FALSE(deepseek_request.contains("tool_choice"));
+    EXPECT_EQ(deepseek_request.at("messages").at(1).at("reasoning_content"), "opaque reasoning");
+    EXPECT_EQ(deepseek_request.at("messages").at(1).at("content"), "");
 
     auto custom = config_for("http://127.0.0.1:8080/v1/chat/completions");
     custom.provider = mint::ModelProvider::custom;
@@ -158,9 +176,12 @@ TEST(ProviderProfileContractTest, BuildsRequestsFromResolvedCapabilities) {
         .stream_usage = false,
         .stateless_reasoning_replay = false,
         .token_limit_parameter = mint::ModelTokenLimitParameter::max_tokens};
-    const auto custom_request = mint::detail::build_provider_request(custom, messages(), tools());
+    const auto custom_request = mint::detail::build_provider_request(custom, continuation, tools());
     EXPECT_TRUE(custom_request.contains("max_tokens"));
     EXPECT_FALSE(custom_request.contains("stream_options"));
+    EXPECT_EQ(custom_request.at("tool_choice"), "auto");
+    EXPECT_FALSE(custom_request.at("messages").at(1).contains("reasoning_content"));
+    EXPECT_TRUE(custom_request.at("messages").at(1).at("content").is_null());
 
     custom.capabilities->function_tools = false;
     EXPECT_THROW((void)mint::detail::build_provider_request(custom, messages(), tools()),
@@ -233,6 +254,12 @@ TEST(ProviderConfigContractTest, RejectsContradictoryProfilesAndCredentials) {
                             {"model", "test-model"},
                             {"capabilities", {{"unknown", true}}}},
                            "未知 capability");
+    expect_config_rejected({{"provider", "custom"},
+                            {"adapter", "responses"},
+                            {"api_url", "https://example.test/v1/responses"},
+                            {"model", "test-model"},
+                            {"capabilities", {{"chat_reasoning_replay", true}}}},
+                           "Chat 专属能力");
 }
 
 TEST(ProviderCliContractTest, ReportsCapabilitiesWithoutReadingOrPrintingApiKeys) {
@@ -254,6 +281,9 @@ TEST(ProviderCliContractTest, ReportsCapabilitiesWithoutReadingOrPrintingApiKeys
     EXPECT_EQ(report.at("authentication"), "environment");
     EXPECT_EQ(report.at("api_key_env"), "GROQ_API_KEY");
     EXPECT_EQ(report.at("capabilities").at("token_limit_parameter"), "max_completion_tokens");
+    EXPECT_TRUE(report.at("capabilities").at("explicit_tool_choice"));
+    EXPECT_FALSE(report.at("capabilities").at("chat_reasoning_replay"));
+    EXPECT_FALSE(report.at("capabilities").at("requires_tool_call_content"));
     EXPECT_FALSE(report.contains("api_key"));
 
     TemporaryDirectory temporary;

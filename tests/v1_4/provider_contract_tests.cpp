@@ -179,10 +179,13 @@ TEST(ProviderProtocolContractTest, DecodesChatCompletionsStream) {
         mint::ModelAdapter::chat_completions,
         [&](const mint::ModelStreamEvent& event) { deltas.push_back(event); });
     std::string stream;
-    stream += sse({{"id", "chat_1"},
-                   {"model", "chat-test"},
-                   {"choices",
-                    mint::Json::array({{{"delta", {{"role", "assistant"}, {"content", "先"}}}}})}});
+    stream += sse(
+        {{"id", "chat_1"},
+         {"model", "chat-test"},
+         {"choices",
+          mint::Json::array(
+              {{{"delta",
+                 {{"role", "assistant"}, {"reasoning_content", "先计划"}, {"content", "先"}}}}})}});
     const mint::Json first_tool_delta = {{"index", 0},
                                          {"id", "call_1"},
                                          {"type", "function"},
@@ -190,7 +193,8 @@ TEST(ProviderProtocolContractTest, DecodesChatCompletionsStream) {
     stream +=
         sse({{"choices",
               mint::Json::array({{{"delta",
-                                   {{"content", "检查"},
+                                   {{"reasoning_content", "再调用"},
+                                    {"content", "检查"},
                                     {"tool_calls", mint::Json::array({first_tool_delta})}}}}})}});
     const mint::Json second_tool_delta = {
         {"index", 0}, {"function", {{"name", "file"}, {"arguments", "th\":\"README.md\"}"}}}};
@@ -211,6 +215,8 @@ TEST(ProviderProtocolContractTest, DecodesChatCompletionsStream) {
         mint::detail::parse_provider_response(mint::ModelAdapter::chat_completions, response);
     MINT_EXPECT(reply.text == "先检查" && reply.tool_calls.size() == 1,
                 "fragmented Chat text and tool deltas form one canonical reply");
+    MINT_EXPECT(reply.assistant_message.at("reasoning_content") == "先计划再调用",
+                "Chat streaming retains provider reasoning needed by tool continuation");
     MINT_EXPECT(reply.tool_calls.at(0).id == "call_1" &&
                     reply.tool_calls.at(0).name == "read_file" &&
                     reply.tool_calls.at(0).arguments.at("path") == "README.md",

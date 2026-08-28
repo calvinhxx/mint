@@ -11,6 +11,9 @@
     "streaming": true,
     "stream_usage": false,
     "stateless_reasoning_replay": false,
-    "token_limit_parameter": "max_tokens"
+    "token_limit_parameter": "max_tokens",
+    "explicit_tool_choice": true,
+    "chat_reasoning_replay": false,
+    "requires_tool_call_content": false
   }
 }

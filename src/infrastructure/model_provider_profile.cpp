@@ -48,21 +48,47 @@ struct ProviderDefinition {
     ModelProvider provider;
     std::string_view name;
     std::string_view official_host;
-    ModelTokenLimitParameter chat_token_limit;
+    ModelProviderCapabilities chat_capabilities;
     bool supports_responses;
 };
 
+constexpr ModelProviderCapabilities chat_capabilities(ModelTokenLimitParameter token_parameter,
+                                                      bool explicit_tool_choice = true,
+                                                      bool reasoning_replay = false,
+                                                      bool requires_tool_call_content = false) {
+    return {.function_tools = true,
+            .streaming = true,
+            .stream_usage = true,
+            .stateless_reasoning_replay = false,
+            .token_limit_parameter = token_parameter,
+            .explicit_tool_choice = explicit_tool_choice,
+            .chat_reasoning_replay = reasoning_replay,
+            .requires_tool_call_content = requires_tool_call_content};
+}
+
+constexpr ModelProviderCapabilities responses_capabilities() {
+    return {.function_tools = true,
+            .streaming = true,
+            .stream_usage = false,
+            .stateless_reasoning_replay = true,
+            .token_limit_parameter = ModelTokenLimitParameter::max_output_tokens,
+            .explicit_tool_choice = true,
+            .chat_reasoning_replay = false,
+            .requires_tool_call_content = false};
+}
+
 constexpr std::array provider_catalog = {
     ProviderDefinition{ModelProvider::automatic, "auto", "",
-                       ModelTokenLimitParameter::max_completion_tokens, true},
+                       chat_capabilities(ModelTokenLimitParameter::max_completion_tokens), true},
     ProviderDefinition{ModelProvider::custom, "custom", "",
-                       ModelTokenLimitParameter::max_completion_tokens, true},
+                       chat_capabilities(ModelTokenLimitParameter::max_completion_tokens), true},
     ProviderDefinition{ModelProvider::openai, "openai", "api.openai.com",
-                       ModelTokenLimitParameter::max_completion_tokens, true},
+                       chat_capabilities(ModelTokenLimitParameter::max_completion_tokens), true},
     ProviderDefinition{ModelProvider::groq, "groq", "api.groq.com",
-                       ModelTokenLimitParameter::max_completion_tokens, false},
+                       chat_capabilities(ModelTokenLimitParameter::max_completion_tokens), false},
     ProviderDefinition{ModelProvider::deepseek, "deepseek", "api.deepseek.com",
-                       ModelTokenLimitParameter::max_tokens, false},
+                       chat_capabilities(ModelTokenLimitParameter::max_tokens, false, true, true),
+                       false},
 };
 
 const ProviderDefinition* provider_definition(ModelProvider provider) noexcept {
@@ -132,29 +158,14 @@ std::optional<ModelProvider> provider_for_host(std::string_view host) {
                                           : std::optional<ModelProvider>(item->provider);
 }
 
-ModelProviderCapabilities chat_capabilities(ModelTokenLimitParameter token_parameter) {
-    return {.function_tools = true,
-            .streaming = true,
-            .stream_usage = true,
-            .stateless_reasoning_replay = false,
-            .token_limit_parameter = token_parameter};
-}
-
-ModelProviderCapabilities responses_capabilities() {
-    return {.function_tools = true,
-            .streaming = true,
-            .stream_usage = false,
-            .stateless_reasoning_replay = true,
-            .token_limit_parameter = ModelTokenLimitParameter::max_output_tokens};
-}
-
 ModelProviderCapabilities default_capabilities(ModelProvider provider, ModelAdapter adapter) {
     if (adapter == ModelAdapter::responses) {
         return responses_capabilities();
     }
     const auto* definition = provider_definition(provider);
-    return chat_capabilities(definition == nullptr ? ModelTokenLimitParameter::max_completion_tokens
-                                                   : definition->chat_token_limit);
+    return definition == nullptr
+               ? chat_capabilities(ModelTokenLimitParameter::max_completion_tokens)
+               : definition->chat_capabilities;
 }
 
 void validate_profile(const ModelProviderConfig& config, const ModelProviderProfile& profile) {
@@ -174,10 +185,13 @@ void validate_profile(const ModelProviderConfig& config, const ModelProviderProf
         throw std::invalid_argument("stream_usage 需要先启用 streaming 能力");
     }
     if (profile.adapter == ModelAdapter::responses) {
-        if (profile.capabilities.stream_usage || profile.capabilities.token_limit_parameter !=
-                                                     ModelTokenLimitParameter::max_output_tokens) {
+        if (profile.capabilities.stream_usage ||
+            profile.capabilities.token_limit_parameter !=
+                ModelTokenLimitParameter::max_output_tokens ||
+            profile.capabilities.chat_reasoning_replay ||
+            profile.capabilities.requires_tool_call_content) {
             throw std::invalid_argument(
-                "Responses adapter 需要 max_output_tokens，且不使用 Chat stream_usage 选项");
+                "Responses adapter 需要 max_output_tokens，且不使用 Chat 专属能力");
         }
     } else if (profile.capabilities.stateless_reasoning_replay ||
                profile.capabilities.token_limit_parameter ==
@@ -256,7 +270,10 @@ Json model_provider_profile_to_json(const ModelProviderProfile& profile) {
               {"stream_usage", profile.capabilities.stream_usage},
               {"stateless_reasoning_replay", profile.capabilities.stateless_reasoning_replay},
               {"token_limit_parameter",
-               model_token_limit_parameter_name(profile.capabilities.token_limit_parameter)}}}};
+               model_token_limit_parameter_name(profile.capabilities.token_limit_parameter)},
+              {"explicit_tool_choice", profile.capabilities.explicit_tool_choice},
+              {"chat_reasoning_replay", profile.capabilities.chat_reasoning_replay},
+              {"requires_tool_call_content", profile.capabilities.requires_tool_call_content}}}};
 }
 
 namespace model_detail {

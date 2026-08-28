@@ -58,6 +58,12 @@ class ProviderRegressionTests(unittest.TestCase):
             "provider": "groq",
             "adapter": "chat_completions",
             "api_key_env": "GROQ_API_KEY",
+            "capabilities": {
+                "explicit_tool_choice": False,
+                "chat_reasoning_replay": True,
+                "requires_tool_call_content": True,
+                "private_dialect": "secret",
+            },
             "config": "/private/workspace/config.json",
             "api_key": "secret",
             "error": "raw provider response",
@@ -71,6 +77,10 @@ class ProviderRegressionTests(unittest.TestCase):
         sanitized = provider_regression.safe_report("groq-chat", report, "passed")
 
         self.assertEqual(sanitized["acceptance"]["requests"], 2)
+        self.assertFalse(sanitized["capabilities"]["explicit_tool_choice"])
+        self.assertTrue(sanitized["capabilities"]["chat_reasoning_replay"])
+        self.assertTrue(sanitized["capabilities"]["requires_tool_call_content"])
+        self.assertNotIn("private_dialect", sanitized["capabilities"])
         self.assertNotIn("config", sanitized)
         self.assertNotIn("api_key", sanitized)
         self.assertNotIn("error", sanitized)
