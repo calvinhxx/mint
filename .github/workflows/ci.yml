@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -25,12 +26,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate build matrix
         run: |
           python3 .github/scripts/validate-build-matrix.py
           python3 .github/scripts/validate-workflows.py
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          python3 scripts/validate-version.py --tag "$GITHUB_REF_NAME"
+          git merge-base --is-ancestor \
+            "$GITHUB_SHA" \
+            "origin/${{ github.event.repository.default_branch }}"
 
       - name: Export build matrix
         id: matrix
@@ -79,7 +90,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .vcpkg-binary-cache
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'cmake/triplets/*.cmake', 'cmake/MintPlatformDefaults.cmake') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-${{ runner.arch }}-
 
@@ -110,6 +121,40 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
 
+      - name: Verify package layout
+        run: |
+          cpack --config build/${{ matrix.preset }}/CPackConfig.cmake
+          cmake -DMINT_BUILD_DIR=build/${{ matrix.preset }} -P cmake/VerifyPackage.cmake
+
+      - name: Configure release package
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+          -DMINT_BUILD_TESTS=OFF
+          -DMINT_ENABLE_DEVELOPER_TOOLS=OFF
+
+      - name: Build release package
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Create and verify release package
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cpack --config build/${{ matrix.preset }}/CPackConfig.cmake
+          cmake -DMINT_BUILD_DIR=build/${{ matrix.preset }} -P cmake/VerifyPackage.cmake
+
+      - name: Upload release package
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mint-${{ matrix.id }}
+          path: build/${{ matrix.preset }}/packages/mint-*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
   quality:
     name: macOS ARM64 quality gates
     runs-on: macos-15
@@ -136,8 +181,58 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .vcpkg-binary-cache
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'cmake/triplets/*.cmake', 'cmake/MintPlatformDefaults.cmake') }}
 
       - name: Run release checks
         shell: bash
         run: bash scripts/release-check.sh
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [platform-build, quality]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_count="$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          test "$asset_count" -eq 12
+          test "$(find release-assets -maxdepth 1 -type f -name '*.sha256' | wc -l | tr -d ' ')" -eq 6
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isDraft \
+              --jq .isDraft)"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "Release $GITHUB_REF_NAME is already published; refusing to replace its assets."
+              exit 0
+            fi
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --draft \
+              --verify-tag \
+              --generate-notes \
+              --title "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"
