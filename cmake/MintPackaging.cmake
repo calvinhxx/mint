@@ -33,6 +33,9 @@ function(mint_install_third_party_licenses)
     foreach(license_file IN LISTS license_files)
         get_filename_component(port_dir "${license_file}" DIRECTORY)
         get_filename_component(port_name "${port_dir}" NAME)
+        if(port_name MATCHES "^vcpkg-")
+            continue()
+        endif()
         install(FILES "${license_file}"
             DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/mint/${port_name}"
         )

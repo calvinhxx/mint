@@ -127,29 +127,24 @@ jobs:
 
       - name: Configure release package
         if: startsWith(github.ref, 'refs/tags/v')
-        run: >-
-          cmake --preset ${{ matrix.preset }}
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_TESTING=OFF
-          -DMINT_BUILD_TESTS=OFF
-          -DMINT_ENABLE_DEVELOPER_TOOLS=OFF
+        run: cmake --preset ${{ matrix.release_preset }}
 
       - name: Build release package
         if: startsWith(github.ref, 'refs/tags/v')
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: cmake --build --preset ${{ matrix.release_preset }}
 
       - name: Create and verify release package
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          cpack --config build/${{ matrix.preset }}/CPackConfig.cmake
-          cmake -DMINT_BUILD_DIR=build/${{ matrix.preset }} -P cmake/VerifyPackage.cmake
+          cpack --config build/${{ matrix.release_preset }}/CPackConfig.cmake
+          cmake -DMINT_BUILD_DIR=build/${{ matrix.release_preset }} -P cmake/VerifyPackage.cmake
 
       - name: Upload release package
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mint-${{ matrix.id }}
-          path: build/${{ matrix.preset }}/packages/mint-*
+          path: build/${{ matrix.release_preset }}/packages/mint-*
           if-no-files-found: error
           compression-level: 0
           retention-days: 7

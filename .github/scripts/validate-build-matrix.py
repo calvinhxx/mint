@@ -21,6 +21,7 @@ REQUIRED_FIELDS = {
     "runner",
     "runner_arch",
     "preset",
+    "release_preset",
     "system_packages",
 }
 EXPECTED = {
@@ -58,6 +59,35 @@ def named_entries(document: dict[str, Any], key: str) -> dict[str, dict[str, Any
         for entry in entries
         if isinstance(entry, dict) and isinstance(entry.get("name"), str)
     }
+
+
+def resolved_cache(
+    name: str,
+    presets: dict[str, dict[str, Any]],
+    stack: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    if name in stack:
+        raise ValueError(f"{PRESETS_PATH}: configure preset inheritance cycle at {name!r}")
+    preset = presets.get(name)
+    if preset is None:
+        raise ValueError(f"{PRESETS_PATH}: configure preset {name!r} does not exist")
+
+    inherited = preset.get("inherits", [])
+    if isinstance(inherited, str):
+        parents = [inherited]
+    elif isinstance(inherited, list) and all(isinstance(parent, str) for parent in inherited):
+        parents = inherited
+    else:
+        raise ValueError(f"{PRESETS_PATH}: {name!r} has invalid inherits")
+
+    cache: dict[str, Any] = {}
+    for parent in parents:
+        cache.update(resolved_cache(parent, presets, (*stack, name)))
+    own_cache = preset.get("cacheVariables", {})
+    if not isinstance(own_cache, dict):
+        raise ValueError(f"{PRESETS_PATH}: {name!r} cacheVariables must be an object")
+    cache.update(own_cache)
+    return cache
 
 
 def validate() -> list[str]:
@@ -132,16 +162,51 @@ def validate() -> list[str]:
         condition = preset.get("condition")
         if not isinstance(condition, dict) or condition.get("rhs") != host_system:
             errors.append(f"{context}: configure preset must target host {host_system}")
-        cache = preset.get("cacheVariables")
-        if not isinstance(cache, dict) or cache.get("VCPKG_TARGET_TRIPLET") != triplet:
+        cache = resolved_cache(preset_name, configure_presets)
+        if cache.get("VCPKG_TARGET_TRIPLET") != triplet:
             errors.append(f"{context}: configure preset must use triplet {triplet}")
-        if not isinstance(cache, dict) or cache.get("CMAKE_BUILD_TYPE") != "Debug":
+        if cache.get("CMAKE_BUILD_TYPE") != "Debug":
             errors.append(f"{context}: configure preset must use Debug")
+        if cache.get("BUILD_TESTING") is not True or cache.get("MINT_BUILD_TESTS") is not True:
+            errors.append(f"{context}: configure preset must enable tests")
+        if cache.get("VCPKG_MANIFEST_FEATURES") != "tests":
+            errors.append(f"{context}: configure preset must install the tests feature")
 
         for kind, entries in (("build", build_presets), ("test", test_presets)):
             entry = entries.get(preset_name)
             if entry is None or entry.get("configurePreset") != preset_name:
                 errors.append(f"{context}: matching {kind} preset is missing")
+
+        release_name = scenario["release_preset"]
+        if release_name == preset_name:
+            errors.append(f"{context}: release preset must be separate from the test preset")
+            continue
+        release_preset = configure_presets.get(release_name)
+        if release_preset is None:
+            errors.append(f"{context}: release preset {release_name!r} does not exist")
+            continue
+        release_condition = release_preset.get("condition")
+        if not isinstance(release_condition, dict) or release_condition.get("rhs") != host_system:
+            errors.append(f"{context}: release preset must target host {host_system}")
+        release_cache = resolved_cache(release_name, configure_presets)
+        if release_cache.get("VCPKG_TARGET_TRIPLET") != triplet:
+            errors.append(f"{context}: release preset must use triplet {triplet}")
+        if release_cache.get("CMAKE_BUILD_TYPE") != "Release":
+            errors.append(f"{context}: release preset must use Release")
+        if release_cache.get("BUILD_TESTING") is not False:
+            errors.append(f"{context}: release preset must disable BUILD_TESTING")
+        if release_cache.get("MINT_BUILD_TESTS") is not False:
+            errors.append(f"{context}: release preset must disable MINT_BUILD_TESTS")
+        if release_cache.get("MINT_ENABLE_DEVELOPER_TOOLS") is not False:
+            errors.append(f"{context}: release preset must disable developer tools")
+        if release_cache.get("VCPKG_MANIFEST_FEATURES"):
+            errors.append(f"{context}: release preset must not install test features")
+
+        release_build = build_presets.get(release_name)
+        if release_build is None or release_build.get("configurePreset") != release_name:
+            errors.append(f"{context}: matching release build preset is missing")
+        if release_name in test_presets:
+            errors.append(f"{context}: release preset must not have a test preset")
 
     missing_scenarios = EXPECTED.keys() - seen
     extra_scenarios = seen - EXPECTED.keys()
