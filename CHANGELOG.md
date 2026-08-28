@@ -9,6 +9,7 @@
 - Added policy-configurable CPU, memory, process-count, and per-file size limits for POSIX commands, with resource-limit evidence retained through context compaction.
 - Fixed Windows file replacement and multi-config fixture handling exposed by the native test lanes.
 - Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
+- Added a security policy, immutable workflow action pins, a pin-validation gate, and weekly Dependabot updates.
 
 ## 1.4.0 - 2026-08-27
 

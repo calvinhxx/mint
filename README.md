@@ -32,6 +32,7 @@ cmake --build --preset vcpkg-release
   - [构建、测试与验收](docs/development/testing.md)：本地验证命令和证据边界。
 - 项目
   - [当前进度与路线图](docs/project/roadmap.md)：已完成能力、缺口和下一步。
+  - [安全漏洞报告](SECURITY.md)：私下报告安全问题和确认当前安全边界。
 
 第一次使用只需阅读“开始使用”；需要理解源码时，再阅读“工作原理与代码结构”。
 

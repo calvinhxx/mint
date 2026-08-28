@@ -27,6 +27,7 @@ fi
 
 git diff --check
 python3 .github/scripts/validate-build-matrix.py
+python3 .github/scripts/validate-workflows.py
 
 cmake --preset vcpkg-dev
 cmake --build --preset vcpkg-dev
