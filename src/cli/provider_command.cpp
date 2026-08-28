@@ -56,7 +56,12 @@ void print_provider(const Json& report, Console& console) {
         "Capabilities: tools=", enabled(capabilities.at("function_tools").get<bool>()),
         ", streaming=", enabled(capabilities.at("streaming").get<bool>()),
         ", stream_usage=", enabled(capabilities.at("stream_usage").get<bool>()),
-        ", reasoning_replay=", enabled(capabilities.at("stateless_reasoning_replay").get<bool>()));
+        ", explicit_tool_choice=", enabled(capabilities.at("explicit_tool_choice").get<bool>()),
+        ", chat_reasoning_replay=", enabled(capabilities.at("chat_reasoning_replay").get<bool>()),
+        ", requires_tool_call_content=",
+        enabled(capabilities.at("requires_tool_call_content").get<bool>()),
+        ", responses_reasoning_replay=",
+        enabled(capabilities.at("stateless_reasoning_replay").get<bool>()));
     console.write_line("Token limit field: ",
                        capabilities.at("token_limit_parameter").get<std::string>());
 }

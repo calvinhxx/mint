@@ -235,7 +235,7 @@ ModelReply parse_responses_response(const Json& response) {
     return reply;
 }
 
-Json sanitized_chat_messages(const Json& messages) {
+Json sanitized_chat_messages(const Json& messages, const ModelProviderCapabilities& capabilities) {
     if (!messages.is_array()) {
         throw std::invalid_argument("模型消息必须是数组");
     }
@@ -249,6 +249,21 @@ Json sanitized_chat_messages(const Json& messages) {
             if (message.contains(field)) {
                 clean[field] = message.at(field);
             }
+        }
+        const auto role = message.at("role").get<std::string>();
+        if (capabilities.chat_reasoning_replay && role == "assistant" &&
+            message.contains("reasoning_content")) {
+            const auto& reasoning = message.at("reasoning_content");
+            if (!reasoning.is_string() && !reasoning.is_null()) {
+                throw std::invalid_argument("assistant reasoning_content 必须是字符串或 null");
+            }
+            clean["reasoning_content"] = reasoning;
+        }
+        if (capabilities.requires_tool_call_content && role == "assistant" &&
+            clean.contains("tool_calls") && clean.at("tool_calls").is_array() &&
+            !clean.at("tool_calls").empty() &&
+            (!clean.contains("content") || clean.at("content").is_null())) {
+            clean["content"] = "";
         }
         result.push_back(std::move(clean));
     }
@@ -360,12 +375,15 @@ Json build_provider_request(const ModelProviderConfig& config, const Json& messa
     }
 
     if (profile.adapter == ModelAdapter::chat_completions) {
-        Json request = {{"model", config.model}, {"messages", sanitized_chat_messages(messages)}};
+        Json request = {{"model", config.model},
+                        {"messages", sanitized_chat_messages(messages, profile.capabilities)}};
         request[std::string(model_token_limit_parameter_name(
             profile.capabilities.token_limit_parameter))] = config.max_completion_tokens;
         if (!tools.empty()) {
             request["tools"] = tools;
-            request["tool_choice"] = "auto";
+            if (profile.capabilities.explicit_tool_choice) {
+                request["tool_choice"] = "auto";
+            }
         }
         if (config.stream) {
             request["stream"] = true;
@@ -408,6 +426,7 @@ struct ModelStreamDecoder::State {
     std::string event_data;
     std::optional<Json> complete_response;
     std::string chat_text;
+    std::string chat_reasoning_content;
     std::string chat_id;
     std::string chat_model;
     Json chat_usage;
@@ -415,6 +434,7 @@ struct ModelStreamDecoder::State {
     std::size_t events = 0;
     std::size_t delta_bytes = 0;
     bool saw_chat_payload = false;
+    bool saw_chat_reasoning_content = false;
     bool finished = false;
 
     void emit(ModelStreamEvent event) {
@@ -448,6 +468,10 @@ struct ModelStreamDecoder::State {
             }
             saw_chat_payload = true;
             const auto& delta = choice.at("delta");
+            if (delta.contains("reasoning_content") && delta.at("reasoning_content").is_string()) {
+                saw_chat_reasoning_content = true;
+                chat_reasoning_content += delta.at("reasoning_content").get<std::string>();
+            }
             if (delta.contains("content") && !delta.at("content").is_null()) {
                 const auto text = extract_text(delta.at("content"));
                 chat_text += text;
@@ -614,6 +638,9 @@ Json ModelStreamDecoder::finish() {
                     {"content", state_->chat_text.empty() && !state_->chat_tools.empty()
                                     ? Json(nullptr)
                                     : Json(state_->chat_text)}};
+    if (state_->saw_chat_reasoning_content) {
+        message["reasoning_content"] = std::move(state_->chat_reasoning_content);
+    }
     if (!state_->chat_tools.empty()) {
         message["tool_calls"] = Json::array();
         for (const auto& tool : state_->chat_tools) {

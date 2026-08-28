@@ -34,7 +34,8 @@
 - Chat Completions / Responses 统一内部格式；
 - 普通响应、SSE、限流重试和请求统计；
 - HTTP 传输、重试编排和模型协议相互独立，成功 SSE 不重复缓存完整响应体；
-- provider 能力目录、官方端点识别和代理显式配置；请求按 profile 选择 token 字段、stream usage 和推理续传；
+- provider 能力目录、官方端点识别和代理显式配置；请求按 profile 选择 token 字段、stream usage、tool choice 和推理续传；
+- DeepSeek V4 默认思考模式兼容：流式与非流式工具调用都会回传 `reasoning_content`、补齐工具消息的空 `content`，并省略不受支持的显式 `tool_choice`；
 - OpenAI Responses、Groq Chat、DeepSeek Chat 和 custom Chat 四份无密钥回归配置，以及离线 `mint provider` 检查命令；
 - 显式 `mint provider test` 真实兼容性握手：固定两轮请求验证 function call、参数和工具结果续接，限制重试与输出额度，只报告脱敏统计；
 - 声明式 provider 回归批次：一次检查 OpenAI Responses、Groq Chat 和 DeepSeek Chat，live 模式先校验全部密钥，再保存不可覆盖的脱敏证据；

@@ -28,6 +28,9 @@ struct ModelProviderCapabilities {
     bool stateless_reasoning_replay = false;
     ModelTokenLimitParameter token_limit_parameter =
         ModelTokenLimitParameter::max_completion_tokens;
+    bool explicit_tool_choice = true;
+    bool chat_reasoning_replay = false;
+    bool requires_tool_call_content = false;
 };
 
 struct ModelProviderProfile {

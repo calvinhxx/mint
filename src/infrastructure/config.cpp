@@ -116,8 +116,10 @@ optional_capabilities(const Json& document, ModelAdapter adapter,
         throw std::runtime_error("配置文件 " + config_path.string() +
                                  " 中的 \"capabilities\" 必须是对象");
     }
-    constexpr std::string_view allowed[] = {"function_tools", "streaming", "stream_usage",
-                                            "stateless_reasoning_replay", "token_limit_parameter"};
+    constexpr std::string_view allowed[] = {"function_tools",        "streaming",
+                                            "stream_usage",          "stateless_reasoning_replay",
+                                            "token_limit_parameter", "explicit_tool_choice",
+                                            "chat_reasoning_replay", "requires_tool_call_content"};
     for (auto item = capabilities.begin(); item != capabilities.end(); ++item) {
         if (std::find(allowed, std::end(allowed), item.key()) == std::end(allowed)) {
             throw std::runtime_error("配置文件 " + config_path.string() +
@@ -139,6 +141,12 @@ optional_capabilities(const Json& document, ModelAdapter adapter,
     result.stateless_reasoning_replay = optional_boolean(
         capabilities, "stateless_reasoning_replay", result.stateless_reasoning_replay, config_path);
     result.token_limit_parameter = token_limit_parameter(capabilities, adapter, config_path);
+    result.explicit_tool_choice = optional_boolean(capabilities, "explicit_tool_choice",
+                                                   result.explicit_tool_choice, config_path);
+    result.chat_reasoning_replay = optional_boolean(capabilities, "chat_reasoning_replay",
+                                                    result.chat_reasoning_replay, config_path);
+    result.requires_tool_call_content = optional_boolean(
+        capabilities, "requires_tool_call_content", result.requires_tool_call_content, config_path);
     return result;
 }
 
