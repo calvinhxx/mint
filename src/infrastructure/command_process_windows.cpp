@@ -466,12 +466,14 @@ ProcessResult execute_process(ProcessRequest request) {
     const auto started_at = std::chrono::steady_clock::now();
     if (workspace_disk_limit_exceeded(request.workspace_root,
                                       request.resource_limits.workspace_disk_bytes)) {
-        return {.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   std::chrono::steady_clock::now() - started_at)
-                                   .count(),
-                .status = "resource_limited",
-                .resource_limited = true,
-                .resource_limit = "workspace_disk"};
+        ProcessResult result;
+        result.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - started_at)
+                                 .count();
+        result.status = "resource_limited";
+        result.resource_limited = true;
+        result.resource_limit = "workspace_disk";
+        return result;
     }
 
     SECURITY_ATTRIBUTES inherited_attributes{};
