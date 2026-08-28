@@ -15,6 +15,10 @@ class TaskControl;
 
 namespace command_detail {
 
+#if defined(_WIN32)
+class WindowsAppContainer;
+#endif
+
 struct ProcessRequest {
     std::filesystem::path executable;
     std::vector<std::string> argv;
@@ -23,6 +27,9 @@ struct ProcessRequest {
     std::size_t max_output_bytes = 0;
     CommandResourceLimits resource_limits{};
     std::shared_ptr<TaskControl> task_control;
+#if defined(_WIN32)
+    std::shared_ptr<const WindowsAppContainer> windows_appcontainer;
+#endif
 };
 
 struct ProcessResult {

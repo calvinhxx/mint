@@ -20,6 +20,9 @@ mint_add_gtest(mint_tests
     TEST_PREFIX "integration."
     LABELS integration
 )
+if(WIN32)
+    target_link_libraries(mint_tests PRIVATE ws2_32)
+endif()
 
 mint_add_gtest(mint_v1_2_tests
     SOURCES v1_2/policy_and_recovery_tests.cpp

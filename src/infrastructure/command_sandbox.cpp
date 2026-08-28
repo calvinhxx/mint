@@ -483,6 +483,16 @@ SandboxConfig build_sandbox_config(
     return config;
 #elif defined(__linux__)
     return linux_sandbox_config(root, resolved_programs, std::move(denied_read_paths));
+#elif defined(_WIN32)
+    SandboxConfig config{.backend = "windows-appcontainer",
+                         .uses_native_process_sandbox = true,
+                         .denied_paths = std::move(denied_read_paths)};
+    config.allowed_executables.reserve(resolved_programs.size());
+    for (const auto& [label, executable] : resolved_programs) {
+        (void)label;
+        config.allowed_executables.push_back(executable);
+    }
+    return config;
 #else
     (void)root;
     (void)resolved_programs;

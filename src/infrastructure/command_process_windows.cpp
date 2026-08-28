@@ -6,6 +6,7 @@
 #endif
 #include <windows.h>
 
+#include "command_appcontainer_windows.hpp"
 #include "command_process.hpp"
 
 #include "mint/runtime/task_control.hpp"
@@ -75,16 +76,17 @@ class UniqueHandle final {
 
 class AttributeList final {
   public:
-    explicit AttributeList(const std::array<HANDLE, 2>& inherited_handles) {
+    AttributeList(const std::array<HANDLE, 2>& inherited_handles, PSID appcontainer_sid) {
+        const DWORD attribute_count = appcontainer_sid == nullptr ? 1 : 2;
         SIZE_T bytes = 0;
-        (void)::InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
+        (void)::InitializeProcThreadAttributeList(nullptr, attribute_count, 0, &bytes);
         if (bytes == 0) {
             throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(),
                                     "无法计算 Windows 进程属性空间");
         }
         storage_.resize(bytes);
         list_ = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage_.data());
-        if (!::InitializeProcThreadAttributeList(list_, 1, 0, &bytes)) {
+        if (!::InitializeProcThreadAttributeList(list_, attribute_count, 0, &bytes)) {
             throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(),
                                     "无法初始化 Windows 进程属性");
         }
@@ -96,6 +98,18 @@ class AttributeList final {
             list_ = nullptr;
             throw std::system_error(static_cast<int>(error), std::system_category(),
                                     "无法限制 Windows 子进程继承句柄");
+        }
+        if (appcontainer_sid != nullptr) {
+            security_capabilities_.AppContainerSid = appcontainer_sid;
+            if (!::UpdateProcThreadAttribute(list_, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+                                             &security_capabilities_,
+                                             sizeof(security_capabilities_), nullptr, nullptr)) {
+                const auto error = ::GetLastError();
+                ::DeleteProcThreadAttributeList(list_);
+                list_ = nullptr;
+                throw std::system_error(static_cast<int>(error), std::system_category(),
+                                        "无法配置 Windows AppContainer 进程属性");
+            }
         }
     }
 
@@ -115,6 +129,7 @@ class AttributeList final {
   private:
     std::vector<std::byte> storage_;
     LPPROC_THREAD_ATTRIBUTE_LIST list_ = nullptr;
+    SECURITY_CAPABILITIES security_capabilities_{};
 };
 
 class EnvironmentStrings final {
@@ -213,7 +228,8 @@ std::wstring uppercase(std::wstring value) {
     return value;
 }
 
-std::vector<wchar_t> filtered_environment() {
+std::vector<wchar_t>
+filtered_environment(const std::shared_ptr<const WindowsAppContainer>& appcontainer) {
     static const std::unordered_set<std::wstring> allowed_names = {L"PATH",
                                                                    L"PATHEXT",
                                                                    L"SYSTEMROOT",
@@ -222,6 +238,7 @@ std::vector<wchar_t> filtered_environment() {
                                                                    L"TEMP",
                                                                    L"TMP",
                                                                    L"HOME",
+                                                                   L"LOCALAPPDATA",
                                                                    L"USERPROFILE",
                                                                    L"HOMEDRIVE",
                                                                    L"HOMEPATH",
@@ -257,6 +274,9 @@ std::vector<wchar_t> filtered_environment() {
 
     const EnvironmentStrings raw_environment;
 
+    static const std::unordered_set<std::wstring> sandbox_overrides = {
+        L"TEMP", L"TMP", L"HOME", L"LOCALAPPDATA", L"USERPROFILE", L"HOMEDRIVE", L"HOMEPATH"};
+
     std::vector<std::wstring> entries;
     for (const wchar_t* current = raw_environment.get(); *current != L'\0';
          current += std::wcslen(current) + 1) {
@@ -265,9 +285,20 @@ std::vector<wchar_t> filtered_environment() {
         if (separator == std::wstring::npos || separator == 0) {
             continue;
         }
-        if (allowed_names.contains(uppercase(entry.substr(0, separator)))) {
+        const auto name = uppercase(entry.substr(0, separator));
+        if (allowed_names.contains(name) &&
+            (appcontainer == nullptr || !sandbox_overrides.contains(name))) {
             entries.push_back(entry);
         }
+    }
+    if (appcontainer != nullptr) {
+        const auto profile = appcontainer->profile_directory().wstring();
+        const auto temp = appcontainer->temp_directory().wstring();
+        const auto home_drive = appcontainer->profile_directory().root_name().wstring();
+        const auto home_path = profile.substr(home_drive.size());
+        entries.insert(entries.end(), {L"HOME=" + profile, L"HOMEDRIVE=" + home_drive,
+                                       L"HOMEPATH=" + home_path, L"LOCALAPPDATA=" + profile,
+                                       L"TEMP=" + temp, L"TMP=" + temp, L"USERPROFILE=" + profile});
     }
     std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
         return ::CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_LESS_THAN;
@@ -453,10 +484,12 @@ ProcessResult execute_process(ProcessRequest request) {
     }
 
     const std::array inherited_handles = {input.get(), output_write.get()};
-    AttributeList attributes(inherited_handles);
+    const auto appcontainer_sid =
+        request.windows_appcontainer == nullptr ? nullptr : request.windows_appcontainer->sid();
+    AttributeList attributes(inherited_handles, appcontainer_sid);
     auto job = create_job(request.resource_limits);
     auto arguments = command_line(request.argv);
-    auto environment = filtered_environment();
+    auto environment = filtered_environment(request.windows_appcontainer);
     const auto executable = request.executable.wstring();
     const auto working_directory = request.cwd.wstring();
 

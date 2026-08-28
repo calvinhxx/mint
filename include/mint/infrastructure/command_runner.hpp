@@ -41,6 +41,10 @@ struct CommandRunnerOptions {
 class CommandRunner {
   public:
     explicit CommandRunner(CommandRunnerOptions options);
+    ~CommandRunner();
+
+    CommandRunner(const CommandRunner&) = delete;
+    CommandRunner& operator=(const CommandRunner&) = delete;
 
     [[nodiscard]] const std::vector<std::string>& allowed_programs() const noexcept;
     [[nodiscard]] const std::vector<std::string>& recipe_names() const noexcept;
@@ -52,6 +56,8 @@ class CommandRunner {
     [[nodiscard]] Json run(const Json& arguments) const;
 
   private:
+    struct NativeSandboxState;
+
     [[nodiscard]] Json run_command(const Json& arguments) const;
 
     std::filesystem::path root_;
@@ -70,6 +76,8 @@ class CommandRunner {
     std::vector<std::string> sandbox_arguments_;
     std::string sandbox_backend_ = "none";
     bool sandbox_sets_working_directory_ = false;
+    bool sandbox_wraps_command_ = false;
+    std::unique_ptr<NativeSandboxState> native_sandbox_;
 };
 
 } // namespace mint

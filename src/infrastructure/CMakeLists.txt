@@ -1,11 +1,14 @@
 if(WIN32)
-    set(mint_command_process_source command_process_windows.cpp)
+    set(mint_command_process_sources
+        command_appcontainer_windows.cpp
+        command_process_windows.cpp
+    )
 else()
-    set(mint_command_process_source command_process.cpp)
+    set(mint_command_process_sources command_process.cpp)
 endif()
 
 add_library(mint_infrastructure STATIC
-    ${mint_command_process_source}
+    ${mint_command_process_sources}
     command_runner.cpp
     command_sandbox.cpp
     config.cpp
@@ -31,3 +34,7 @@ target_link_libraries(mint_infrastructure
         CURL::libcurl
         spdlog::spdlog
 )
+
+if(WIN32)
+    target_link_libraries(mint_infrastructure PRIVATE advapi32 ole32 userenv)
+endif()
