@@ -7,14 +7,11 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdlib>
-#include <cwchar>
-#include <limits>
+#include <cstring>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
-#include <unordered_set>
 #include <utility>
 
 namespace mint::command_detail {
@@ -62,23 +59,7 @@ std::filesystem::path canonical_existing_path(const std::filesystem::path& path,
     return resolved;
 }
 
-std::optional<std::filesystem::path> normalized_existing_path(std::wstring_view value) {
-    if (value.empty() || value.find(L'\0') != std::wstring_view::npos) {
-        return std::nullopt;
-    }
-    std::filesystem::path path(value);
-    if (!path.is_absolute()) {
-        return std::nullopt;
-    }
-    std::error_code error;
-    path = std::filesystem::weakly_canonical(std::move(path), error);
-    if (error || path.empty() || !std::filesystem::exists(path, error) || error) {
-        return std::nullopt;
-    }
-    return path;
-}
-
-std::optional<std::wstring> environment_value(const wchar_t* name) {
+std::optional<std::filesystem::path> environment_path(const wchar_t* name) {
     DWORD size = ::GetEnvironmentVariableW(name, nullptr, 0);
     if (size == 0) {
         return std::nullopt;
@@ -89,78 +70,55 @@ std::optional<std::wstring> environment_value(const wchar_t* name) {
         return std::nullopt;
     }
     value.resize(written);
-    return value;
+    std::filesystem::path path(std::move(value));
+    std::error_code error;
+    path = std::filesystem::weakly_canonical(std::move(path), error);
+    if (error || path.empty() || !std::filesystem::exists(path, error) || error) {
+        return std::nullopt;
+    }
+    return path;
 }
 
-void append_path_list(std::vector<std::filesystem::path>& paths, const wchar_t* name) {
-    const auto raw_value = environment_value(name);
-    if (!raw_value) {
-        return;
-    }
-    std::size_t begin = 0;
-    while (begin <= raw_value->size()) {
-        const auto end = raw_value->find(L';', begin);
-        const auto length = end == std::wstring::npos ? raw_value->size() - begin : end - begin;
-        auto value = std::wstring_view(*raw_value).substr(begin, length);
-        if (value.size() >= 2 && value.front() == L'"' && value.back() == L'"') {
-            value.remove_prefix(1);
-            value.remove_suffix(1);
-        }
-        if (const auto path = normalized_existing_path(value)) {
+std::vector<std::filesystem::path> system_managed_roots() {
+    std::vector<std::filesystem::path> paths;
+    for (const auto* name :
+         {L"SYSTEMROOT", L"PROGRAMFILES", L"PROGRAMFILES(X86)", L"PROGRAMW6432", L"PROGRAMDATA"}) {
+        if (const auto path = environment_path(name)) {
             paths.push_back(*path);
         }
-        if (end == std::wstring::npos) {
-            break;
-        }
-        begin = end + 1;
     }
-}
-
-void append_single_path(std::vector<std::filesystem::path>& paths, const wchar_t* name) {
-    const auto value = environment_value(name);
-    if (!value) {
-        return;
-    }
-    if (const auto path = normalized_existing_path(*value)) {
-        paths.push_back(*path);
-    }
+    return paths;
 }
 
 std::vector<std::filesystem::path>
-runtime_read_paths(const std::filesystem::path& workspace,
-                   const std::vector<std::filesystem::path>& allowed_executables) {
+executable_read_paths(const std::filesystem::path& workspace,
+                      const std::vector<std::filesystem::path>& allowed_executables) {
+    const auto system_roots = system_managed_roots();
     std::vector<std::filesystem::path> paths;
-    paths.reserve(allowed_executables.size() * 2 + 32);
     for (const auto& executable : allowed_executables) {
+        const bool system_managed =
+            std::any_of(system_roots.begin(), system_roots.end(),
+                        [&](const auto& root) { return is_inside(root, executable); });
+        if (system_managed || is_inside(workspace, executable)) {
+            continue;
+        }
         paths.push_back(executable);
-        paths.push_back(executable.parent_path());
+        const auto parent = executable.parent_path();
+        if (parent.empty() || is_inside(parent, workspace)) {
+            continue;
+        }
+        paths.push_back(parent);
+        std::error_code error;
+        for (std::filesystem::directory_iterator entry(parent, error), end; !error && entry != end;
+             entry.increment(error)) {
+            const auto status = entry->symlink_status(error);
+            if (!error && std::filesystem::is_regular_file(status)) {
+                paths.push_back(entry->path());
+            }
+            error.clear();
+        }
     }
 
-    for (const auto* name : {L"INCLUDE", L"LIB", L"LIBPATH", L"CMAKE_PREFIX_PATH"}) {
-        append_path_list(paths, name);
-    }
-    for (const auto* name : {L"VCPKG_ROOT", L"VCPKG_INSTALLATION_ROOT", L"CMAKE_TOOLCHAIN_FILE",
-                             L"VCINSTALLDIR", L"VCTOOLSINSTALLDIR", L"WINDOWSSDKDIR",
-                             L"UNIVERSALCRTSDKDIR", L"VSINSTALLDIR", L"DEVENVDIR", L"CC", L"CXX"}) {
-        append_single_path(paths, name);
-    }
-
-    std::vector<std::filesystem::path> system_roots;
-    for (const auto* name :
-         {L"SYSTEMROOT", L"PROGRAMFILES", L"PROGRAMFILES(X86)", L"PROGRAMW6432", L"PROGRAMDATA"}) {
-        append_single_path(system_roots, name);
-    }
-
-    paths.erase(std::remove_if(paths.begin(), paths.end(),
-                               [&](const auto& path) {
-                                   return path.empty() || is_inside(workspace, path) ||
-                                          is_inside(path, workspace) ||
-                                          std::any_of(system_roots.begin(), system_roots.end(),
-                                                      [&](const auto& system_root) {
-                                                          return is_inside(system_root, path);
-                                                      });
-                               }),
-                paths.end());
     std::sort(paths.begin(), paths.end(), [](const auto& left, const auto& right) {
         return ::CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_LESS_THAN;
     });
@@ -221,20 +179,116 @@ void update_acl(const std::filesystem::path& path, PSID sid, ACCESS_MODE mode, D
     }
 }
 
-void grant_path(const std::filesystem::path& path, PSID sid, DWORD access) {
+void grant_path(const std::filesystem::path& path, PSID sid, DWORD access, bool recursive) {
     const DWORD inheritance =
-        path_is_directory(path) ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
+        recursive && path_is_directory(path) ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
     update_acl(path, sid, GRANT_ACCESS, access, inheritance);
-}
-
-void deny_path(const std::filesystem::path& path, PSID sid) {
-    const DWORD inheritance =
-        path_is_directory(path) ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
-    update_acl(path, sid, DENY_ACCESS, denied_access, inheritance);
 }
 
 void revoke_path(const std::filesystem::path& path, PSID sid) {
     update_acl(path, sid, REVOKE_ACCESS, 0, NO_INHERITANCE);
+}
+
+std::vector<std::byte> read_security_descriptor(const std::filesystem::path& path,
+                                                bool& dacl_protected) {
+    auto native_path = path.wstring();
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const DWORD error =
+        ::GetNamedSecurityInfoW(native_path.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                                nullptr, nullptr, &dacl, nullptr, &descriptor);
+    if (error != ERROR_SUCCESS) {
+        throw_windows_error(error, "无法保存 Windows 保护路径 ACL");
+    }
+    SECURITY_DESCRIPTOR_CONTROL control{};
+    DWORD revision = 0;
+    if (!::GetSecurityDescriptorControl(descriptor, &control, &revision)) {
+        const auto control_error = ::GetLastError();
+        (void)::LocalFree(descriptor);
+        throw_windows_error(control_error, "无法读取 Windows 保护路径 ACL 状态");
+    }
+    BOOL present = FALSE;
+    BOOL defaulted = FALSE;
+    if (!::GetSecurityDescriptorDacl(descriptor, &present, &dacl, &defaulted) || !present ||
+        dacl == nullptr) {
+        (void)::LocalFree(descriptor);
+        throw std::invalid_argument("Windows 保护路径必须具有明确 DACL: " + path.string());
+    }
+    std::vector<std::byte> result;
+    if ((control & SE_SELF_RELATIVE) != 0) {
+        const DWORD bytes = ::GetSecurityDescriptorLength(descriptor);
+        result.resize(bytes);
+        std::memcpy(result.data(), descriptor, bytes);
+    } else {
+        DWORD bytes = 0;
+        (void)::MakeSelfRelativeSD(descriptor, nullptr, &bytes);
+        if (bytes == 0 || ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+            const auto relative_error = ::GetLastError();
+            (void)::LocalFree(descriptor);
+            throw_windows_error(relative_error, "无法计算 Windows 保护路径 ACL 快照空间");
+        }
+        result.resize(bytes);
+        if (!::MakeSelfRelativeSD(descriptor, result.data(), &bytes)) {
+            const auto relative_error = ::GetLastError();
+            (void)::LocalFree(descriptor);
+            throw_windows_error(relative_error, "无法保存 Windows 保护路径 ACL 快照");
+        }
+        result.resize(bytes);
+    }
+    (void)::LocalFree(descriptor);
+    dacl_protected = (control & SE_DACL_PROTECTED) != 0;
+    return result;
+}
+
+PACL saved_dacl(const std::vector<std::byte>& security_descriptor) {
+    auto* descriptor =
+        reinterpret_cast<PSECURITY_DESCRIPTOR>(const_cast<std::byte*>(security_descriptor.data()));
+    BOOL present = FALSE;
+    BOOL defaulted = FALSE;
+    PACL dacl = nullptr;
+    if (!::GetSecurityDescriptorDacl(descriptor, &present, &dacl, &defaulted) || !present ||
+        dacl == nullptr) {
+        throw std::logic_error("保存的 Windows DACL 无效");
+    }
+    return dacl;
+}
+
+void protect_path(const std::filesystem::path& path,
+                  const std::vector<std::byte>& security_descriptor, PSID sid) {
+    EXPLICIT_ACCESSW entry{};
+    entry.grfAccessPermissions = denied_access;
+    entry.grfAccessMode = DENY_ACCESS;
+    entry.grfInheritance = NO_INHERITANCE;
+    ::BuildTrusteeWithSidW(&entry.Trustee, sid);
+
+    PACL protected_dacl = nullptr;
+    const DWORD acl_error =
+        ::SetEntriesInAclW(1, &entry, saved_dacl(security_descriptor), &protected_dacl);
+    if (acl_error != ERROR_SUCCESS) {
+        throw_windows_error(acl_error, "无法构建 Windows 保护路径 DACL");
+    }
+    auto native_path = path.wstring();
+    const DWORD error =
+        ::SetNamedSecurityInfoW(native_path.data(), SE_FILE_OBJECT,
+                                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                                nullptr, nullptr, protected_dacl, nullptr);
+    (void)::LocalFree(protected_dacl);
+    if (error != ERROR_SUCCESS) {
+        throw_windows_error(error, "无法应用 Windows 保护路径 DACL");
+    }
+}
+
+void restore_path(const std::filesystem::path& path,
+                  const std::vector<std::byte>& security_descriptor, bool dacl_protected) {
+    auto native_path = path.wstring();
+    const SECURITY_INFORMATION inheritance = dacl_protected ? PROTECTED_DACL_SECURITY_INFORMATION
+                                                            : UNPROTECTED_DACL_SECURITY_INFORMATION;
+    const DWORD error = ::SetNamedSecurityInfoW(native_path.data(), SE_FILE_OBJECT,
+                                                DACL_SECURITY_INFORMATION | inheritance, nullptr,
+                                                nullptr, saved_dacl(security_descriptor), nullptr);
+    if (error != ERROR_SUCCESS) {
+        throw_windows_error(error, "无法恢复 Windows 保护路径 DACL");
+    }
 }
 
 } // namespace
@@ -282,6 +336,20 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
         throw std::invalid_argument("命令工作区不是目录: " + resolved_workspace.string());
     }
 
+    for (auto& denied : denied_paths) {
+        std::error_code error;
+        denied = std::filesystem::weakly_canonical(std::move(denied), error);
+        if (error || denied.empty() || !std::filesystem::exists(denied, error) || error) {
+            continue;
+        }
+        if (is_inside(denied, resolved_workspace)) {
+            throw std::invalid_argument("命令保护路径不能包含整个工作区: " + denied.string());
+        }
+        ProtectedPathState state{.path = std::move(denied)};
+        state.security_descriptor = read_security_descriptor(state.path, state.dacl_protected);
+        protected_paths_.push_back(std::move(state));
+    }
+
     profile_name_ = unique_profile_name();
     const HRESULT create_result =
         ::CreateAppContainerProfile(profile_name_.c_str(), L"Mint command sandbox",
@@ -310,24 +378,16 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
     }
 
     acl_paths_.push_back(resolved_workspace);
-    grant_path(resolved_workspace, sid_, workspace_access);
+    grant_path(resolved_workspace, sid_, workspace_access, true);
 
-    for (const auto& path : runtime_read_paths(resolved_workspace, allowed_executables)) {
+    for (const auto& path : executable_read_paths(resolved_workspace, allowed_executables)) {
         acl_paths_.push_back(path);
-        grant_path(path, sid_, readonly_access);
+        grant_path(path, sid_, readonly_access, false);
     }
 
-    for (auto& denied : denied_paths) {
-        std::error_code error;
-        denied = std::filesystem::weakly_canonical(std::move(denied), error);
-        if (error || denied.empty() || !std::filesystem::exists(denied, error) || error) {
-            continue;
-        }
-        if (is_inside(denied, resolved_workspace)) {
-            throw std::invalid_argument("命令保护路径不能包含整个工作区: " + denied.string());
-        }
-        acl_paths_.push_back(std::move(denied));
-        deny_path(acl_paths_.back(), sid_);
+    for (auto& protected_path : protected_paths_) {
+        protect_path(protected_path.path, protected_path.security_descriptor, sid_);
+        protected_path.applied = true;
     }
 }
 
@@ -341,6 +401,16 @@ void WindowsAppContainer::cleanup() noexcept {
         }
         acl_paths_.clear();
     }
+    for (auto path = protected_paths_.rbegin(); path != protected_paths_.rend(); ++path) {
+        if (!path->applied) {
+            continue;
+        }
+        try {
+            restore_path(path->path, path->security_descriptor, path->dacl_protected);
+        } catch (...) {
+        }
+    }
+    protected_paths_.clear();
     if (!profile_name_.empty()) {
         (void)::DeleteAppContainerProfile(profile_name_.c_str());
         profile_name_.clear();

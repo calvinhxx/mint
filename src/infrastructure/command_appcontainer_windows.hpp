@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -30,6 +31,13 @@ class WindowsAppContainer final {
     [[nodiscard]] const std::filesystem::path& temp_directory() const noexcept;
 
   private:
+    struct ProtectedPathState {
+        std::filesystem::path path;
+        std::vector<std::byte> security_descriptor;
+        bool dacl_protected = false;
+        bool applied = false;
+    };
+
     WindowsAppContainer(const std::filesystem::path& workspace,
                         std::vector<std::filesystem::path> allowed_executables,
                         std::vector<std::filesystem::path> denied_paths);
@@ -44,6 +52,7 @@ class WindowsAppContainer final {
     std::filesystem::path profile_directory_;
     std::filesystem::path temp_directory_;
     std::vector<std::filesystem::path> acl_paths_;
+    std::vector<ProtectedPathState> protected_paths_;
 };
 
 } // namespace mint::command_detail
