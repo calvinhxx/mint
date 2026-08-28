@@ -97,7 +97,9 @@ flowchart LR
 | [`src/infrastructure/model_protocol.cpp`](../../src/infrastructure/model_protocol.cpp) | Chat Completions / Responses 格式转换 |
 | [`src/infrastructure/command_runner.cpp`](../../src/infrastructure/command_runner.cpp) | 固定命令契约、审批和结果组装 |
 | [`src/infrastructure/command_sandbox.cpp`](../../src/infrastructure/command_sandbox.cpp) | 程序解析、危险启动器拦截和 OS 沙箱策略 |
-| [`src/infrastructure/command_process.cpp`](../../src/infrastructure/command_process.cpp) | POSIX 子进程、资源限制、超时与取消 |
+| [`src/infrastructure/command_process.cpp`](../../src/infrastructure/command_process.cpp) | POSIX 子进程、超时、取消和资源检查编排 |
+| [`src/infrastructure/command_process_tree.cpp`](../../src/infrastructure/command_process_tree.cpp) | macOS / Linux 子孙进程发现、计数和整树终止 |
+| [`src/infrastructure/command_resource_monitor.cpp`](../../src/infrastructure/command_resource_monitor.cpp) | 三平台共用的工作区磁盘用量检查 |
 | [`src/infrastructure/command_process_windows.cpp`](../../src/infrastructure/command_process_windows.cpp) | Windows `CreateProcessW`、AppContainer 启动属性、句柄隔离和 Job Object |
 | [`src/infrastructure/command_appcontainer_windows.cpp`](../../src/infrastructure/command_appcontainer_windows.cpp) | Windows AppContainer profile、路径 DACL 和生命周期 |
 | [`src/infrastructure/session_store.cpp`](../../src/infrastructure/session_store.cpp) | checkpoint 读写 |

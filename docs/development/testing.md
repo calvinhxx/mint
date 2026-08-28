@@ -43,9 +43,9 @@ ctest --preset PRESET
 
 这里的“支持”表示代码能够在目标系统编译并运行该系统适用的自动测试。macOS 命令使用 Seatbelt；Linux 使用 Bubblewrap，并由矩阵安装 `bubblewrap` 包；Windows 使用无网络 capability 的 AppContainer 和 DACL 授权。
 
-Linux 和 Windows 沙箱测试会真实检查四件事：工作区内可以写、工作区外不能写、受保护文件不能读、命令不能访问宿主网络。Bubblewrap 不可用时不会静默降级；只有用户显式传入 `--unsafe-no-command-sandbox` 才能关闭这层保护。Ubuntu hosted runner 默认用 AppArmor 限制 user namespace，CI 因此只为 `/usr/bin/bwrap` 加载临时 `userns` profile，不关闭系统级限制。
+沙箱测试会真实检查五件事：工作区内可以写、工作区外不能写、受保护文件不能读、命令不能访问宿主网络、显式授权的外部路径可读但不可写。Bubblewrap 不可用时不会静默降级；只有用户显式传入 `--unsafe-no-command-sandbox` 才能关闭这层保护。Ubuntu hosted runner 默认用 AppArmor 限制 user namespace，CI 因此只为 `/usr/bin/bwrap` 加载临时 `userns` profile，不关闭系统级限制。
 
-资源限制测试会真实触发 CPU、内存和单文件大小上限。macOS 的内存用父进程监控，Linux 使用 `RLIMIT_AS`；Sanitizer 构建不启用内存上限。Windows 另外创建子进程验证 Job Object 的进程树上限。Windows 不支持 `file_size_bytes`，测试确认非零配置会被拒绝。
+资源限制测试会真实触发 CPU、内存、进程树数量、单文件大小和工作区磁盘上限，并检查工作区已经超限时不会启动新命令。macOS 的内存用父进程监控，Linux 使用 `RLIMIT_AS`；Sanitizer 构建不启用内存上限。Windows 不支持 `file_size_bytes`，测试确认非零配置会被拒绝。
 
 ## 本地全量验证
 
@@ -139,7 +139,8 @@ provider 契约测试会加载 `configs/providers` 下四份固定配置，检�
 
 - v1.4 的真实外部证据只覆盖 Chat Completions 非流式配置；
 - 六组合矩阵覆盖原生构建和适用测试，Linux Bubblewrap 和 Windows AppContainer 后端在 x64 / ARM64 验收；
-- Windows AppContainer 不是虚拟机；工作区外的自定义工具链可能因未授权而失败；
+- Windows AppContainer 不是虚拟机；工作区外的工具链必须通过 `command_read_paths` 显式授权；
+- 工作区磁盘限制按普通文件逻辑大小巡检，不是文件系统原生 quota；
 - 本地测试证明确定性行为，不替代真实 provider 回归；
 - OpenAI、Groq、DeepSeek 和 custom 固定配置目前只做离线契约回归；
 - session 管理的 `apply_changeset` 通过事务日志避免跨进程重复提交；`apply_patch`、命令和任意扩展工具不承诺 exactly-once。

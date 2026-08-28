@@ -32,13 +32,24 @@ test      -> ctest --test-dir build --output-on-failure
 |---|---|
 | macOS | Seatbelt：限制宿主写入、敏感文件和网络 |
 | Linux | Bubblewrap：工作区可写，其余宿主路径只读或隐藏；使用独立网络和运行时目录 |
-| Windows | AppContainer：工作区和已登记程序可用；受保护路径与网络不可用 |
+| Windows | AppContainer：工作区、已登记程序和显式只读路径可用；受保护路径与网络不可用 |
 
 Linux 缺少 `bwrap` 时会直接拒绝命令，不会自动退回到无沙箱模式。非标准安装位置可以用 `MINT_BWRAP_PATH=/absolute/path/to/bwrap` 指定。
 
-Windows 使用 `CreateProcessW` 直接启动程序，不经过 shell。每个 `CommandRunner` 拥有独立的无网络 capability AppContainer；DACL 只向工作区、已登记程序及其同目录运行文件授权，受保护路径保持不可读。Job Object 再限制进程树、CPU、内存和进程数。
+Windows 使用 `CreateProcessW` 直接启动程序，不经过 shell。每个 `CommandRunner` 拥有独立的无网络 capability AppContainer；DACL 只向工作区、已登记程序、程序同目录运行文件和 policy 声明的只读路径授权，受保护路径保持不可读。Job Object 再限制进程树、CPU、内存和进程数。
 
-AppContainer 不是虚拟机，仍可见部分 Windows 公共系统资源。如果工具还依赖工作区和程序同目录之外的用户文件，命令会以无权访问失败。`--unsafe-no-command-sandbox` 会关闭当前平台的 OS 隔离，只应由信任工作区和命令的本地操作者显式使用。
+工具链确实需要读取工作区外文件时，在 policy 顶层声明绝对路径：
+
+~~~json
+{
+  "schema_version": 1,
+  "command_read_paths": ["/opt/toolchain"]
+}
+~~~
+
+Windows 可写成 `C:\toolchains\llvm`。路径必须已经存在，不能位于工作区内、包含整个工作区或与保护路径重叠。授权只增加读取和执行权限，不增加写权限；关闭 OS 沙箱时也不能使用这个字段。
+
+AppContainer 不是虚拟机，仍可见部分 Windows 公共系统资源。`--unsafe-no-command-sandbox` 会关闭当前平台的 OS 隔离，只应由信任工作区和命令的本地操作者显式使用。
 
 ## 命令资源上限
 
@@ -51,15 +62,21 @@ AppContainer 不是虚拟机，仍可见部分 Windows 公共系统资源。如�
       "cpu_seconds": 60,
       "memory_bytes": 1073741824,
       "max_processes": 128,
-      "file_size_bytes": 67108864
+      "file_size_bytes": 67108864,
+      "workspace_disk_bytes": 4294967296
     }
   }
 }
 ~~~
 
-数值为 `0` 表示不启用该项；旧 policy 没有这些字段时保持原行为。Linux 使用进程级 `rlimit`；macOS 的内存由 mint 监控命令主进程，其余项目使用 `rlimit`。Windows 的 CPU、内存和进程数限制作用于整个 Job Object，也就是命令进程树。
+数值为 `0` 表示不启用该项；旧 policy 没有这些字段时保持原行为。
 
-Windows Job Object 不提供单文件大小限制，因此 Windows policy 的 `file_size_bytes` 必须为 `0`。POSIX 的限制仍不等于整棵进程树总量；工作区总磁盘配额也尚未实现。可识别的超限原因会写入命令结果，Linux 内存分配或进程创建被内核拒绝时也可能只得到非零退出码。
+- `max_processes` 计算一次命令的完整进程树。Windows 使用 Job Object；macOS 和 Linux 由 mint 跟踪子孙进程，超限后终止整棵树。
+- `workspace_disk_bytes` 统计工作区内普通文件的逻辑大小，不跟随符号链接。命令启动前、运行中和结束后都会检查。
+- POSIX 的 CPU 和单文件大小仍由进程级 `rlimit` 执行；Linux 内存使用 `RLIMIT_AS`，macOS 由 mint 监控命令主进程。
+- Windows Job Object 不提供单文件大小限制，因此 Windows policy 的 `file_size_bytes` 必须为 `0`。
+
+工作区磁盘限制采用 100 毫秒巡检，不是文件系统原生 quota。快速写入可能短暂超过目标值，超限文件也不会自动回滚；命令结果会明确返回 `resource_limit: "workspace_disk"`。
 
 ## 修改后的验证
 
@@ -97,7 +114,8 @@ changeset 在写第一个文件前保存事务日志，内容包括每个文件�
 
 - 三个系统都在 x64 / ARM64 原生 CI 运行适用测试；
 - Linux Bubblewrap 和 Windows AppContainer 在两种架构验收工作区写入、越界写入、受保护读取和网络四个边界；
-- Windows 对工作区外的自定义工具链仍缺可配置的只读路径；
-- POSIX 进程树总资源和工作区总磁盘配额仍待补充。
+- POSIX 的 CPU 和内存上限不是整棵进程树的汇总值；
+- 工作区磁盘上限是巡检式限制，不是文件系统硬配额；
+- Windows 仍不支持 `file_size_bytes` 单文件限制。
 
 这些限制属于当前实现范围，不应由提示词代替。
