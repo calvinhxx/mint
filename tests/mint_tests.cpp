@@ -300,8 +300,16 @@ class TemporaryDirectory final {
   public:
     explicit TemporaryDirectory(
         std::filesystem::path base = std::filesystem::temp_directory_path()) {
+        static std::atomic<std::uint64_t> sequence{0};
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::move(base) / ("mint-tests-" + std::to_string(stamp));
+#if defined(_WIN32)
+        const auto process_id = static_cast<std::uint64_t>(::GetCurrentProcessId());
+#else
+        const auto process_id = static_cast<std::uint64_t>(::getpid());
+#endif
+        const auto suffix = std::to_string(process_id) + '-' + std::to_string(stamp) + '-' +
+                            std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+        path_ = std::move(base) / ("mint-tests-" + suffix);
         std::filesystem::create_directories(path_ / "workspace" / "src");
     }
 
@@ -2116,28 +2124,23 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
     MINT_EXPECT(blocked_network.at("exit_code") == 0,
                 "sandbox prevents the command from reaching the host network: " +
                     blocked_network.dump());
-}
 
 #if defined(_WIN32)
-TEST(CommandRunnerTest, RunsCMakeInAppContainer) {
-    TemporaryDirectory temporary;
-    const auto workspace = temporary.path() / "workspace";
-    write_text(workspace / "README.md", "# AppContainer smoke test\n");
-
-    mint::ToolRegistry tools(workspace, mint::ToolRegistryOptions{.allowed_programs = {"cmake"},
-                                                                  .require_command_sandbox = true});
-    const auto result = mint::Json::parse(
-        tools.execute({"cmake-version",
-                       "run_command",
-                       {{"program", "cmake"}, {"args", mint::Json::array({"--version"})}}}));
-
-    MINT_EXPECT(result.at("sandbox_backend") == "windows-appcontainer",
+    mint::ToolRegistry cmake_tools(
+        workspace,
+        mint::ToolRegistryOptions{.allowed_programs = {"cmake"}, .require_command_sandbox = true});
+    const auto cmake_result = mint::Json::parse(
+        cmake_tools.execute({"cmake-version",
+                             "run_command",
+                             {{"program", "cmake"}, {"args", mint::Json::array({"--version"})}}}));
+    MINT_EXPECT(cmake_result.at("sandbox_backend") == "windows-appcontainer",
                 "CMake runs through the Windows AppContainer backend");
-    const auto output = result.at("output").get<std::string>();
-    MINT_EXPECT(result.at("exit_code") == 0 && output.find("cmake version") != std::string::npos,
-                "installed CMake remains usable in the AppContainer: " + result.dump());
-}
+    const auto cmake_output = cmake_result.at("output").get<std::string>();
+    MINT_EXPECT(cmake_result.at("exit_code") == 0 &&
+                    cmake_output.find("cmake version") != std::string::npos,
+                "installed CMake remains usable in the AppContainer: " + cmake_result.dump());
 #endif
+}
 
 TEST(AgentLoopTest, CompletesReadOnlyTask) {
     TemporaryDirectory temporary;
