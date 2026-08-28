@@ -13,6 +13,7 @@ namespace mint::cli {
 class Console;
 
 enum class CommandMode { legacy, init, run, resume, status, provider };
+enum class ProviderCommandAction { inspect, test };
 
 struct CommandLine {
     CommandMode mode = CommandMode::legacy;
@@ -31,6 +32,7 @@ struct CommandLine {
     bool policy_conflict = false;
     bool config_specified = false;
     bool root_specified = false;
+    ProviderCommandAction provider_action = ProviderCommandAction::inspect;
     std::filesystem::path config = "config.json";
     std::filesystem::path policy;
     std::filesystem::path root = std::filesystem::current_path();

@@ -52,7 +52,9 @@ mint_add_gtest(mint_v1_4_tests
 
 mint_add_gtest(mint_v1_5_tests
     GTEST_MAIN
-    SOURCES v1_5/provider_profile_tests.cpp
+    SOURCES
+        v1_5/provider_acceptance_tests.cpp
+        v1_5/provider_profile_tests.cpp
     LIBRARIES mint_cli
     INCLUDE_DIRECTORIES
         "${PROJECT_SOURCE_DIR}/src/cli"

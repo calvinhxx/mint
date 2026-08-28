@@ -61,7 +61,8 @@ void print_help(Console& console, const char* program) {
         << " resume [--root 路径] [--state-dir 路径] [--task ID] [--config 路径]\n"
         << "  " << program << " status [--root 路径] [--state-dir 路径] [--task ID] [--json]\n\n"
         << "模型配置:\n"
-        << "  " << program << " provider [--config 路径] [--json]  离线检查 provider 能力\n\n"
+        << "  " << program << " provider [--config 路径] [--json]  离线检查 provider 能力\n"
+        << "  " << program << " provider test [--config 路径] [--json]  发送两轮真实兼容性测试\n\n"
         << "兼容工作流:\n"
         << "  " << program << " --demo [问题]\n"
         << "  " << program
@@ -127,6 +128,10 @@ CommandLine parse_arguments(int argc, char** argv) {
     }
     if (result.mode == CommandMode::resume) {
         result.resume_session = true;
+    }
+    if (result.mode == CommandMode::provider && argc > 2 && std::string(argv[2]) == "test") {
+        result.provider_action = ProviderCommandAction::test;
+        begin = 3;
     }
 
     for (int index = begin; index < argc; ++index) {
@@ -267,7 +272,8 @@ CommandLine parse_arguments(int argc, char** argv) {
             result.policy_conflict || !result.policy.empty() || !result.session.empty() ||
             !result.events_jsonl.empty() || !result.state_dir.empty() || !result.task_id.empty() ||
             result.root_specified) {
-            throw std::invalid_argument("provider 只接受 --config、--json 和 --log-level");
+            throw std::invalid_argument(
+                "provider 和 provider test 只接受 --config、--json 和 --log-level");
         }
     } else {
         if (!result.policy.empty() || !result.session.empty() || !result.events_jsonl.empty() ||

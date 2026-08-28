@@ -11,6 +11,7 @@
 - Added session schema v4 and a per-task changeset journal with an exclusive process lock, deterministic crash rollback, checkpoint acknowledgement, and fail-closed external-change detection.
 - Added centralized OpenAI, Groq, DeepSeek, and custom provider profiles with endpoint detection, capability-driven request fields, and explicit proxy configuration.
 - Added secret-free fixed provider configurations and an offline `mint provider` command that reports the resolved adapter and capabilities without reading or printing API keys.
+- Added an explicit, spend-bounded `mint provider test` handshake that validates a two-request tool round trip and emits only sanitized compatibility metrics.
 - Added API key environment-variable loading and redacted endpoint query parameters from configuration reports.
 - Fixed Windows file replacement and multi-config fixture handling exposed by the native test lanes.
 - Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
