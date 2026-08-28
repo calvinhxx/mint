@@ -36,4 +36,4 @@ cmake --build --preset vcpkg-release
 
 第一次使用只需阅读“开始使用”；需要理解源码时，再阅读“工作原理与代码结构”。
 
-源码构建矩阵覆盖 Windows、macOS、Linux 的 x64 / ARM64，具体 preset 见[构建、测试与验收](docs/development/testing.md)。macOS 和 Linux 提供 OS 沙箱；Windows 已有受控进程后端，但尚无文件与网络隔离，因此默认拒绝项目命令。
+源码构建矩阵覆盖 Windows、macOS、Linux 的 x64 / ARM64，具体 preset 见[构建、测试与验收](docs/development/testing.md)。三个系统都默认隔离项目命令：macOS 使用 Seatbelt，Linux 使用 Bubblewrap，Windows 使用 AppContainer。

@@ -3,11 +3,11 @@
 ## 1.5.0 - Unreleased
 
 - Added native Windows, macOS, and Linux build/test lanes for x64 and ARM64, backed by matching vcpkg presets and a checked matrix catalog.
-- Validated all six native platform lanes; Windows runs the applicable tests while its secure command backend remains unavailable.
+- Validated all six native platform lanes, including Windows x64 and ARM64 command-sandbox boundary tests.
 - Added a Linux command sandbox backed by Bubblewrap: the workspace is the only writable host path, the user home and runtime directories are masked, protected files stay hidden, capabilities are dropped, and the host network is isolated.
 - Closed inherited file descriptors before approved commands start, preventing an otherwise isolated child from reusing process resources opened by mint.
 - Added policy-configurable CPU, memory, process-count, and per-file size limits for POSIX commands, with resource-limit evidence retained through context compaction.
-- Added a no-shell Windows process backend with strict argv quoting, filtered environment and inherited handles, whole-tree termination, and Job Object CPU, memory, and process-count limits. Windows still requires the explicit unsafe switch because filesystem and network isolation are not implemented.
+- Added a Windows AppContainer command backend with no network capabilities, DACL-scoped workspace and executable access, protected-path denial, strict argv and handle isolation, and Job Object resource limits.
 - Fixed Windows file replacement and multi-config fixture handling exposed by the native test lanes.
 - Kept the macOS ARM64 quality gate for version, format, Debug, Release, sanitizer, full CTest, and offline CLI checks.
 - Added a security policy, immutable workflow action pins, a pin-validation gate, and weekly Dependabot updates.

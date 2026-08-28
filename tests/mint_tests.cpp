@@ -44,6 +44,8 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #else
 #include <cerrno>
 #include <fcntl.h>
@@ -174,6 +176,29 @@ int run_command_helper(int argc, char** argv) {
         return memory.empty() ? 17 : 0;
     }
 #if defined(_WIN32)
+    if (mode == "network") {
+        if (argc != 4) {
+            return 65;
+        }
+        WSADATA winsock{};
+        if (::WSAStartup(MAKEWORD(2, 2), &winsock) != 0) {
+            return 0;
+        }
+        const SOCKET socket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (socket == INVALID_SOCKET) {
+            (void)::WSACleanup();
+            return 0;
+        }
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(static_cast<std::uint16_t>(std::stoul(argv[3])));
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        const auto connected =
+            ::connect(socket, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
+        (void)::closesocket(socket);
+        (void)::WSACleanup();
+        return connected == SOCKET_ERROR ? 0 : 14;
+    }
     if (mode == "handle") {
         if (argc != 7) {
             return 65;
@@ -275,8 +300,16 @@ class TemporaryDirectory final {
   public:
     explicit TemporaryDirectory(
         std::filesystem::path base = std::filesystem::temp_directory_path()) {
+        static std::atomic<std::uint64_t> sequence{0};
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::move(base) / ("mint-tests-" + std::to_string(stamp));
+#if defined(_WIN32)
+        const auto process_id = static_cast<std::uint64_t>(::GetCurrentProcessId());
+#else
+        const auto process_id = static_cast<std::uint64_t>(::getpid());
+#endif
+        const auto suffix = std::to_string(process_id) + '-' + std::to_string(stamp) + '-' +
+                            std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+        path_ = std::move(base) / ("mint-tests-" + suffix);
         std::filesystem::create_directories(path_ / "workspace" / "src");
     }
 
@@ -293,7 +326,59 @@ class TemporaryDirectory final {
     std::filesystem::path path_;
 };
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+class LoopbackListener final {
+  public:
+    LoopbackListener() {
+        if (::WSAStartup(MAKEWORD(2, 2), &winsock_) != 0) {
+            throw std::runtime_error("sandbox test could not initialize Winsock");
+        }
+        socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (socket_ == INVALID_SOCKET) {
+            (void)::WSACleanup();
+            throw std::runtime_error("sandbox test could not create loopback listener");
+        }
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        address.sin_port = 0;
+        if (::bind(socket_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) ==
+                SOCKET_ERROR ||
+            ::listen(socket_, 1) == SOCKET_ERROR) {
+            (void)::closesocket(socket_);
+            (void)::WSACleanup();
+            throw std::runtime_error("sandbox test could not bind loopback listener");
+        }
+        int length = sizeof(address);
+        if (::getsockname(socket_, reinterpret_cast<sockaddr*>(&address), &length) ==
+            SOCKET_ERROR) {
+            (void)::closesocket(socket_);
+            (void)::WSACleanup();
+            throw std::runtime_error("sandbox test could not inspect loopback listener");
+        }
+        port_ = ntohs(address.sin_port);
+    }
+
+    ~LoopbackListener() {
+        if (socket_ != INVALID_SOCKET) {
+            (void)::closesocket(socket_);
+        }
+        (void)::WSACleanup();
+    }
+
+    LoopbackListener(const LoopbackListener&) = delete;
+    LoopbackListener& operator=(const LoopbackListener&) = delete;
+
+    [[nodiscard]] std::uint16_t port() const noexcept {
+        return port_;
+    }
+
+  private:
+    WSADATA winsock_{};
+    SOCKET socket_ = INVALID_SOCKET;
+    std::uint16_t port_ = 0;
+};
+#else
 class LoopbackListener final {
   public:
     LoopbackListener() {
@@ -1968,17 +2053,12 @@ TEST(CommandRunnerTest, EnforcesRuntimeControls) {
 TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
 #if defined(_WIN32)
     TemporaryDirectory temporary;
-    const auto workspace = temporary.path() / "workspace";
-    const auto program = test_executable.generic_string();
-    EXPECT_THROW((void)mint::ToolRegistry(
-                     workspace, mint::ToolRegistryOptions{.allowed_programs = {program},
-                                                          .require_command_sandbox = true}),
-                 std::invalid_argument);
 #else
     TemporaryDirectory temporary(std::filesystem::path{"/var/tmp"});
+#endif
     const auto workspace = temporary.path() / "workspace";
     const auto program = test_executable.generic_string();
-    const auto protected_secret = temporary.path() / "protected-secret.txt";
+    const auto protected_secret = workspace / "protected-secret.txt";
     write_text(protected_secret, "sandbox secret\n");
     mint::ToolRegistry tools(workspace,
                              mint::ToolRegistryOptions{.protected_paths = {protected_secret},
@@ -1988,6 +2068,8 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
                 "command registry reports OS sandbox enforcement");
 #if defined(__APPLE__)
     constexpr std::string_view expected_backend = "macos-seatbelt";
+#elif defined(_WIN32)
+    constexpr std::string_view expected_backend = "windows-appcontainer";
 #else
     constexpr std::string_view expected_backend = "linux-bubblewrap";
 #endif
@@ -2003,7 +2085,7 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
          {{"program", program},
           {"args", mint::Json::array({"--command-helper", "write", inside.generic_string()})}}}));
     MINT_EXPECT(allowed.at("sandboxed").get<bool>() &&
-                    allowed.at("sandbox_backend") == expected_backend,
+                    allowed.at("sandbox_backend").get<std::string>() == expected_backend,
                 "command result carries auditable sandbox metadata");
     MINT_EXPECT(allowed.at("exit_code") == 0 && std::filesystem::exists(inside),
                 "sandbox permits writes inside the workspace: " + allowed.dump());
@@ -2042,6 +2124,21 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
     MINT_EXPECT(blocked_network.at("exit_code") == 0,
                 "sandbox prevents the command from reaching the host network: " +
                     blocked_network.dump());
+
+#if defined(_WIN32)
+    mint::ToolRegistry cmake_tools(
+        workspace,
+        mint::ToolRegistryOptions{.allowed_programs = {"cmake"}, .require_command_sandbox = true});
+    const auto cmake_result = mint::Json::parse(
+        cmake_tools.execute({"cmake-version",
+                             "run_command",
+                             {{"program", "cmake"}, {"args", mint::Json::array({"--version"})}}}));
+    MINT_EXPECT(cmake_result.at("sandbox_backend") == "windows-appcontainer",
+                "CMake runs through the Windows AppContainer backend");
+    const auto cmake_output = cmake_result.at("output").get<std::string>();
+    MINT_EXPECT(cmake_result.at("exit_code") == 0 &&
+                    cmake_output.find("cmake version") != std::string::npos,
+                "installed CMake remains usable in the AppContainer: " + cmake_result.dump());
 #endif
 }
 

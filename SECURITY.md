@@ -19,8 +19,8 @@
 mint 信任本地操作者及其 policy，不信任模型输出和工作区文件内容。
 
 - 模型不能提交任意 shell 文本，只能选择用户已经登记的 recipe；构建工具仍可能启动自己的子进程。
-- macOS 使用 allow-default、显式拒绝敏感访问的 Seatbelt profile；Linux 使用 Bubblewrap。两者都不是容器或虚拟机。
-- Windows 直接启动登记程序并用 Job Object 管理进程树，但尚无文件与网络沙箱，默认拒绝命令执行。
+- macOS 使用 Seatbelt；Linux 使用 Bubblewrap；Windows 使用无网络 capability 的 AppContainer，只向工作区和已登记程序授权，并用 Job Object 管理进程树。
+- 这些机制不是虚拟机；它们缩小了命令的宿主访问范围，不会使已授权程序自身变得可信。
 - `--unsafe-no-command-sandbox` 会按用户选择关闭 OS 命令沙箱。
 
 默认配置下能够绕过路径、policy、验证、恢复或敏感信息保护的行为属于安全问题。仅仅因为用户扩大了根目录、登记了有副作用的 recipe，或显式启用了 unsafe 模式而产生的预期访问，不自动视为漏洞；执行超出授权范围仍属于安全问题。

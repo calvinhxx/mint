@@ -39,11 +39,11 @@ ctest --preset PRESET
 
 这些 preset 面向同架构原生构建，例如 `vcpkg-linux-arm64` 应在 ARM64 Linux 上运行。CI 从 [`.github/build-matrix.json`](../../.github/build-matrix.json) 读取 runner、vcpkg triplet、CMake preset 和平台运行时依赖；校验脚本会检查它们是否一致。
 
-2026-08-28，Windows、macOS、Linux 的 x64 / ARM64 六条原生流水线均会构建并运行适用测试。Linux 两条流水线验收 Bubblewrap；Windows 两条流水线验收无 shell 启动、argv、环境与句柄过滤、超时、取消、恢复和 Job Object 资源限制。
+2026-08-28，Windows、macOS、Linux 的 x64 / ARM64 六条原生流水线均会构建并运行适用测试。Linux 两条流水线验收 Bubblewrap；Windows 两条流水线验收 AppContainer、无 shell 启动、argv、环境与句柄过滤、超时、取消、恢复和 Job Object 资源限制。
 
-这里的“支持”表示代码能够在目标系统编译并运行该系统适用的自动测试。macOS 命令使用 Seatbelt；Linux 使用 Bubblewrap，并由矩阵安装 `bubblewrap` 包。Windows 没有文件与网络沙箱，测试会确认安全模式拒绝启动，不把受控进程后端写成安全沙箱。
+这里的“支持”表示代码能够在目标系统编译并运行该系统适用的自动测试。macOS 命令使用 Seatbelt；Linux 使用 Bubblewrap，并由矩阵安装 `bubblewrap` 包；Windows 使用无网络 capability 的 AppContainer 和 DACL 授权。
 
-Linux 沙箱测试会真实检查四件事：工作区内可以写、工作区外不能写、受保护文件不能读、命令不能访问宿主网络。Bubblewrap 不可用时不会静默降级；只有用户显式传入 `--unsafe-no-command-sandbox` 才能关闭这层保护。Ubuntu hosted runner 默认用 AppArmor 限制 user namespace，CI 因此只为 `/usr/bin/bwrap` 加载临时 `userns` profile，不关闭系统级限制。
+Linux 和 Windows 沙箱测试会真实检查四件事：工作区内可以写、工作区外不能写、受保护文件不能读、命令不能访问宿主网络。Bubblewrap 不可用时不会静默降级；只有用户显式传入 `--unsafe-no-command-sandbox` 才能关闭这层保护。Ubuntu hosted runner 默认用 AppArmor 限制 user namespace，CI 因此只为 `/usr/bin/bwrap` 加载临时 `userns` profile，不关闭系统级限制。
 
 资源限制测试会真实触发 CPU、内存和单文件大小上限。macOS 的内存用父进程监控，Linux 使用 `RLIMIT_AS`；Sanitizer 构建不启用内存上限。Windows 另外创建子进程验证 Job Object 的进程树上限。Windows 不支持 `file_size_bytes`，测试确认非零配置会被拒绝。
 
@@ -82,7 +82,7 @@ ctest --preset vcpkg-sanitize
 - ASan + UBSan：51/51 tests passed；
 - Release：构建通过，且未安装 GoogleTest；
 - clang-format：通过；
-- GitHub Actions 六平台与发布门禁：[运行 33139754990](https://github.com/calvinhxx/mint/actions/runs/33139754990)，全部通过。
+- GitHub Actions 六平台与发布门禁：[运行 33148572493](https://github.com/calvinhxx/mint/actions/runs/33148572493)，全部通过。
 
 51 个测试包括 11 个单元测试、24 个集成测试、12 个契约测试、2 个 CLI smoke 和 2 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
 
@@ -129,7 +129,7 @@ ctest --preset vcpkg-sanitize
 ## 当前边界
 
 - v1.4 的真实外部证据只覆盖 Chat Completions 非流式配置；
-- 六组合矩阵覆盖原生构建和适用测试，Linux Bubblewrap 后端在 x64 / ARM64 验收；
-- Windows 受控进程后端不等于文件与网络沙箱，安全模式仍会拒绝命令；
+- 六组合矩阵覆盖原生构建和适用测试，Linux Bubblewrap 和 Windows AppContainer 后端在 x64 / ARM64 验收；
+- Windows AppContainer 不是虚拟机；工作区外的自定义工具链可能因未授权而失败；
 - 本地测试证明确定性行为，不替代真实 provider 回归；
 - checkpoint 保证从稳定点恢复，不承诺跨进程 exactly-once。

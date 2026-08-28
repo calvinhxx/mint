@@ -5,6 +5,10 @@
 #include "command_sandbox.hpp"
 #include "diagnostic_log.hpp"
 
+#if defined(_WIN32)
+#include "command_appcontainer_windows.hpp"
+#endif
+
 #include <algorithm>
 #include <optional>
 #include <stdexcept>
@@ -222,16 +226,17 @@ Json process_result_json(const CommandInvocation& invocation, command_detail::Pr
     return result;
 }
 
-command_detail::ProcessRequest process_request(const CommandInvocation& invocation, bool sandboxed,
+command_detail::ProcessRequest process_request(const CommandInvocation& invocation,
+                                               bool wraps_command,
                                                const std::filesystem::path& sandbox_executable,
                                                const std::vector<std::string>& sandbox_arguments,
                                                bool sandbox_sets_working_directory,
                                                std::size_t max_output_bytes,
                                                const std::shared_ptr<TaskControl>& task_control) {
     command_detail::ProcessRequest request;
-    request.executable = sandboxed ? sandbox_executable : invocation.executable;
+    request.executable = wraps_command ? sandbox_executable : invocation.executable;
     request.argv.reserve(invocation.arguments.size() + sandbox_arguments.size() + 4);
-    if (sandboxed) {
+    if (wraps_command) {
         request.argv = sandbox_arguments;
         if (sandbox_sets_working_directory) {
             request.argv.insert(request.argv.end(),
@@ -291,6 +296,12 @@ CommandCatalog build_command_catalog(CommandRunnerOptions& options, long max_tim
 
 } // namespace
 
+struct CommandRunner::NativeSandboxState {
+#if defined(_WIN32)
+    std::shared_ptr<const command_detail::WindowsAppContainer> windows_appcontainer;
+#endif
+};
+
 CommandRunner::CommandRunner(CommandRunnerOptions options)
     : default_timeout_seconds_(options.default_timeout_seconds),
       max_timeout_seconds_(options.max_timeout_seconds),
@@ -331,7 +342,19 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
     sandbox_arguments_ = std::move(sandbox.arguments);
     sandbox_backend_ = std::move(sandbox.backend);
     sandbox_sets_working_directory_ = sandbox.sets_working_directory;
+    sandbox_wraps_command_ = !sandbox_executable_.empty();
+    if (sandbox.uses_native_process_sandbox) {
+#if defined(_WIN32)
+        native_sandbox_ = std::make_unique<NativeSandboxState>();
+        native_sandbox_->windows_appcontainer = command_detail::WindowsAppContainer::create(
+            root_, std::move(sandbox.allowed_executables), std::move(sandbox.denied_paths));
+#else
+        throw std::logic_error("当前平台未实现声明的原生进程沙箱");
+#endif
+    }
 }
+
+CommandRunner::~CommandRunner() = default;
 
 const std::vector<std::string>& CommandRunner::allowed_programs() const noexcept {
     return allowed_programs_;
@@ -476,8 +499,13 @@ Json CommandRunner::run_command(const Json& arguments) const {
     }
 
     auto request =
-        process_request(invocation, is_os_sandboxed(), sandbox_executable_, sandbox_arguments_,
+        process_request(invocation, sandbox_wraps_command_, sandbox_executable_, sandbox_arguments_,
                         sandbox_sets_working_directory_, max_output_bytes_, task_control_);
+#if defined(_WIN32)
+    if (native_sandbox_ != nullptr) {
+        request.windows_appcontainer = native_sandbox_->windows_appcontainer;
+    }
+#endif
     auto process = command_detail::execute_process(std::move(request));
     diagnostics::emit(diagnostics::Level::debug, "command.completed",
                       {{"program", invocation.program},

@@ -12,6 +12,9 @@ struct SandboxConfig {
     std::vector<std::string> arguments{};
     std::string backend = "none";
     bool sets_working_directory = false;
+    bool uses_native_process_sandbox = false;
+    std::vector<std::filesystem::path> allowed_executables{};
+    std::vector<std::filesystem::path> denied_paths{};
 };
 
 [[nodiscard]] std::filesystem::path resolve_program(const std::string& requested);
