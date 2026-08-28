@@ -2,6 +2,7 @@
 
 #include "mint/domain/task_policy.hpp"
 #include "mint/infrastructure/session_store.hpp"
+#include "mint/version.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -239,7 +240,7 @@ ManagedTaskSummary summary_from(const ManagedTaskPaths& paths,
     if (session.exists()) {
         const auto snapshot = session.load();
         const auto schema = snapshot.is_object() ? snapshot.value("schema_version", 0) : 0;
-        if (!snapshot.is_object() || (schema != 2 && schema != 3) ||
+        if (!snapshot.is_object() || schema < 2 || schema > session_schema_version ||
             snapshot.value("workspace_root", "") != task.at("workspace_root").get<std::string>() ||
             !snapshot.contains("status") || !snapshot.at("status").is_string() ||
             !snapshot.contains("verification_status") ||

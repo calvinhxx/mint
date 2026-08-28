@@ -1,7 +1,9 @@
 #include "mint/tools/tool_registry.hpp"
 
 #include "mint/domain/change_journal.hpp"
+#include "mint/infrastructure/change_transaction_store.hpp"
 
+#include "change_transaction.hpp"
 #include "file_support.hpp"
 #include "tool_contract.hpp"
 
@@ -21,10 +23,10 @@
 namespace mint {
 namespace {
 
-struct FileState {
-    bool exists = false;
-    std::string content;
-};
+using tools::transaction_detail::document;
+using tools::transaction_detail::FileState;
+using tools::transaction_detail::next_id;
+using tools::transaction_detail::restore_originals;
 
 struct PlannedChange {
     std::string operation;
@@ -80,33 +82,6 @@ void validate_text(std::string_view field, const std::string& value, std::size_t
     total_payload += value.size();
     if (total_payload > tools::contract::max_changeset_payload_bytes) {
         throw std::invalid_argument("apply_changeset 文本参数总量不能超过 1 MiB");
-    }
-}
-
-void restore_originals(const std::map<std::filesystem::path, FileState>& originals) {
-    std::string rollback_errors;
-    for (auto iterator = originals.rbegin(); iterator != originals.rend(); ++iterator) {
-        const auto& [path, original] = *iterator;
-        try {
-            std::error_code error;
-            const bool exists = std::filesystem::exists(path, error);
-            if (error) {
-                throw std::runtime_error(error.message());
-            }
-            if (original.exists) {
-                tools::detail::replace_file_safely(path, original.content, exists);
-            } else if (exists) {
-                tools::detail::remove_file_safely(path);
-            }
-        } catch (const std::exception& error) {
-            if (!rollback_errors.empty()) {
-                rollback_errors += "; ";
-            }
-            rollback_errors += path.generic_string() + ": " + error.what();
-        }
-    }
-    if (!rollback_errors.empty()) {
-        throw std::runtime_error("changeset 回滚不完整: " + rollback_errors);
     }
 }
 
@@ -292,6 +267,16 @@ Json ToolRegistry::apply_changeset(const Json& arguments) const {
     }
 
     const auto journal_before = change_journal_->state();
+    bool durable_transaction_started = false;
+    if (change_transaction_store_ != nullptr) {
+        if (pending_change_transaction_id_.has_value() || change_transaction_store_->exists()) {
+            throw std::runtime_error("上一个 changeset 事务尚未完成恢复或确认");
+        }
+        const auto transaction_id = next_id();
+        change_transaction_store_->save(document(transaction_id, root_, originals, final_states));
+        pending_change_transaction_id_ = transaction_id;
+        durable_transaction_started = true;
+    }
     try {
         for (const auto& [path, desired] : final_states) {
             const auto original = originals.at(path);
@@ -315,9 +300,13 @@ Json ToolRegistry::apply_changeset(const Json& arguments) const {
         }
     } catch (const std::exception& commit_error) {
         std::string message = commit_error.what();
+        pending_change_transaction_id_.reset();
         try {
             restore_originals(originals);
             change_journal_->restore(journal_before);
+            if (durable_transaction_started) {
+                change_transaction_store_->clear();
+            }
         } catch (const std::exception& rollback_error) {
             throw std::runtime_error("changeset 提交失败: " + message + "; " +
                                      rollback_error.what());

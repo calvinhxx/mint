@@ -1,5 +1,7 @@
 #include "agent_command_internal.hpp"
 
+#include "mint/infrastructure/change_transaction_store.hpp"
+
 #include <stdexcept>
 #include <utility>
 
@@ -82,6 +84,10 @@ void validate_runtime_paths(const CommandLine& command_line) {
     const auto events = command_line.events_jsonl.empty()
                             ? std::filesystem::path{}
                             : normalized_path(command_line.events_jsonl);
+    const auto transaction =
+        session.empty() ? std::filesystem::path{} : change_transaction_path_for_session(session);
+    const auto transaction_lock =
+        transaction.empty() ? std::filesystem::path{} : change_transaction_lock_path(transaction);
 
     if (!policy.empty() && policy == config) {
         throw std::invalid_argument("task policy 与模型配置必须使用不同文件");
@@ -95,12 +101,21 @@ void validate_runtime_paths(const CommandLine& command_line) {
     if ((!policy.empty() && policy == session) || (!policy.empty() && policy == events)) {
         throw std::invalid_argument("task policy 不能与会话或事件文件共用路径");
     }
+    if ((!transaction.empty() && (transaction == config || transaction_lock == config)) ||
+        (!policy.empty() && (policy == transaction || policy == transaction_lock)) ||
+        (!events.empty() && (events == transaction || events == transaction_lock))) {
+        throw std::invalid_argument("changeset 事务文件不能与其他运行时文件共用路径");
+    }
 }
 
 RuntimeFiles open_runtime_files(const CommandLine& command_line) {
     RuntimeFiles files;
     if (!command_line.session.empty()) {
         files.session = std::make_unique<SessionStore>(command_line.session);
+        if (!command_line.resume_session && files.session->exists()) {
+            throw std::invalid_argument("会话快照已存在；请使用 --resume 或选择新的路径");
+        }
+        files.change_transaction = change_transaction_path_for_session(files.session->path());
     }
     if (!command_line.events_jsonl.empty()) {
         files.events =
@@ -123,6 +138,10 @@ protected_paths(const CommandLine& command_line, const std::optional<TaskPolicy>
     if (files.events != nullptr) {
         paths.push_back(files.events->path());
     }
+    if (!files.change_transaction.empty()) {
+        paths.push_back(files.change_transaction);
+        paths.push_back(change_transaction_lock_path(files.change_transaction));
+    }
     if (managed_task.has_value()) {
         paths.push_back(project_store->project_directory());
     }
@@ -132,7 +151,8 @@ protected_paths(const CommandLine& command_line, const std::optional<TaskPolicy>
 ToolRegistryOptions tool_options(const CommandLine& command_line,
                                  std::vector<std::filesystem::path> protected_files,
                                  const std::shared_ptr<TaskControl>& task_control,
-                                 bool has_commands, Console& console) {
+                                 bool has_commands, std::filesystem::path change_transaction_path,
+                                 Console& console) {
     return {.protected_paths = std::move(protected_files),
             .allow_write = command_line.allow_write,
             .allowed_write_paths = command_line.allowed_write_paths,
@@ -146,7 +166,8 @@ ToolRegistryOptions tool_options(const CommandLine& command_line,
                                        ? change_set_approval(console)
                                        : ChangeSetApproval{},
             .require_command_sandbox = has_commands && !command_line.unsafe_no_command_sandbox,
-            .runtime = command_line.tool_limits};
+            .runtime = command_line.tool_limits,
+            .change_transaction_path = std::move(change_transaction_path)};
 }
 
 } // namespace mint::cli::command_detail

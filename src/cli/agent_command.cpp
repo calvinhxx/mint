@@ -97,12 +97,15 @@ int run_agent_command(CommandLine command_line, std::optional<ManagedTaskPaths>&
 
     command_detail::validate_runtime_paths(command_line);
     auto files = command_detail::open_runtime_files(command_line);
-    ToolRegistry tools(command_line.root,
-                       command_detail::tool_options(
-                           command_line,
-                           command_detail::protected_paths(command_line, task_policy, files,
-                                                           project_store, managed_task),
-                           task_control, has_commands, console));
+    ToolRegistry tools(
+        command_line.root,
+        command_detail::tool_options(
+            command_line,
+            command_detail::protected_paths(command_line, task_policy, files, project_store,
+                                            managed_task),
+            task_control, has_commands,
+            command_line.allow_write ? files.change_transaction : std::filesystem::path{},
+            console));
     auto model =
         command_detail::create_model(command_line, task_control, files.events.get(), console);
     command_detail::print_run_configuration(command_line, tools, task_policy, managed_task,

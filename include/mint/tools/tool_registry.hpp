@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,7 +15,10 @@
 namespace mint {
 
 class ChangeJournal;
+class ChangeTransactionStore;
 class TaskControl;
+
+enum class ChangeTransactionRecovery { none, rolled_back, committed };
 
 struct ChangeSetApprovalRequest {
     std::vector<std::string> paths{};
@@ -40,6 +44,7 @@ struct ToolRegistryOptions {
     ChangeSetApproval change_set_approval{};
     bool require_command_sandbox = false;
     ToolRuntimeSettings runtime{};
+    std::filesystem::path change_transaction_path{};
 };
 
 class ToolRegistry {
@@ -64,6 +69,12 @@ class ToolRegistry {
     [[nodiscard]] Json workspace_change_snapshot() const;
     [[nodiscard]] Json workspace_change_state() const;
     void restore_workspace_change_state(const Json& state);
+    [[nodiscard]] bool has_durable_change_transactions() const noexcept;
+    [[nodiscard]] std::string change_transaction_path() const;
+    [[nodiscard]] std::optional<std::string> pending_change_transaction_id() const;
+    [[nodiscard]] ChangeTransactionRecovery
+    reconcile_change_transaction(const std::optional<std::string>& checkpoint_transaction_id);
+    void finalize_change_transaction();
     [[nodiscard]] Json definitions() const;
     [[nodiscard]] std::string describe_call(const ToolCall& call) const;
     [[nodiscard]] std::string execute(const ToolCall& call) const;
@@ -91,6 +102,8 @@ class ToolRegistry {
     std::vector<std::string> write_path_labels_;
     ToolRuntimeSettings runtime_;
     std::unique_ptr<ChangeJournal> change_journal_;
+    std::unique_ptr<ChangeTransactionStore> change_transaction_store_;
+    mutable std::optional<std::string> pending_change_transaction_id_;
     std::unique_ptr<CommandRunner> command_runner_;
     ChangeSetApproval change_set_approval_;
     std::string policy_fingerprint_;

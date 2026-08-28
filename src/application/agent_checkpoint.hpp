@@ -14,6 +14,7 @@ struct RestoredSession {
     Json messages;
     AgentResult result;
     std::deque<ToolCall> pending_calls;
+    ChangeTransactionRecovery transaction_recovery = ChangeTransactionRecovery::none;
     bool recovered_in_flight = false;
 };
 

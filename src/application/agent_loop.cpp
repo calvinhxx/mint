@@ -14,6 +14,21 @@
 #include <utility>
 
 namespace mint::agent_detail {
+namespace {
+
+const char* recovery_name(ChangeTransactionRecovery recovery) {
+    switch (recovery) {
+    case ChangeTransactionRecovery::none:
+        return "none";
+    case ChangeTransactionRecovery::rolled_back:
+        return "rolled_back";
+    case ChangeTransactionRecovery::committed:
+        return "committed";
+    }
+    return "none";
+}
+
+} // namespace
 
 AgentRun::AgentRun(ModelClient& model, ToolRegistry& tools, std::ostream& output,
                    const AgentOptions& options, const std::string& requested_task,
@@ -73,6 +88,13 @@ void AgentRun::initialize() {
         if (user_request_.empty()) {
             throw std::invalid_argument("任务内容不能为空");
         }
+        if (tools_.has_durable_change_transactions() && options_.session_store == nullptr) {
+            throw std::invalid_argument("changeset 事务日志必须与会话 checkpoint 一起使用");
+        }
+        if (options_.session_store != nullptr && options_.session_store->exists()) {
+            throw std::invalid_argument("会话快照已存在；请使用恢复模式或选择新的会话路径");
+        }
+        transaction_recovery_ = tools_.reconcile_change_transaction(std::nullopt);
         messages_ = Json::array({{{"role", "system"}, {"content", system_prompt_}},
                                  {{"role", "user"}, {"content", user_request_}}});
         return;
@@ -91,6 +113,7 @@ void AgentRun::initialize() {
     messages_ = std::move(restored.messages);
     result_ = std::move(restored.result);
     pending_calls_ = std::move(restored.pending_calls);
+    transaction_recovery_ = restored.transaction_recovery;
     recovered_in_flight_ = restored.recovered_in_flight;
 }
 
@@ -100,6 +123,7 @@ void AgentRun::start_task() {
     }
     diagnostics::emit(diagnostics::Level::info, "task.started",
                       {{"resumed", options_.resume_session},
+                       {"transaction_recovery", recovery_name(transaction_recovery_)},
                        {"recovered_in_flight", recovered_in_flight_},
                        {"previous_turns", result_.turns},
                        {"max_turns", options_.max_turns},
@@ -107,6 +131,7 @@ void AgentRun::start_task() {
                        {"verification_required", options_.require_verification_after_write}});
     emit("task_started", {{"workspace_root", tools_.root().generic_string()},
                           {"resumed", options_.resume_session},
+                          {"transaction_recovery", recovery_name(transaction_recovery_)},
                           {"recovered_in_flight", recovered_in_flight_},
                           {"retry_in_flight_authorized", options_.retry_in_flight_tool},
                           {"previous_turns", result_.turns},
@@ -129,6 +154,7 @@ void AgentRun::save_checkpoint(const std::string& status) {
         options_.session_store->save(make_checkpoint_document(
             status, user_request_, messages_, result_, pending_calls_, in_flight_call_, tools_,
             options_.require_verification_after_write, options_.max_context_bytes));
+        tools_.finalize_change_transaction();
     }
 }
 
