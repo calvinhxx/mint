@@ -172,12 +172,13 @@ int run_command_helper(int argc, char** argv) {
             return 65;
         }
         const auto bytes = static_cast<std::size_t>(std::stoull(argv[3]));
-        std::vector<unsigned char> memory(bytes);
-        for (std::size_t offset = 0; offset < memory.size(); offset += 4096) {
-            memory[offset] = 1;
+        std::unique_ptr<unsigned char[]> memory(new unsigned char[bytes]);
+        auto* const pages = static_cast<volatile unsigned char*>(memory.get());
+        for (std::size_t offset = 0; offset < bytes; offset += 4096) {
+            pages[offset] = 1;
         }
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        return memory.empty() ? 17 : 0;
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+        return pages[0] == 1 ? 0 : 17;
     }
 #if defined(_WIN32)
     if (mode == "network") {
