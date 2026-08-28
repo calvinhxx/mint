@@ -15,6 +15,9 @@
 | `cmake/MintSanitizers.cmake` | ASan 和 UBSan |
 | `cmake/MintDeveloperTools.cmake` | `format` 与 `format-check` |
 | `cmake/MintTesting.cmake` | GoogleTest 目标和 CTest 标签 |
+| `cmake/MintPackaging.cmake` | 安装目录、运行时依赖和 CPack 包名 |
+| `cmake/VerifyPackage.cmake` | 解包、校验和、文件布局与版本冒烟 |
+| `cmake/triplets` | 让 mint 与 macOS 静态依赖使用同一个最低系统版本 |
 | `tests/CMakeLists.txt` | 选择测试源码并注册验收流程 |
 
 库目标同时提供 `mint::domain`、`mint::runtime`、`mint::infrastructure`、`mint::tools`、`mint::application` 和 `mint::core` 别名。新增源码时，只修改所属目录的 `CMakeLists.txt`。
@@ -56,7 +59,24 @@ export VCPKG_ROOT=/path/to/vcpkg
 bash scripts/release-check.sh
 ~~~
 
-这条命令检查版本号、构建矩阵、代码格式、Debug、Release、ASan/UBSan、全部 CTest 和离线 CLI。GitHub Actions 除了执行这条 macOS ARM64 深度门禁，还会运行上面的六组合构建矩阵。
+这条命令检查版本号、构建矩阵、代码格式、Debug、Release、ASan/UBSan、全部 CTest、离线 CLI 和 Release 包。GitHub Actions 除了执行这条 macOS ARM64 深度门禁，还会运行上面的六组合构建矩阵。
+
+## 安装与发布包
+
+本机 Release 包可单独生成并验收：
+
+~~~bash
+cmake --preset vcpkg-release
+cmake --build --preset vcpkg-release
+cpack --config build/vcpkg-release/CPackConfig.cmake
+cmake -DMINT_BUILD_DIR=build/vcpkg-release -P cmake/VerifyPackage.cmake
+~~~
+
+产物位于 `build/vcpkg-release/packages`。Windows 使用 `.zip`，macOS / Linux 使用 `.tar.gz`；每个包都有 `.sha256`。六平台 CI 都会解包运行 `mint --version`，并检查 provider 模板、项目许可证和依赖许可证。
+
+macOS 使用 13.0 deployment target。Linux 包由 Ubuntu 24.04 runner 构建，不承诺兼容更旧的 glibc。Windows 和 macOS 归档当前未做商业证书签名或 notarization。
+
+在主分支提交上推送与 CMake、vcpkg manifest 和 Changelog 日期一致的 `vMAJOR.MINOR.PATCH` tag 后，CI 会重新构建六个 Release 包。全部测试和包验收通过后才公开 GitHub Release。普通分支和 PR 不上传包。
 
 只排查某一种构建时，可以单独运行 preset：
 
@@ -81,6 +101,7 @@ ctest --preset vcpkg-sanitize
 - Debug：67/67 tests passed；
 - ASan + UBSan：67/67 tests passed；
 - Release：构建通过，且未安装 GoogleTest；
+- Release 包：macOS ARM64 归档、SHA-256、文件布局和解包运行通过；
 - clang-format：通过；
 - GitHub Actions 会运行六平台矩阵和发布门禁；最新结果见 [Actions](https://github.com/calvinhxx/mint/actions)。
 
@@ -111,6 +132,7 @@ export GROQ_API_KEY='你的密钥'
 | 本地回环 HTTP 服务 | Chat / Responses、SSE、重试、脱敏的两轮 provider 验收 | 所有真实 provider 都可用 |
 | 固定 provider 配置 | profile 解析和请求形状保持稳定 | 服务在线、密钥有效或模型可用 |
 | 故障 fixture | 失败基线、修改、写后重新验证 | 任意项目都能自动修好 |
+| 六平台包验收 | 归档可解开，CLI 可启动，运行时文件齐全 | 用户机器的所有系统策略都相同 |
 | 真实模型记录 | 当时端点和配置完成了隔离任务 | 当前版本或其他端点也通过 |
 
 当前 fixture 位于 [`tests/fixtures/v1_broken_project`](../../tests/fixtures/v1_broken_project)。它先让 `calculator::add` 测试失败，再验证把减法修正为加法后 CTest 通过。

@@ -57,6 +57,9 @@ function(mint_enable_project_warnings target)
             -Wpedantic
             $<$<BOOL:${MINT_WARNINGS_AS_ERRORS}>:-Werror>
         )
+        if(APPLE AND MINT_WARNINGS_AS_ERRORS)
+            target_link_options("${target}" PRIVATE LINKER:-fatal_warnings)
+        endif()
     endif()
 endfunction()
 
