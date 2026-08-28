@@ -14,6 +14,7 @@
 - Added an explicit, spend-bounded `mint provider test` handshake that validates a two-request tool round trip and emits only sanitized compatibility metrics.
 - Added a manifest-driven provider regression batch that preflights every credential before live requests and writes non-overwriting, allowlisted evidence for the three official profiles.
 - Added an opt-in OpenAI Responses + SSE repair regression that works in a temporary fixture copy, proves the failing baseline, enforces the task policy, independently rebuilds the repair, and retains only allowlisted evidence.
+- Required release tags to include sanitized provider and repair evidence that matches the tagged version, provider matrix, fixture, and functional source tree.
 - Fixed DeepSeek V4 thinking-mode tool continuation by replaying `reasoning_content`, keeping assistant tool-call content non-null, and omitting unsupported explicit `tool_choice`.
 - Runs Chat retry, Responses SSE, tool continuation, and sanitized provider acceptance through the same loopback HTTP fixture on Windows, macOS, and Linux instead of skipping the Windows transport path.
 - Added API key environment-variable loading and redacted endpoint query parameters from configuration reports.
