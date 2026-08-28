@@ -8,6 +8,8 @@ import json
 import re
 from pathlib import Path
 
+from release_evidence import EvidenceError, validate_release_evidence
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = r"[0-9]+\.[0-9]+\.[0-9]+"
@@ -20,7 +22,7 @@ def require_match(path: Path, pattern: str, label: str) -> str:
     return match.group(1)
 
 
-def validate(tag: str | None) -> str:
+def validate(tag: str | None, require_evidence: bool = False) -> str:
     cmake_version = require_match(
         ROOT / "CMakeLists.txt",
         rf"^project\(mint VERSION ({SEMVER})(?:\s|\))",
@@ -57,16 +59,24 @@ def validate(tag: str | None) -> str:
         if heading.group(1) == "Unreleased":
             raise ValueError(f"CHANGELOG.md must date {cmake_version} before tagging")
 
+    if tag is not None or require_evidence:
+        validate_release_evidence(ROOT, cmake_version)
+
     return cmake_version
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag", help="require an exact vMAJOR.MINOR.PATCH release tag")
+    parser.add_argument(
+        "--release-evidence",
+        action="store_true",
+        help="require the sanitized live evidence for the current version",
+    )
     args = parser.parse_args()
     try:
-        version = validate(args.tag)
-    except (OSError, ValueError) as error:
+        version = validate(args.tag, args.release_evidence)
+    except (EvidenceError, OSError, ValueError) as error:
         parser.error(str(error))
     print(f"Validated mint version {version}.")
     return 0

@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from release_evidence import EvidenceError, release_source_digest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs" / "providers" / "openai-responses.json"
@@ -449,6 +451,11 @@ def execute(args: argparse.Namespace) -> int:
         report["missing_environment"] = [key_name]
         write_report(args.output, report)
         return 2
+
+    try:
+        report["source_sha256"] = release_source_digest(ROOT)
+    except EvidenceError as error:
+        raise FixtureRegressionError("source_digest", str(error)) from error
 
     try:
         with tempfile.TemporaryDirectory(prefix="mint-fixture-regression-") as directory:
