@@ -2,38 +2,30 @@
 #include "mint/infrastructure/config.hpp"
 #include "mint/infrastructure/model_provider_client.hpp"
 
+#include "agent_command.hpp"
 #include "model_protocol.hpp"
+#include "provider_command.hpp"
+#include "scripted_http_server.hpp"
 
 #include <algorithm>
-#include <array>
 #include <chrono>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
-#include <iterator>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#if !defined(_WIN32)
-#include <netinet/in.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
-
 namespace {
 
 #define MINT_EXPECT(condition, message) EXPECT_TRUE(condition) << (message)
 
-std::string mint_executable;
+using mint::test::ScriptedHttpServer;
 
 class TemporaryDirectory final {
   public:
@@ -69,6 +61,13 @@ std::string sse(const mint::Json& event) {
     return "data: " + event.dump() + "\n\n";
 }
 
+mint::test::ScriptedHttpResponse sse_response(std::string body, int status = 200) {
+    return {.status = status,
+            .content_type = "text/event-stream",
+            .body = std::move(body),
+            .fragment_bytes = 17};
+}
+
 void feed_fragmented(mint::detail::ModelStreamDecoder& decoder, const std::string& stream) {
     constexpr std::size_t fragment_sizes[] = {1, 7, 2, 19, 3, 5, 11};
     std::size_t offset = 0;
@@ -93,209 +92,6 @@ mint::Json tool_definitions() {
                                    {"required", mint::Json::array({"path"})},
                                    {"additionalProperties", false}}}}}}});
 }
-
-#if !defined(_WIN32)
-class ScriptedHttpServer final {
-  public:
-    explicit ScriptedHttpServer(std::vector<std::string> response_bodies,
-                                std::vector<int> response_statuses = {})
-        : response_bodies_(std::move(response_bodies)),
-          response_statuses_(std::move(response_statuses)) {
-        if (response_bodies_.empty()) {
-            throw std::invalid_argument("stream test needs at least one response");
-        }
-        if (response_statuses_.empty()) {
-            response_statuses_.assign(response_bodies_.size(), 200);
-        }
-        if (response_statuses_.size() != response_bodies_.size()) {
-            throw std::invalid_argument("stream test response statuses do not match bodies");
-        }
-        listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (listener_ < 0) {
-            throw std::runtime_error("stream test could not create socket");
-        }
-        int reuse = 1;
-        (void)::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        address.sin_port = 0;
-        if (::bind(listener_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
-            ::listen(listener_, static_cast<int>(response_bodies_.size())) != 0) {
-            ::close(listener_);
-            listener_ = -1;
-            throw std::runtime_error("stream test could not bind loopback server");
-        }
-        socklen_t length = sizeof(address);
-        if (::getsockname(listener_, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
-            ::close(listener_);
-            listener_ = -1;
-            throw std::runtime_error("stream test could not inspect loopback port");
-        }
-        port_ = ntohs(address.sin_port);
-        thread_ = std::thread([this] { serve(); });
-    }
-
-    ~ScriptedHttpServer() {
-        if (listener_ >= 0) {
-            ::shutdown(listener_, SHUT_RDWR);
-            ::close(listener_);
-            listener_ = -1;
-        }
-        if (thread_.joinable()) {
-            thread_.join();
-        }
-    }
-
-    ScriptedHttpServer(const ScriptedHttpServer&) = delete;
-    ScriptedHttpServer& operator=(const ScriptedHttpServer&) = delete;
-
-    [[nodiscard]] std::string url() const {
-        return "http://127.0.0.1:" + std::to_string(port_) + "/v1/responses";
-    }
-
-    void wait() {
-        if (thread_.joinable()) {
-            thread_.join();
-        }
-    }
-
-    [[nodiscard]] const std::string& request(std::size_t index = 0) const {
-        return requests_.at(index);
-    }
-
-  private:
-    static std::size_t content_length(const std::string& request) {
-        constexpr std::string_view field = "Content-Length:";
-        const auto position = request.find(field);
-        if (position == std::string::npos) {
-            return 0;
-        }
-        const auto begin = request.find_first_not_of(" \t", position + field.size());
-        const auto end = request.find("\r\n", begin);
-        return static_cast<std::size_t>(std::stoull(request.substr(begin, end - begin)));
-    }
-
-    static void send_all(int descriptor, std::string_view value) {
-        std::size_t offset = 0;
-        while (offset < value.size()) {
-            const auto sent = ::send(descriptor, value.data() + offset, value.size() - offset, 0);
-            if (sent <= 0) {
-                return;
-            }
-            offset += static_cast<std::size_t>(sent);
-        }
-    }
-
-    void serve() {
-        for (std::size_t response_index = 0; response_index < response_bodies_.size();
-             ++response_index) {
-            const auto& response_body = response_bodies_.at(response_index);
-            pollfd ready{listener_, POLLIN, 0};
-            if (::poll(&ready, 1, 5000) <= 0) {
-                return;
-            }
-            const auto connection = ::accept(listener_, nullptr, nullptr);
-            if (connection < 0) {
-                return;
-            }
-            std::string request;
-            std::array<char, 4096> buffer{};
-            while (request.find("\r\n\r\n") == std::string::npos) {
-                const auto received = ::recv(connection, buffer.data(), buffer.size(), 0);
-                if (received <= 0) {
-                    break;
-                }
-                request.append(buffer.data(), static_cast<std::size_t>(received));
-            }
-            const auto header_end = request.find("\r\n\r\n");
-            if (header_end != std::string::npos) {
-                const auto expected = header_end + 4 + content_length(request);
-                while (request.size() < expected) {
-                    const auto received = ::recv(connection, buffer.data(), buffer.size(), 0);
-                    if (received <= 0) {
-                        break;
-                    }
-                    request.append(buffer.data(), static_cast<std::size_t>(received));
-                }
-            }
-            requests_.push_back(std::move(request));
-            const auto status = response_statuses_.at(response_index);
-            const auto reason = status == 200 ? "OK" : "Too Many Requests";
-            const auto headers = std::string("HTTP/1.1 ") + std::to_string(status) + " " + reason +
-                                 "\r\nContent-Type: text/event-stream\r\nContent-Length: " +
-                                 std::to_string(response_body.size()) +
-                                 "\r\nConnection: close\r\n\r\n";
-            send_all(connection, headers);
-            constexpr std::size_t network_fragment = 17;
-            for (std::size_t offset = 0; offset < response_body.size();
-                 offset += network_fragment) {
-                send_all(connection,
-                         std::string_view(response_body).substr(offset, network_fragment));
-            }
-            ::shutdown(connection, SHUT_RDWR);
-            ::close(connection);
-        }
-        ::close(listener_);
-        listener_ = -1;
-    }
-
-    int listener_ = -1;
-    unsigned short port_ = 0;
-    std::vector<std::string> response_bodies_;
-    std::vector<int> response_statuses_;
-    std::vector<std::string> requests_;
-    std::thread thread_;
-};
-
-std::pair<int, std::string> run_process(const std::vector<std::string>& arguments) {
-    if (arguments.empty()) {
-        throw std::invalid_argument("process arguments cannot be empty");
-    }
-    int output_pipe[2]{};
-    if (::pipe(output_pipe) != 0) {
-        throw std::runtime_error("could not create CLI output pipe");
-    }
-    const auto child = ::fork();
-    if (child < 0) {
-        ::close(output_pipe[0]);
-        ::close(output_pipe[1]);
-        throw std::runtime_error("could not fork CLI acceptance process");
-    }
-    if (child == 0) {
-        (void)::dup2(output_pipe[1], STDOUT_FILENO);
-        (void)::dup2(output_pipe[1], STDERR_FILENO);
-        ::close(output_pipe[0]);
-        ::close(output_pipe[1]);
-        (void)::setenv("NO_PROXY", "127.0.0.1", 1);
-        (void)::setenv("no_proxy", "127.0.0.1", 1);
-        std::vector<char*> raw_arguments;
-        raw_arguments.reserve(arguments.size() + 1);
-        for (const auto& argument : arguments) {
-            raw_arguments.push_back(const_cast<char*>(argument.c_str()));
-        }
-        raw_arguments.push_back(nullptr);
-        ::execv(raw_arguments.front(), raw_arguments.data());
-        ::_exit(127);
-    }
-
-    ::close(output_pipe[1]);
-    std::string output;
-    std::array<char, 4096> buffer{};
-    while (true) {
-        const auto received = ::read(output_pipe[0], buffer.data(), buffer.size());
-        if (received <= 0) {
-            break;
-        }
-        output.append(buffer.data(), static_cast<std::size_t>(received));
-    }
-    ::close(output_pipe[0]);
-    int status = 0;
-    (void)::waitpid(child, &status, 0);
-    const auto exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128;
-    return {exit_code, std::move(output)};
-}
-#endif
 
 TEST(ProviderConfigContractTest, PreservesV13Compatibility) {
     const mint::ChatCompletionsConfig positional{"https://example.test/v1/chat/completions",
@@ -586,9 +382,6 @@ TEST(ProviderProtocolContractTest, DecodesResponsesStream) {
 }
 
 TEST(ProviderTransportContractTest, StreamsHttpResponses) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
-#else
     const mint::Json completed_response = {
         {"id", "resp_http"},
         {"status", "completed"},
@@ -614,12 +407,12 @@ TEST(ProviderTransportContractTest, StreamsHttpResponses) {
                  {"content_index", 0},
                  {"delta", "流式完成"}});
     body += sse({{"type", "response.completed"}, {"response", completed_response}});
-    ScriptedHttpServer server({std::move(body)});
+    ScriptedHttpServer server({sse_response(std::move(body))});
 
     std::vector<mint::ModelProgress> progress;
     std::string streamed_text;
     mint::ModelProviderClient client(
-        {.api_url = server.url(),
+        {.api_url = server.url("/v1/responses"),
          .model = "responses-http-test",
          .connect_timeout_seconds = 2,
          .request_timeout_seconds = 2,
@@ -659,13 +452,9 @@ TEST(ProviderTransportContractTest, StreamsHttpResponses) {
                 "HTTP transport disables remote Responses storage");
     MINT_EXPECT(server.request().find(R"("max_output_tokens":1024)") != std::string::npos,
                 "HTTP transport sends the Responses output token limit");
-#endif
 }
 
 TEST(ProviderTransportContractTest, RetriesStreamingHttpFailures) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
-#else
     const auto rate_limit_stream =
         sse({{"type", "error"}, {"message", "transient stream rate limit"}});
     const mint::Json completed_response = {
@@ -681,11 +470,11 @@ TEST(ProviderTransportContractTest, RetriesStreamingHttpFailures) {
                                                              {"text", "retry completed"}}})}}})}};
     const auto success_stream =
         sse({{"type", "response.completed"}, {"response", completed_response}});
-    ScriptedHttpServer server({rate_limit_stream, success_stream}, {429, 200});
+    ScriptedHttpServer server({sse_response(rate_limit_stream, 429), sse_response(success_stream)});
 
     std::vector<mint::ModelProgress> progress;
     mint::ModelProviderClient client(
-        {.api_url = server.url(),
+        {.api_url = server.url("/v1/responses"),
          .model = "responses-retry-test",
          .connect_timeout_seconds = 2,
          .request_timeout_seconds = 2,
@@ -708,16 +497,9 @@ TEST(ProviderTransportContractTest, RetriesStreamingHttpFailures) {
                     progress.at(5).kind == mint::ModelProgressKind::stream_completed &&
                     progress.at(6).kind == mint::ModelProgressKind::request_succeeded,
                 "SSE HTTP errors follow retry progress instead of becoming parser failures");
-#endif
 }
 
 TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
-#else
-    if (mint_executable.empty()) {
-        GTEST_SKIP() << "mint executable was not supplied";
-    }
     const mint::Json tool_response = {
         {"id", "resp_cli_1"},
         {"status", "completed"},
@@ -761,7 +543,8 @@ TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
                           {"content_index", 0},
                           {"delta", "项目是本地 Agent。"}});
     second_stream += sse({{"type", "response.completed"}, {"response", final_response}});
-    ScriptedHttpServer server({std::move(first_stream), std::move(second_stream)});
+    ScriptedHttpServer server(
+        {sse_response(std::move(first_stream)), sse_response(std::move(second_stream))});
 
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -769,7 +552,7 @@ TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
     write_text(workspace / "README.md", "# Local Agent\n");
     const auto config_path = temporary.path() / "config.json";
     write_text(config_path, mint::Json({{"adapter", "responses"},
-                                        {"api_url", server.url()},
+                                        {"api_url", server.url("/v1/responses")},
                                         {"api_key", ""},
                                         {"model", "responses-cli-test"},
                                         {"connect_timeout_seconds", 2},
@@ -779,11 +562,25 @@ TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
                                         {"stream", true}})
                                 .dump(2));
 
-    const auto [exit_code, output] =
-        run_process({mint_executable, "--json", "--config", config_path.generic_string(), "--root",
-                     workspace.generic_string(), "读取 README.md 后用一句话说明项目用途"});
+    mint::cli::CommandLine command_line;
+    command_line.json_output = true;
+    command_line.config = config_path;
+    command_line.config_specified = true;
+    command_line.root = workspace;
+    command_line.root_specified = true;
+    command_line.question = "读取 README.md 后用一句话说明项目用途";
+    std::optional<mint::ManagedTaskPaths> managed_task;
+    std::istringstream input;
+    std::ostringstream output_stream;
+    std::ostringstream error_stream;
+    mint::cli::Console console(input, output_stream, error_stream);
+    const auto exit_code =
+        mint::cli::run_agent_command(std::move(command_line), managed_task, console);
     server.wait();
+    const auto output = output_stream.str();
     MINT_EXPECT(exit_code == 0, "streaming Responses CLI exits successfully: " + output);
+    MINT_EXPECT(error_stream.str().empty(),
+                "streaming Responses CLI keeps stderr empty: " + error_stream.str());
 
     mint::Json result;
     ASSERT_NO_THROW(result = mint::Json::parse(output))
@@ -806,16 +603,9 @@ TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
                     server.request(1).find(R"("call_id":"call_cli")") != std::string::npos &&
                     server.request(1).find("# Local Agent") != std::string::npos,
                 "second CLI request returns the real tool result with call linkage");
-#endif
 }
 
 TEST(ProviderCliContractTest, RunsSanitizedLiveProviderAcceptance) {
-#if defined(_WIN32)
-    GTEST_SKIP() << "the local HTTP test server is not implemented on Windows";
-#else
-    if (mint_executable.empty()) {
-        GTEST_SKIP() << "mint executable was not supplied";
-    }
     constexpr auto challenge = "mint-provider-acceptance-v1";
     constexpr auto receipt = "MINT_PROVIDER_ACCEPTANCE_OK";
     constexpr auto api_key = "acceptance-test-secret";
@@ -857,12 +647,13 @@ TEST(ProviderCliContractTest, RunsSanitizedLiveProviderAcceptance) {
                           {"content_index", 0},
                           {"delta", receipt}});
     second_stream += sse({{"type", "response.completed"}, {"response", final_response}});
-    ScriptedHttpServer server({std::move(first_stream), std::move(second_stream)});
+    ScriptedHttpServer server(
+        {sse_response(std::move(first_stream)), sse_response(std::move(second_stream))});
 
     TemporaryDirectory temporary;
     const auto config_path = temporary.path() / "provider.json";
     write_text(config_path, mint::Json({{"adapter", "responses"},
-                                        {"api_url", server.url()},
+                                        {"api_url", server.url("/v1/responses")},
                                         {"api_key", api_key},
                                         {"model", "responses-acceptance-test"},
                                         {"connect_timeout_seconds", 2},
@@ -872,10 +663,22 @@ TEST(ProviderCliContractTest, RunsSanitizedLiveProviderAcceptance) {
                                         {"stream", true}})
                                 .dump(2));
 
-    const auto [exit_code, output] = run_process(
-        {mint_executable, "provider", "test", "--config", config_path.generic_string(), "--json"});
+    mint::cli::CommandLine command_line;
+    command_line.mode = mint::cli::CommandMode::provider;
+    command_line.provider_action = mint::cli::ProviderCommandAction::test;
+    command_line.config = config_path;
+    command_line.config_specified = true;
+    command_line.json_output = true;
+    std::istringstream input;
+    std::ostringstream output_stream;
+    std::ostringstream error_stream;
+    mint::cli::Console console(input, output_stream, error_stream);
+    const auto exit_code = mint::cli::run_provider_command(command_line, console);
     server.wait();
+    const auto output = output_stream.str();
     MINT_EXPECT(exit_code == 0, "provider acceptance exits successfully: " + output);
+    MINT_EXPECT(error_stream.str().empty(),
+                "provider acceptance keeps stderr empty: " + error_stream.str());
 
     mint::Json result;
     ASSERT_NO_THROW(result = mint::Json::parse(output))
@@ -909,26 +712,8 @@ TEST(ProviderCliContractTest, RunsSanitizedLiveProviderAcceptance) {
                     server.request(1).find(R"("call_id":"call_acceptance")") != std::string::npos &&
                     server.request(1).find(receipt) != std::string::npos,
                 "second provider acceptance request returns the tool result with call linkage");
-#endif
 }
 
 } // namespace
 
 #undef MINT_EXPECT
-
-int main(int argc, char** argv) {
-    constexpr std::string_view executable_option = "--mint-executable=";
-    int write_index = 1;
-    for (int read_index = 1; read_index < argc; ++read_index) {
-        const std::string_view argument = argv[read_index];
-        if (argument.starts_with(executable_option)) {
-            mint_executable = argument.substr(executable_option.size());
-        } else {
-            argv[write_index++] = argv[read_index];
-        }
-    }
-    argc = write_index;
-    argv[argc] = nullptr;
-    testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}

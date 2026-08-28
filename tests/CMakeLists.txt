@@ -1,6 +1,17 @@
 find_package(GTest CONFIG REQUIRED)
 include(MintTesting)
 
+add_library(mint_test_support STATIC
+    support/scripted_http_server.cpp
+)
+mint_configure_target(mint_test_support)
+target_include_directories(mint_test_support PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+)
+if(WIN32)
+    target_link_libraries(mint_test_support PUBLIC ws2_32)
+endif()
+
 mint_add_gtest(mint_unit_tests
     GTEST_MAIN
     SOURCES
@@ -17,14 +28,11 @@ mint_add_gtest(mint_tests
     SOURCES
         mint_tests.cpp
         integration/change_transaction_tests.cpp
-    LIBRARIES mint::core
+    LIBRARIES mint::core mint_test_support
     INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/src/application"
     TEST_PREFIX "integration."
     LABELS integration
 )
-if(WIN32)
-    target_link_libraries(mint_tests PRIVATE ws2_32)
-endif()
 
 mint_add_gtest(mint_v1_2_tests
     SOURCES v1_2/policy_and_recovery_tests.cpp
@@ -42,12 +50,14 @@ mint_add_gtest(mint_v1_3_tests
 )
 
 mint_add_gtest(mint_v1_4_tests
+    GTEST_MAIN
     SOURCES v1_4/provider_contract_tests.cpp
-    LIBRARIES mint::core
-    INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/src/infrastructure"
+    LIBRARIES mint_cli mint_test_support
+    INCLUDE_DIRECTORIES
+        "${PROJECT_SOURCE_DIR}/src/cli"
+        "${PROJECT_SOURCE_DIR}/src/infrastructure"
     TEST_PREFIX "contract.v1_4."
     LABELS v1.4 contract acceptance
-    EXTRA_ARGS "--mint-executable=$<TARGET_FILE:mint>"
 )
 
 mint_add_gtest(mint_v1_5_tests
