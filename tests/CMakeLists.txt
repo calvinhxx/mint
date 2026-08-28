@@ -50,6 +50,20 @@ mint_add_gtest(mint_v1_4_tests
     EXTRA_ARGS "--mint-executable=$<TARGET_FILE:mint>"
 )
 
+mint_add_gtest(mint_v1_5_tests
+    GTEST_MAIN
+    SOURCES v1_5/provider_profile_tests.cpp
+    LIBRARIES mint_cli
+    INCLUDE_DIRECTORIES
+        "${PROJECT_SOURCE_DIR}/src/cli"
+        "${PROJECT_SOURCE_DIR}/src/infrastructure"
+    TEST_PREFIX "contract.v1_5."
+    LABELS v1.5 contract acceptance
+)
+target_compile_definitions(mint_v1_5_tests PRIVATE
+    MINT_PROVIDER_CONFIG_DIR="${PROJECT_SOURCE_DIR}/configs/providers"
+)
+
 add_test(
     NAME architecture_console_boundary
     COMMAND "${CMAKE_COMMAND}"
@@ -73,6 +87,19 @@ set_tests_properties(
     PROPERTIES
         LABELS "smoke"
         PASS_REGULAR_EXPRESSION "mint ${mint_version_regex}"
+)
+
+add_test(
+    NAME mint_provider_profile
+    COMMAND $<TARGET_FILE:mint> provider
+        --config "${PROJECT_SOURCE_DIR}/configs/providers/groq-chat.json"
+        --json
+)
+set_tests_properties(
+    mint_provider_profile
+    PROPERTIES
+        LABELS "v1.5;smoke"
+        PASS_REGULAR_EXPRESSION "\"provider\":\"groq\""
 )
 
 add_test(
