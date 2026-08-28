@@ -113,7 +113,7 @@ ctest --preset vcpkg-sanitize
 - clang-format：通过；
 - GitHub Actions 会运行六平台矩阵和发布门禁；最新结果见 [Actions](https://github.com/calvinhxx/mint/actions)。
 
-69 个测试包括 12 个单元测试、30 个集成测试、21 个契约测试、3 个 CLI smoke 和 3 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
+71 个测试包括 13 个单元测试、30 个集成测试、21 个契约测试、3 个 CLI smoke 和 4 个独立验收流程。CTest 使用 GoogleTest discovery，因此每个场景可以单独筛选和报告。
 
 changeset 恢复测试会真实写两个文件并重建 `ToolRegistry`，覆盖：完整写入后崩溃、只完成部分文件、checkpoint 已确认但日志未清、外部改写、两个进程争用同一任务，以及 Agent 自动回滚并重放 in-flight changeset。测试同时检查 schema v2/v3 可迁移到 v4。
 
@@ -146,6 +146,21 @@ python3 scripts/provider-regression.py \
 ~~~
 
 批次由 `configs/provider-regression.json` 声明。live 模式会先确认三份配置对应的 API Key 环境变量均已设置，避免执行到一半才发现缺少密钥。证据只保存白名单中的 profile、协议和统计字段，并记录配置矩阵的 SHA-256；原始响应、错误正文、密钥和本机配置路径不会写入文件。
+
+三份握手通过后，用同一份 OpenAI Responses + SSE 配置运行隔离修复：
+
+~~~bash
+# 默认只检查配置、fixture 和 policy，不请求模型
+python3 scripts/fixture-regression.py --mint ./build/vcpkg-dev/mint
+
+# 显式 --live 才复制故障工程并请求模型；证据文件不会被覆盖
+python3 scripts/fixture-regression.py \
+  --mint ./build/vcpkg-dev/mint \
+  --live \
+  --output build/openai-responses-fixture-v1.5.json
+~~~
+
+脚本先在临时副本中确认 CTest 按预期失败，再按 fixture policy 启动 Agent。模型只能修改 `src/calculator.cpp` 和 `FIX_REPORT.md`，只能运行三条固定 recipe，并且最后必须通过 verification recipe。Agent 结束后，脚本会用另一个全新构建目录独立复测。JSON 证据只保留 profile、内容摘要、轮次、工具、Token、改动文件和验证状态；模型回答、diff、response id、事件原文和密钥不会写入。
 
 ## 测试覆盖到哪里
 
@@ -197,4 +212,5 @@ python3 scripts/provider-regression.py \
 - 工作区磁盘限制按普通文件逻辑大小巡检，不是文件系统原生 quota；
 - 本地测试证明确定性行为，不替代真实 provider 回归；
 - OpenAI、Groq、DeepSeek 和 custom 固定配置已有统一验收入口，但尚未记录本版本的真实外部运行；
+- OpenAI Responses + SSE 隔离修复已有可重复脚本，但尚未消耗外部额度执行；
 - session 管理的 `apply_changeset` 通过事务日志避免跨进程重复提交；`apply_patch`、命令和任意扩展工具不承诺 exactly-once。
