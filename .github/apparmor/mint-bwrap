@@ -1,0 +1,5 @@
+abi <abi/4.0>,
+
+/usr/bin/bwrap flags=(unconfined) {
+    allow userns create,
+}

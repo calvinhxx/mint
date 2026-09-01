@@ -1,0 +1,104 @@
+name: Native build
+
+on:
+  workflow_call:
+    inputs:
+      tier:
+        description: Build-matrix tier to run
+        required: true
+        type: string
+      packages:
+        description: Build, verify, and upload Release archives
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-plan:
+    name: Select ${{ inputs.tier }} matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Select build matrix
+        id: matrix
+        shell: bash
+        env:
+          MINT_BUILD_TIER: ${{ inputs.tier }}
+        run: |
+          set -euo pipefail
+          matrix="$(python3 .github/scripts/select-build-matrix.py --tier "$MINT_BUILD_TIER")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  native-build:
+    name: ${{ matrix.name }}
+    needs: build-plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build-plan.outputs.matrix) }}
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-binary-cache,readwrite
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up native build
+        uses: ./.github/actions/setup-native
+        with:
+          platform: ${{ matrix.platform }}
+          arch: ${{ matrix.arch }}
+          runner-arch: ${{ matrix.runner_arch }}
+          system-packages: ${{ join(matrix.system_packages, ' ') }}
+
+      - name: Configure tests
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build tests
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Check formatting
+        if: matrix.id == 'linux-x64'
+        run: cmake --build --preset ${{ matrix.preset }} --target format-check
+
+      - name: Configure release package
+        if: inputs.packages
+        run: cmake --preset ${{ matrix.release_preset }}
+
+      - name: Build release package
+        if: inputs.packages
+        run: cmake --build --preset ${{ matrix.release_preset }}
+
+      - name: Create and verify release package
+        if: inputs.packages
+        run: |
+          cpack --config build/${{ matrix.release_preset }}/CPackConfig.cmake
+          cmake -DMINT_BUILD_DIR=build/${{ matrix.release_preset }} -P cmake/VerifyPackage.cmake
+
+      - name: Upload release package
+        if: inputs.packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mint-${{ matrix.id }}
+          path: build/${{ matrix.release_preset }}/packages/mint-*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

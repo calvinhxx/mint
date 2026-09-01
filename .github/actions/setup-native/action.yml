@@ -1,0 +1,74 @@
+name: Set up native build
+description: Prepare the checked runner architecture, vcpkg cache, and platform sandbox dependency
+
+inputs:
+  platform:
+    description: Native platform identifier from the build matrix
+    required: true
+  arch:
+    description: Target architecture used by the Windows toolchain setup
+    required: true
+  runner-arch:
+    description: Expected GitHub runner architecture
+    required: true
+  system-packages:
+    description: Space-separated native packages required by the platform
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare native toolchain
+      shell: pwsh
+      env:
+        MINT_EXPECTED_RUNNER_ARCH: ${{ inputs.runner-arch }}
+        MINT_RUNNER_ARCH: ${{ runner.arch }}
+      run: |
+        if ($env:MINT_RUNNER_ARCH -ne $env:MINT_EXPECTED_RUNNER_ARCH) {
+          throw "Expected runner architecture $env:MINT_EXPECTED_RUNNER_ARCH, got $env:MINT_RUNNER_ARCH"
+        }
+        if (-not $env:VCPKG_INSTALLATION_ROOT) {
+          throw "VCPKG_INSTALLATION_ROOT is not available on this runner"
+        }
+        "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+        New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+
+    - name: Activate MSVC
+      if: inputs.platform == 'windows'
+      shell: pwsh
+      env:
+        MINT_TARGET_ARCH: ${{ inputs.arch }}
+      run: |
+        & "$env:GITHUB_WORKSPACE/.github/scripts/setup-msvc.ps1" `
+          -TargetArchitecture "$env:MINT_TARGET_ARCH"
+
+    - name: Cache vcpkg packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .vcpkg-binary-cache
+        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'cmake/triplets/*.cmake', 'cmake/MintPlatformDefaults.cmake') }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install platform runtime dependencies
+      if: inputs.platform == 'linux'
+      shell: bash
+      env:
+        MINT_SYSTEM_PACKAGES: ${{ inputs.system-packages }}
+      run: |
+        set -euo pipefail
+        read -r -a packages <<< "$MINT_SYSTEM_PACKAGES"
+        test "${#packages[@]}" -gt 0
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends "${packages[@]}"
+
+    - name: Allow Bubblewrap user namespaces
+      if: inputs.platform == 'linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        restriction=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+        if [[ -r "$restriction" && "$(<"$restriction")" == "1" ]]; then
+          sudo apparmor_parser --replace .github/apparmor/mint-bwrap
+        fi

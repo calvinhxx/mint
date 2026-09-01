@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release source
+    uses: ./.github/workflows/_validate.yml
+    permissions:
+      contents: read
+
+  native-packages:
+    name: Native release packages
+    needs: validate
+    uses: ./.github/workflows/_native-build.yml
+    with:
+      tier: release
+      packages: true
+    permissions:
+      contents: read
+
+  quality:
+    name: macOS ARM64 sanitizer
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-binary-cache,readwrite
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up native build
+        uses: ./.github/actions/setup-native
+        with:
+          platform: macos
+          arch: arm64
+          runner-arch: ARM64
+
+      - name: Configure sanitizer build
+        run: cmake --preset vcpkg-sanitize
+
+      - name: Build sanitizer tests
+        run: cmake --build --preset vcpkg-sanitize
+
+      - name: Run sanitizer tests
+        run: ctest --preset vcpkg-sanitize
+
+  release-assets:
+    name: Validate release assets
+    needs: native-packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download release packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate release assets
+        run: python3 .github/scripts/verify-release-assets.py --directory release-assets
+
+  release-ready:
+    name: Release Gate
+    if: ${{ always() }}
+    needs: [validate, native-packages, quality, release-assets]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      VALIDATE_RESULT: ${{ needs.validate.result }}
+      PACKAGE_RESULT: ${{ needs.native-packages.result }}
+      QUALITY_RESULT: ${{ needs.quality.result }}
+      ASSET_RESULT: ${{ needs.release-assets.result }}
+
+    steps:
+      - name: Require successful release jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$VALIDATE_RESULT" != "success" || \
+                "$PACKAGE_RESULT" != "success" || \
+                "$QUALITY_RESULT" != "success" || \
+                "$ASSET_RESULT" != "success" ]]; then
+            echo "Release failed: validate=$VALIDATE_RESULT, packages=$PACKAGE_RESULT, quality=$QUALITY_RESULT, assets=$ASSET_RESULT"
+            exit 1
+          fi
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release-ready
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isDraft \
+              --jq .isDraft)"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "Release $GITHUB_REF_NAME is already published; refusing to replace its assets."
+              exit 0
+            fi
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --draft \
+              --verify-tag \
+              --generate-notes \
+              --title "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"

@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "matrix": {
+    "include": [
+      {
+        "id": "windows-x64",
+        "name": "Windows x64",
+        "platform": "windows",
+        "arch": "x64",
+        "runner": "windows-2022",
+        "runner_arch": "X64",
+        "preset": "vcpkg-windows",
+        "release_preset": "vcpkg-windows-release",
+        "tiers": ["full", "release"],
+        "system_packages": []
+      },
+      {
+        "id": "windows-arm64",
+        "name": "Windows ARM64",
+        "platform": "windows",
+        "arch": "arm64",
+        "runner": "windows-11-arm",
+        "runner_arch": "ARM64",
+        "preset": "vcpkg-windows-arm64",
+        "release_preset": "vcpkg-windows-arm64-release",
+        "tiers": ["full", "release"],
+        "system_packages": []
+      },
+      {
+        "id": "macos-x64",
+        "name": "macOS x64",
+        "platform": "macos",
+        "arch": "x64",
+        "runner": "macos-15-intel",
+        "runner_arch": "X64",
+        "preset": "vcpkg-osx-x64",
+        "release_preset": "vcpkg-osx-x64-release",
+        "tiers": ["full", "release"],
+        "system_packages": []
+      },
+      {
+        "id": "macos-arm64",
+        "name": "macOS ARM64",
+        "platform": "macos",
+        "arch": "arm64",
+        "runner": "macos-15",
+        "runner_arch": "ARM64",
+        "preset": "vcpkg-osx",
+        "release_preset": "vcpkg-osx-release",
+        "tiers": ["full", "release"],
+        "system_packages": []
+      },
+      {
+        "id": "linux-x64",
+        "name": "Linux x64",
+        "platform": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-24.04",
+        "runner_arch": "X64",
+        "preset": "vcpkg-linux",
+        "release_preset": "vcpkg-linux-release",
+        "tiers": ["fast", "full", "release"],
+        "system_packages": ["bubblewrap", "clang-format"]
+      },
+      {
+        "id": "linux-arm64",
+        "name": "Linux ARM64",
+        "platform": "linux",
+        "arch": "arm64",
+        "runner": "ubuntu-24.04-arm",
+        "runner_arch": "ARM64",
+        "preset": "vcpkg-linux-arm64",
+        "release_preset": "vcpkg-linux-arm64-release",
+        "tiers": ["full", "release"],
+        "system_packages": ["bubblewrap"]
+      }
+    ]
+  }
+}

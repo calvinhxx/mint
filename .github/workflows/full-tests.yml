@@ -1,0 +1,47 @@
+name: Full Tests
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: full-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate source
+    uses: ./.github/workflows/_validate.yml
+    permissions:
+      contents: read
+
+  full-tests:
+    name: Full native tests
+    needs: validate
+    uses: ./.github/workflows/_native-build.yml
+    with:
+      tier: full
+    permissions:
+      contents: read
+
+  full-tests-gate:
+    name: Full Tests Gate
+    if: ${{ always() }}
+    needs: [validate, full-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      VALIDATE_RESULT: ${{ needs.validate.result }}
+      TEST_RESULT: ${{ needs.full-tests.result }}
+
+    steps:
+      - name: Require successful jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$VALIDATE_RESULT" != "success" || "$TEST_RESULT" != "success" ]]; then
+            echo "Full tests failed: validate=$VALIDATE_RESULT, tests=$TEST_RESULT"
+            exit 1
+          fi

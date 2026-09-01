@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate source
+    uses: ./.github/workflows/_validate.yml
+    permissions:
+      contents: read
+
+  fast-tests:
+    name: Fast native tests
+    needs: validate
+    uses: ./.github/workflows/_native-build.yml
+    with:
+      tier: fast
+    permissions:
+      contents: read
+
+  ci-gate:
+    name: CI Gate
+    if: ${{ always() }}
+    needs: [validate, fast-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      VALIDATE_RESULT: ${{ needs.validate.result }}
+      TEST_RESULT: ${{ needs.fast-tests.result }}
+
+    steps:
+      - name: Require successful jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$VALIDATE_RESULT" != "success" || "$TEST_RESULT" != "success" ]]; then
+            echo "CI failed: validate=$VALIDATE_RESULT, tests=$TEST_RESULT"
+            exit 1
+          fi
