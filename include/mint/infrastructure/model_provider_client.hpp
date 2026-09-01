@@ -180,8 +180,6 @@ struct ModelProviderConfig {
     long max_completion_tokens = model_provider_defaults::max_completion_tokens;
     std::shared_ptr<TaskControl> task_control{};
     ModelProgressCallback progress{};
-    // Appended after the v1.3 fields so positional aggregate initialization of
-    // ChatCompletionsConfig remains source compatible.
     ModelAdapter adapter = ModelAdapter::chat_completions;
     bool stream = false;
     ModelStreamCallback stream_event{};
@@ -192,8 +190,6 @@ struct ModelProviderConfig {
     long request_token_safety_margin = model_provider_defaults::request_token_safety_margin;
     long request_token_estimate_bytes_per_token =
         model_provider_defaults::request_token_estimate_bytes_per_token;
-    // Appended to preserve positional aggregate initialization of earlier
-    // ModelProviderConfig and ChatCompletionsConfig call sites.
     ModelResponseLimits response_limits{};
 };
 

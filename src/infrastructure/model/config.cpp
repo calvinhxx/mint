@@ -325,8 +325,4 @@ ModelProviderConfig load_model_provider_config(const std::filesystem::path& conf
     return config;
 }
 
-ModelProviderConfig load_chat_completions_config(const std::filesystem::path& config_path) {
-    return load_model_provider_config(config_path);
-}
-
 } // namespace mint
