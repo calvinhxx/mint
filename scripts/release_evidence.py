@@ -22,6 +22,7 @@ from provider_matrix import (
 EVIDENCE_FILENAMES = ("provider-regression.json", "fixture-regression.json")
 RELEASE_METADATA = {
     "CHANGELOG.md",
+    "docs/development/releasing.md",
     "docs/development/testing.md",
     "docs/project/roadmap.md",
 }

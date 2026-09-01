@@ -1,42 +1,47 @@
+<div align="right">
+  <strong>简体中文</strong> · <a href="README.en.md">English</a>
+</div>
+
 # mint
 
-mint 是一个轻量的通用 AI Agent 工具。它提供模型循环、工具调用、权限控制、任务恢复和结果验证，可以直接使用 CLI，也可以从源码嵌入 C++ 内核。
+mint 是一个轻量的本地 AI Agent。模型选择下一步，mint 在本机完成文件读取、搜索、修改和验证。
 
-当前自带文件读取、搜索、编辑和固定命令工具，适合本地工程与目录自动化。
+模型没有直接的 shell 或文件系统权限。写入默认关闭，项目命令只能从用户登记的列表中选择；修改后必须通过真实构建或测试，任务才能完成。
 
-## 快速试用
+> [!NOTE]
+> 预编译包尚未发布，当前请从源码构建。项目只提供 CLI 和 C++ Agent 内核，不包含 GUI 或多 Agent 编排。
 
-当前源码版本是 `v1.0.0`。版本历史正在重新建立，新的预编译包尚未发布，请先从源码构建。
+## 试用
 
-需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。macOS / Linux 用 `export VCPKG_ROOT=/path/to/vcpkg`，Windows PowerShell 用 `$env:VCPKG_ROOT = 'C:\src\vcpkg'`。
+需要 CMake 3.24+、Ninja、C++20 编译器和 [vcpkg](https://github.com/microsoft/vcpkg)。
 
-~~~bash
+```bash
+git clone https://github.com/calvinhxx/mint.git
+cd mint
+
+export VCPKG_ROOT=/path/to/vcpkg
 cmake --preset vcpkg-release
 cmake --build --preset vcpkg-release
 
 ./build/vcpkg-release/mint init --root .
-./build/vcpkg-release/mint run --root . --demo "总结这个目录"
-~~~
+./build/vcpkg-release/mint run --root . --demo "总结这个项目"
+```
 
-`--demo` 不需要 API Key，不会修改文件或运行项目命令。
+`--demo` 不需要 API Key，不会修改文件或运行项目命令。接入真实模型和 Windows 构建方式见[开始使用](docs/getting-started/quickstart.md)。
 
 ## 文档
 
-所有文档都从这里进入：
-
-- 入门
-  - [开始使用](docs/getting-started/quickstart.md)：安装、配置模型和日常命令。
-- 原理
-  - [工作原理与代码结构](docs/concepts/architecture.md)：一次任务如何经过模型、工具和验证。
-- 指南
-  - [安全、权限与任务恢复](docs/guides/safety-and-recovery.md)：文件边界、固定命令和中断处理。
+- 使用
+  - [开始使用](docs/getting-started/quickstart.md)：构建、配置和日常命令。
+  - [模型配置](docs/reference/model-providers.md)：供应商、协议、密钥和 Token 预算。
+  - [安全与恢复](docs/guides/safety-and-recovery.md)：文件边界、命令沙箱和任务恢复。
+- 理解
+  - [架构](docs/concepts/architecture.md)：执行流程、模块和依赖方向。
 - 开发
-  - [构建、测试与验收](docs/development/testing.md)：本地验证命令和证据边界。
+  - [代码风格](docs/development/code-style.md)：命名、双语注释和自动检查。
+  - [测试](docs/development/testing.md)：本地检查和平台矩阵。
+  - [发布](docs/development/releasing.md)：打包、真实模型证据和发布门禁。
 - 项目
-  - [项目状态](docs/project/roadmap.md)：已有能力、当前工作和已知边界。
-  - [更新记录](CHANGELOG.md)：每个版本的主要变化。
-  - [安全漏洞报告](SECURITY.md)：私下报告安全问题和确认当前安全边界。
-
-第一次使用只需阅读“开始使用”；需要理解源码时，再阅读“工作原理与代码结构”。
-
-源码构建矩阵覆盖 Windows、macOS、Linux 的 x64 / ARM64，具体 preset 见[构建、测试与验收](docs/development/testing.md)。三个系统都默认隔离项目命令：macOS 使用 Seatbelt，Linux 使用 Bubblewrap，Windows 使用 AppContainer。
+  - [当前状态](docs/project/roadmap.md)：完成度、已知边界和下一步。
+  - [更新记录](CHANGELOG.md)
+  - [安全漏洞报告](SECURITY.md)

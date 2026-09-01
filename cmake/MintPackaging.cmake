@@ -74,8 +74,13 @@ function(mint_configure_packaging target)
         DESTINATION "${CMAKE_INSTALL_DATADIR}/mint/providers"
         FILES_MATCHING PATTERN "*.json"
     )
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/locales/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/mint/locales"
+        FILES_MATCHING PATTERN "*.json"
+    )
     install(FILES
         "${PROJECT_SOURCE_DIR}/README.md"
+        "${PROJECT_SOURCE_DIR}/README.en.md"
         "${PROJECT_SOURCE_DIR}/CHANGELOG.md"
         "${PROJECT_SOURCE_DIR}/LICENSE"
         "${PROJECT_SOURCE_DIR}/SECURITY.md"

@@ -72,13 +72,18 @@ foreach(required_file IN ITEMS
     "${package_root}/share/mint/providers/kimi-chat.json"
     "${package_root}/share/mint/providers/openai-codex.json"
     "${package_root}/share/mint/providers/openai-responses.json"
+    "${package_root}/share/mint/locales/en.json"
+    "${package_root}/share/mint/locales/zh-CN.json"
     "${package_root}/share/doc/mint/CHANGELOG.md"
     "${package_root}/share/doc/mint/README.md"
+    "${package_root}/share/doc/mint/README.en.md"
     "${package_root}/share/doc/mint/LICENSE"
     "${package_root}/share/doc/mint/SECURITY.md"
     "${package_root}/share/doc/mint/docs/getting-started/quickstart.md"
     "${package_root}/share/doc/mint/docs/concepts/architecture.md"
     "${package_root}/share/doc/mint/docs/guides/safety-and-recovery.md"
+    "${package_root}/share/doc/mint/docs/reference/model-providers.md"
+    "${package_root}/share/doc/mint/docs/development/releasing.md"
     "${package_root}/share/doc/mint/docs/development/testing.md"
     "${package_root}/share/doc/mint/docs/project/roadmap.md"
     "${package_root}/share/licenses/mint/curl/copyright"
@@ -101,6 +106,26 @@ if(NOT version_result EQUAL 0 OR NOT version_output STREQUAL "mint ${CPACK_PACKA
         "stdout='${version_output}', stderr='${version_error}'"
     )
 endif()
+
+set(help_languages en zh-CN)
+foreach(language IN LISTS help_languages)
+    file(READ "${package_root}/share/mint/locales/${language}.json" locale_catalog)
+    string(JSON help_template GET "${locale_catalog}" messages "cli.help.general")
+    string(REGEX MATCH "^[^\r\n]*" expected_title "${help_template}")
+    execute_process(
+        COMMAND "${executable}" --lang "${language}" --help
+        RESULT_VARIABLE help_result
+        OUTPUT_VARIABLE help_output
+        ERROR_VARIABLE help_error
+    )
+    string(FIND "${help_output}" "${expected_title}" title_offset)
+    if(NOT help_result EQUAL 0 OR NOT title_offset EQUAL 0)
+        message(FATAL_ERROR
+            "Packaged executable failed ${language} help check: result=${help_result}, "
+            "stderr='${help_error}'"
+        )
+    endif()
+endforeach()
 
 set(groq_profile "${package_root}/share/mint/providers/groq-chat.json")
 execute_process(
