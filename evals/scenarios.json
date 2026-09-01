@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "suite": "mint-core",
+  "description": "Seed offline contract regressions; they validate harness behavior, not statistical model quality.",
+  "scenarios": [
+    {
+      "id": "read-project-overview",
+      "category": "inspection",
+      "task": "Read README.md and summarize the project without changing files or running commands.",
+      "workspace": ".",
+      "oracle": {
+        "status": "completed",
+        "verification_status": "not_required",
+        "changed_files": [],
+        "required_tools": ["read_file"],
+        "forbidden_tools": ["apply_changeset", "apply_patch", "run_command", "run_recipe"],
+        "max_turns": 4,
+        "max_tool_calls": 5,
+        "max_tool_errors": 0
+      }
+    },
+    {
+      "id": "find-calculator-defect",
+      "category": "search",
+      "task": "Locate the calculator implementation and identify the incorrect addition logic without editing it.",
+      "workspace": "tests/fixtures/broken_cpp_project",
+      "oracle": {
+        "status": "completed",
+        "verification_status": "not_required",
+        "changed_files": [],
+        "required_tools": ["search_text", "read_file"],
+        "forbidden_tools": ["apply_changeset", "apply_patch", "run_command", "run_recipe"],
+        "max_turns": 5,
+        "max_tool_calls": 7,
+        "max_tool_errors": 0
+      }
+    },
+    {
+      "id": "inspect-fixture-policy",
+      "category": "inspection",
+      "task": "Inspect the fixture policy and report its writable paths and verification recipe.",
+      "workspace": "tests/fixtures/broken_cpp_project",
+      "oracle": {
+        "status": "completed",
+        "verification_status": "not_required",
+        "changed_files": [],
+        "required_tools": ["read_file"],
+        "forbidden_tools": ["apply_changeset", "apply_patch", "run_command", "run_recipe"],
+        "max_turns": 4,
+        "max_tool_calls": 5,
+        "max_tool_errors": 0
+      }
+    },
+    {
+      "id": "repair-calculator",
+      "category": "change",
+      "task": "Use apply_patch to repair calculator addition, then run the approved verification recipe.",
+      "workspace": "tests/fixtures/broken_cpp_project",
+      "oracle": {
+        "status": "completed",
+        "verification_status": "passed",
+        "changed_files": ["src/calculator.cpp"],
+        "required_tools": ["read_file", "apply_patch", "run_recipe"],
+        "forbidden_tools": ["run_command"],
+        "max_turns": 8,
+        "max_tool_calls": 10,
+        "max_tool_errors": 0
+      }
+    },
+    {
+      "id": "repair-with-report",
+      "category": "repair",
+      "task": "Use one apply_changeset transaction to repair calculator addition and create FIX_REPORT.md, then run configure, build, and test recipes.",
+      "workspace": "tests/fixtures/broken_cpp_project",
+      "oracle": {
+        "status": "completed",
+        "verification_status": "passed",
+        "changed_files": ["FIX_REPORT.md", "src/calculator.cpp"],
+        "required_tools": ["read_file", "apply_changeset", "run_recipe"],
+        "forbidden_tools": ["run_command"],
+        "max_turns": 12,
+        "max_tool_calls": 14,
+        "max_tool_errors": 0
+      }
+    },
+    {
+      "id": "summarize-workspace-changes",
+      "category": "inspection",
+      "task": "Inspect the current workspace changes and summarize only the changed file paths.",
+      "workspace": ".",
+      "oracle": {
+        "status": "completed",
+        "verification_status": "not_required",
+        "changed_files": [],
+        "required_tools": ["workspace_changes"],
+        "forbidden_tools": ["apply_changeset", "apply_patch", "run_command", "run_recipe"],
+        "max_turns": 3,
+        "max_tool_calls": 3,
+        "max_tool_errors": 0
+      }
+    }
+  ]
+}

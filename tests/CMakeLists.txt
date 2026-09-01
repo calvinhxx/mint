@@ -173,6 +173,13 @@ add_test(
 set_tests_properties(fixture_regression_script_unit PROPERTIES LABELS "unit;acceptance")
 
 add_test(
+    NAME eval_regression_script_unit
+    COMMAND "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/tests/scripts/eval_regression_tests.py"
+)
+set_tests_properties(eval_regression_script_unit PROPERTIES LABELS "unit;acceptance")
+
+add_test(
     NAME release_evidence_script_unit
     COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/tests/scripts/release_evidence_tests.py"
