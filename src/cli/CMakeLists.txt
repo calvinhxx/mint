@@ -12,7 +12,7 @@ add_library(mint_cli STATIC
 )
 
 mint_configure_target(mint_cli)
-target_include_directories(mint_cli PUBLIC
+target_include_directories(mint_cli PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 target_link_libraries(mint_cli

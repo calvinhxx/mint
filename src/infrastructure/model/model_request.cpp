@@ -147,7 +147,7 @@ void relax_failed_tool_generation_request(std::string& request_body, ModelAdapte
     request_body = request.dump();
 }
 
-std::string_view transport_outcome_name(HttpTransportOutcome outcome) noexcept {
+std::string_view failed_request_outcome_name(HttpTransportOutcome outcome) noexcept {
     switch (outcome) {
     case HttpTransportOutcome::success:
         return "http_error";
@@ -371,7 +371,7 @@ ModelReply complete_provider_request(const ModelProviderConfig& config, std::str
                               {{"attempt", attempt_number},
                                {"curl_code", attempt.transport_code},
                                {"http_status", attempt.http_status},
-                               {"outcome", transport_outcome_name(attempt.outcome)}});
+                               {"outcome", failed_request_outcome_name(attempt.outcome)}});
             if (attempt.outcome != HttpTransportOutcome::success) {
                 throw std::runtime_error("请求模型失败: " + attempt.transport_error);
             }

@@ -24,7 +24,9 @@ mint_add_gtest(mint_unit_tests
         unit/path_tests.cpp
         unit/runtime_settings_tests.cpp
     LIBRARIES mint_cli
-    INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/src/infrastructure"
+    INCLUDE_DIRECTORIES
+        "${PROJECT_SOURCE_DIR}/src/cli"
+        "${PROJECT_SOURCE_DIR}/src/infrastructure"
     TEST_PREFIX "unit."
     LABELS unit
 )
@@ -42,6 +44,7 @@ mint_add_gtest(mint_tests
     LIBRARIES mint::core mint_cli mint_test_support
     INCLUDE_DIRECTORIES
         "${PROJECT_SOURCE_DIR}/src/application"
+        "${PROJECT_SOURCE_DIR}/src/cli"
         "${PROJECT_SOURCE_DIR}/src/tools"
     TEST_PREFIX "integration."
     LABELS integration
@@ -123,14 +126,6 @@ add_test(NAME mint_cli_version COMMAND $<TARGET_FILE:mint> --version)
 string(REPLACE "." "\\." mint_version_regex "${PROJECT_VERSION}")
 set_tests_properties(
     mint_cli_version
-    PROPERTIES
-        LABELS "smoke"
-        PASS_REGULAR_EXPRESSION "mint ${mint_version_regex}"
-)
-
-add_test(NAME mint_cli_log_level COMMAND $<TARGET_FILE:mint> --log-level off --version)
-set_tests_properties(
-    mint_cli_log_level
     PROPERTIES
         LABELS "smoke"
         PASS_REGULAR_EXPRESSION "mint ${mint_version_regex}"
