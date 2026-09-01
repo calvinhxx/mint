@@ -414,10 +414,11 @@ JobHandles create_job(const CommandResourceLimits& limits) {
 std::string poll_resource_limit(HANDLE completion_port) {
     std::string detected;
     while (true) {
-        DWORD message = 0;
+        DWORD event_code = 0;
         ULONG_PTR completion_key = 0;
         LPOVERLAPPED context = nullptr;
-        if (!::GetQueuedCompletionStatus(completion_port, &message, &completion_key, &context, 0)) {
+        if (!::GetQueuedCompletionStatus(completion_port, &event_code, &completion_key, &context,
+                                         0)) {
             const auto error = ::GetLastError();
             if (error == WAIT_TIMEOUT) {
                 return detected;
@@ -427,7 +428,7 @@ std::string poll_resource_limit(HANDLE completion_port) {
         }
         (void)completion_key;
         (void)context;
-        switch (message) {
+        switch (event_code) {
         case JOB_OBJECT_MSG_END_OF_JOB_TIME:
             detected = "cpu";
             break;
