@@ -74,9 +74,13 @@ $env:GROQ_API_KEY = '你的密钥'
 
 `mint provider` 只解析配置并显示最终 endpoint、adapter、能力和 token 参数，不会请求模型，也不会输出密钥。内置服务只写 `provider` 即可使用默认 endpoint；旧配置中的官方根地址也会自动补全。代理或自定义接口用 `endpoint` 写完整请求地址，并明确写 `provider`；旧字段 `api_url` 继续兼容。只有自定义兼容接口允许覆盖 `capabilities`。远程接口必须使用 HTTPS，明文 HTTP 只允许 `localhost`、`127.0.0.0/8` 或 `::1` 本机回环地址。
 
+密钥应只通过模板中的 `api_key_env` 指定环境变量名。旧字段 `api_key` 在 `1.0.x` 仍可运行，但 CLI 会提示迁移；不要把真实密钥写进配置文件或提交到仓库。
+
 Codex 模型使用 OpenAI API Key。Cursor 和 GitHub Copilot 是编程客户端，不是独立的模型 HTTP 协议；它们的产品凭据不能当成 mint 的模型 Key。需要同款模型时，配置对应的 OpenAI、Anthropic 或 Google 等上游 Key。模板中的模型 ID 会随供应商更新，可按账号实际可用型号修改 `model`。
 
 长任务还要给单次请求留出 Token 预算。`max_request_tokens` 设为 `0` 时，首轮按 8000 tokens 控制；成功响应带有 `x-ratelimit-limit-tokens` 后，mint 会采用更低的服务端上限。Agent 先扣除输出上限、工具定义和默认 256 tokens 的安全余量，再按保守的 2 bytes/token 估算压缩历史。不同模型的 tokenizer 不同，这只能降低 413 风险，不能保证完全避免；仍有问题时可调低 `request_token_estimate_bytes_per_token` 或 `max_request_tokens`。一分钟内连续请求耗尽额度仍可能返回 429。
+
+`mint init` 新建的任务 policy 还会设置 `max_total_tokens: 100000`，按 provider 实际返回的 usage 控制整个任务；旧 policy 保持原值，需要时可手动加入该字段，`0` 表示关闭。mint 在每轮响应后检查累计值，因此最后一次请求可能越过目标值，但越界后不会再执行工具或发送下一次请求。它不是金额保证；若接口不返回 usage，结果会明确标记只能按已报告值尽力停止，mint 不会把缺失值当成零成本。
 
 想先确认真实接口能否完成工具调用，可以运行：
 

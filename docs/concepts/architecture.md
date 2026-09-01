@@ -133,6 +133,8 @@ flowchart LR
 
 每轮请求前，Agent 会向 `ModelClient` 查询请求预算。`max_request_tokens` 为 `0` 时先使用 8000 tokens，成功响应带有 `x-ratelimit-limit-tokens` 后采用更低的服务端上限。输出上限、工具定义和安全余量会先被扣除，剩余空间才交给上下文压缩器。默认估算按保守的 2 bytes/token；它适配不同 tokenizer 时只能降低超限概率，配置可用 `request_token_estimate_bytes_per_token` 继续收紧。
 
+任务 policy 的 `max_total_tokens` 是另一层限制：它累计每轮 provider 报告的 `total_tokens`，并随 checkpoint 恢复。检查发生在响应返回后，所以最后一次请求可能越过目标值；达到上限后，已经返回的最终文本可以结束任务，但任何尚未执行的工具和下一次模型请求都会被阻断。结果同时记录 usage 覆盖率；完整上报标记为 `reported_usage`，漏报时标记为 `best_effort` 或 `unavailable`。
+
 传输层只允许远程 HTTPS 和本机回环 HTTP。HTTP 正文、SSE 缓冲、模型文本、推理内容和工具调用分别受限，避免异常或恶意接口让本地进程无界分配内存；高级配置可以用 `response_limits` 继续收紧默认值。
 
 `mint provider --config ...` 只离线解析配置，不读取密钥。`mint provider test --config ...` 才会读取密钥并发出请求；它绕过 Agent Loop 和工作区工具，用固定的两轮握手检查 function call、参数解析和工具结果续接。

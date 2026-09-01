@@ -22,10 +22,13 @@
 - HTTP、SSE、模型文本、推理内容和工具调用都有独立资源上限；远程地址必须使用 HTTPS；
 - Codex、Claude、Gemini、Grok、Kimi、Groq 和 DeepSeek 共用三种协议适配器，配置模板不含密钥；
 - 三种协议统一统计输入、输出、缓存 tokens 和加权缓存命中率；
+- 任务 policy 可限制累计 Token，预算与已报告 usage 会跨 checkpoint 恢复；
 - 面向人的终端输出会转义控制字符，JSON / JSONL 机器协议保持原始结构；
 - 发布包包含完整文档树、安全策略和唯一一组 provider 模板；
 - 日常 CI 只跑一条快速 Debug 门禁，六平台测试和发布包留给候选版与 Tag；
 - Anthropic 流式工具调用在 Clang、GCC 和 MSVC 的严格告警模式下均可构建。
+- 工具 Schema 同时由运行时代码执行，未知字段和错误参数组合不会被静默忽略；
+- 6 个种子 Agent 场景支持脱敏采集、离线回放和成功率、验证率、轮数、工具数、Token、缓存与耗时统计。
 
 ### 工程结构
 
@@ -46,6 +49,7 @@
 - Windows 和 macOS 包尚未签名，macOS 尚未 notarize；
 - Linux 预编译包以 Ubuntu 24.04 为兼容基线；
 - `v1.0.0` 尚未选定正式真实回归的 provider；模板和离线协议测试不等于线上服务验证；
+- 种子评测集尚未在固定真实模型配置上完整运行，不能当作模型质量基准；
 - 持续聊天、GUI 和多 Agent 编排不在当前产品范围。
 
 历史变化见 [Changelog](../../CHANGELOG.md)，验证方法与证据边界见[构建与测试](../development/testing.md)。
