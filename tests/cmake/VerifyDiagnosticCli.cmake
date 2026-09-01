@@ -18,7 +18,7 @@ if(json_error OR NOT interaction_status STREQUAL "error")
 endif()
 
 execute_process(
-    COMMAND "${MINT_EXECUTABLE}" --demo --root "${SOURCE_DIR}" --log-dir "${SOURCE_DIR}"
+    COMMAND "${MINT_EXECUTABLE}" exec --demo --root "${SOURCE_DIR}" --log-dir "${SOURCE_DIR}"
             --log-file-level off --json probe
     RESULT_VARIABLE disabled_result
     OUTPUT_VARIABLE disabled_stdout
@@ -33,7 +33,7 @@ if(json_error OR NOT disabled_status STREQUAL "completed")
 endif()
 
 execute_process(
-    COMMAND "${MINT_EXECUTABLE}" --demo --root "${SOURCE_DIR}" --log-dir "${SOURCE_DIR}/.."
+    COMMAND "${MINT_EXECUTABLE}" exec --demo --root "${SOURCE_DIR}" --log-dir "${SOURCE_DIR}/.."
             --json probe
     RESULT_VARIABLE ancestor_result
     OUTPUT_VARIABLE ancestor_stdout
@@ -56,7 +56,7 @@ set(explicit_log_dir "${temp_root}/mint-日志-${probe_id}")
 file(REMOVE_RECURSE "${explicit_log_dir}")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env "HOME=" "USERPROFILE=" "LOCALAPPDATA="
-            "${MINT_EXECUTABLE}" --demo --root "${SOURCE_DIR}" --log-dir "${explicit_log_dir}"
+            "${MINT_EXECUTABLE}" exec --demo --root "${SOURCE_DIR}" --log-dir "${explicit_log_dir}"
             --json probe
     RESULT_VARIABLE explicit_result
     OUTPUT_VARIABLE explicit_stdout

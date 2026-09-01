@@ -92,7 +92,7 @@ TEST(CommandLineTest, LocalLogOptionsRequireValues) {
     EXPECT_THROW((void)parse({"mint", "run", "--log-dir"}), std::invalid_argument);
 }
 
-TEST(CommandLineTest, KeepsLegacyWorkflowOutOfDefaultHelp) {
+TEST(CommandLineTest, KeepsAdvancedOptionsOutOfDefaultHelp) {
     std::istringstream input;
     std::ostringstream output;
     std::ostringstream error;
@@ -100,35 +100,51 @@ TEST(CommandLineTest, KeepsLegacyWorkflowOutOfDefaultHelp) {
 
     mint::cli::print_help(console, "mint");
 
-    EXPECT_EQ(output.str().find("兼容工作流"), std::string::npos);
+    EXPECT_EQ(output.str().find("显式策略执行"), std::string::npos);
     EXPECT_EQ(output.str().find("--allow-write"), std::string::npos);
-    EXPECT_NE(output.str().find("--help-legacy"), std::string::npos);
+    EXPECT_NE(output.str().find("exec --help"), std::string::npos);
 }
 
-TEST(CommandLineTest, ExposesLegacyHelpOnlyWhenRequested) {
-    const auto command = parse({"mint", "--help-legacy"});
+TEST(CommandLineTest, UsesHelpAsTheEmptyAndGlobalEntryPoint) {
+    const auto empty = parse({"mint"});
+    EXPECT_EQ(empty.mode, mint::cli::CommandMode::none);
+    EXPECT_TRUE(empty.help);
+
+    const auto help = parse({"mint", "--help"});
+    EXPECT_EQ(help.mode, mint::cli::CommandMode::none);
+    EXPECT_TRUE(help.help);
+    EXPECT_THROW((void)parse({"mint", "--help", "extra"}), std::invalid_argument);
+}
+
+TEST(CommandLineTest, ExposesAdvancedOptionsUnderExec) {
+    const auto command = parse({"mint", "exec", "--help"});
     EXPECT_TRUE(command.help);
-    EXPECT_TRUE(command.legacy_help);
+    EXPECT_EQ(command.mode, mint::cli::CommandMode::exec);
 
     std::istringstream input;
     std::ostringstream output;
     std::ostringstream error;
     mint::cli::Console console(input, output, error);
-    mint::cli::print_legacy_help(console, "mint");
+    mint::cli::print_exec_help(console, "mint");
 
-    EXPECT_NE(output.str().find("旧版兼容模式"), std::string::npos);
+    EXPECT_NE(output.str().find("显式策略执行"), std::string::npos);
     EXPECT_NE(output.str().find("--allow-write"), std::string::npos);
 }
 
-TEST(CommandLineTest, ParsesOptionalLegacyTaskTokenBudget) {
-    const auto bounded = parse({"mint", "--max-total-tokens", "12345", "检查项目"});
+TEST(CommandLineTest, ParsesOptionalExecTaskTokenBudget) {
+    const auto bounded = parse({"mint", "exec", "--max-total-tokens", "12345", "检查项目"});
     EXPECT_EQ(bounded.max_total_tokens, 12345U);
 
-    const auto disabled = parse({"mint", "--max-total-tokens", "0", "检查项目"});
+    const auto disabled = parse({"mint", "exec", "--max-total-tokens", "0", "检查项目"});
     EXPECT_EQ(disabled.max_total_tokens, 0U);
 
-    EXPECT_THROW((void)parse({"mint", "--max-total-tokens", "100000001", "检查项目"}),
+    EXPECT_THROW((void)parse({"mint", "exec", "--max-total-tokens", "100000001", "检查项目"}),
                  std::invalid_argument);
+}
+
+TEST(CommandLineTest, RejectsImplicitExecMode) {
+    EXPECT_THROW((void)parse({"mint", "检查项目"}), std::invalid_argument);
+    EXPECT_THROW((void)parse({"mint", "--allow-write", "检查项目"}), std::invalid_argument);
 }
 
 } // namespace

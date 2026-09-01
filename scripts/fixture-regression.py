@@ -628,6 +628,7 @@ def run_agent(executable: Path, config: Path, project: Path, runtime: Path) -> t
     runtime.mkdir(parents=True)
     command = [
         str(executable),
+        "exec",
         "--config",
         str(config),
         "--policy",

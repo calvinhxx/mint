@@ -55,7 +55,9 @@ string(JSON run_status GET "${run_output}" status)
 string(JSON run_completed GET "${run_output}" completed)
 string(JSON task_id GET "${run_output}" task_id)
 string(JSON task_directory GET "${run_output}" task_directory)
-if(NOT run_status STREQUAL "completed" OR NOT run_completed OR task_id STREQUAL "")
+string(JSON events_path GET "${run_output}" events_path)
+if(NOT run_status STREQUAL "completed" OR NOT run_completed OR task_id STREQUAL "" OR
+   NOT events_path STREQUAL "${task_directory}/events.jsonl")
     message(FATAL_ERROR "managed demo run returned an unexpected contract: ${run_output}")
 endif()
 string(FIND "${task_directory}" "${FIXTURE_DIR}" task_inside_workspace)
@@ -194,7 +196,9 @@ if(failed_run_result EQUAL 0)
 endif()
 string(JSON failed_run_status GET "${failed_run_output}" status)
 string(JSON failed_run_task_id GET "${failed_run_output}" task_id)
-if(NOT failed_run_status STREQUAL "error" OR failed_run_task_id STREQUAL "")
+string(JSON failed_run_events_path GET "${failed_run_output}" events_path)
+if(NOT failed_run_status STREQUAL "error" OR failed_run_task_id STREQUAL "" OR
+   failed_run_events_path STREQUAL "")
     message(FATAL_ERROR "managed run errors must retain their task identity: ${failed_run_output}${failed_run_error}")
 endif()
 execute_process(
@@ -213,17 +217,17 @@ if(NOT failed_task_state STREQUAL "created")
 endif()
 
 execute_process(
-    COMMAND "${MINT_EXECUTABLE}" --demo --root "${FIXTURE_DIR}" --json "legacy compatibility"
-    RESULT_VARIABLE legacy_result
-    OUTPUT_VARIABLE legacy_output
-    ERROR_VARIABLE legacy_error
+    COMMAND "${MINT_EXECUTABLE}" exec --demo --root "${FIXTURE_DIR}" --json "explicit execution"
+    RESULT_VARIABLE exec_result
+    OUTPUT_VARIABLE exec_output
+    ERROR_VARIABLE exec_error
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-if(NOT legacy_result EQUAL 0)
-    message(FATAL_ERROR "legacy demo compatibility failed: ${legacy_output}${legacy_error}")
+if(NOT exec_result EQUAL 0)
+    message(FATAL_ERROR "explicit execution demo failed: ${exec_output}${exec_error}")
 endif()
-string(JSON legacy_status GET "${legacy_output}" status)
-string(FIND "${legacy_output}" "\"task_id\"" legacy_task_field)
-if(NOT legacy_status STREQUAL "completed" OR NOT legacy_task_field EQUAL -1)
-    message(FATAL_ERROR "legacy invocation contract unexpectedly changed: ${legacy_output}")
+string(JSON exec_status GET "${exec_output}" status)
+string(FIND "${exec_output}" "\"task_id\"" exec_task_field)
+if(NOT exec_status STREQUAL "completed" OR NOT exec_task_field EQUAL -1)
+    message(FATAL_ERROR "explicit execution contract unexpectedly changed: ${exec_output}")
 endif()

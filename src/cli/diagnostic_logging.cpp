@@ -17,8 +17,10 @@ namespace {
 
 std::string_view command_mode_name(CommandMode mode) noexcept {
     switch (mode) {
-    case CommandMode::legacy:
-        return "legacy";
+    case CommandMode::none:
+        return "none";
+    case CommandMode::exec:
+        return "exec";
     case CommandMode::init:
         return "init";
     case CommandMode::run:

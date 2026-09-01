@@ -12,14 +12,13 @@ namespace mint::cli {
 
 class Console;
 
-enum class CommandMode { legacy, init, run, resume, status, provider };
+enum class CommandMode { none, exec, init, run, resume, status, provider };
 enum class ProviderCommandAction { inspect, test };
 
 struct CommandLine {
-    CommandMode mode = CommandMode::legacy;
+    CommandMode mode = CommandMode::none;
     bool demo = false;
     bool help = false;
-    bool legacy_help = false;
     bool version = false;
     bool force = false;
     bool allow_write = false;
@@ -65,6 +64,6 @@ struct CommandLine {
 [[nodiscard]] bool requested_interaction_output(int argc, char** argv);
 [[nodiscard]] bool is_managed_mode(CommandMode mode) noexcept;
 void print_help(Console& console, const char* program);
-void print_legacy_help(Console& console, const char* program);
+void print_exec_help(Console& console, const char* program);
 
 } // namespace mint::cli

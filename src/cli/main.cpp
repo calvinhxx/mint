@@ -41,8 +41,8 @@ int run(int argc, char** argv) {
         mint::diagnostics::configure(interaction_requested ? "off" : command_line.log_level);
         mint::diagnostics::validate_level(command_line.log_file_level);
         if (command_line.help) {
-            if (command_line.legacy_help) {
-                mint::cli::print_legacy_help(console, argv[0]);
+            if (command_line.mode == mint::cli::CommandMode::exec) {
+                mint::cli::print_exec_help(console, argv[0]);
             } else {
                 mint::cli::print_help(console, argv[0]);
             }
@@ -77,6 +77,7 @@ int run(int argc, char** argv) {
             if (managed_task.has_value()) {
                 result["task_id"] = managed_task->id;
                 result["task_directory"] = managed_task->directory.generic_string();
+                result["events_path"] = managed_task->events.generic_string();
             }
             if (log_status.file_enabled) {
                 result["diagnostic_log"] = log_status.file_path.generic_string();

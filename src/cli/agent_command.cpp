@@ -186,6 +186,7 @@ int run_agent_command(CommandLine command_line, std::optional<ManagedTaskPaths>&
         if (managed_task.has_value()) {
             machine_result["task_id"] = managed_task->id;
             machine_result["task_directory"] = managed_task->directory.generic_string();
+            machine_result["events_path"] = managed_task->events.generic_string();
         }
         console.write_line(machine_result.dump());
     }

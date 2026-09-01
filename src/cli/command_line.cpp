@@ -2,6 +2,7 @@
 #include "console.hpp"
 
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -25,7 +26,10 @@ unsigned long parse_unsigned(const std::string& text, const std::string& option)
     return value;
 }
 
-CommandMode parse_mode(const std::string& argument) {
+std::optional<CommandMode> parse_mode(const std::string& argument) {
+    if (argument == "exec") {
+        return CommandMode::exec;
+    }
     if (argument == "init") {
         return CommandMode::init;
     }
@@ -41,7 +45,7 @@ CommandMode parse_mode(const std::string& argument) {
     if (argument == "provider") {
         return CommandMode::provider;
     }
-    return CommandMode::legacy;
+    return std::nullopt;
 }
 
 std::filesystem::path utf8_path(std::string_view argument) {
@@ -77,6 +81,8 @@ void print_help(Console& console, const char* program) {
         << "模型配置:\n"
         << "  " << program << " provider [--config 路径] [--json]  离线检查 provider 能力\n"
         << "  " << program << " provider test [--config 路径] [--json]  发送两轮真实兼容性测试\n\n"
+        << "高级执行:\n"
+        << "  " << program << " exec --help  显式配置能力、策略与事件文件\n\n"
         << "常用选项:\n"
         << "  --root 路径       项目目录，默认当前目录\n"
         << "  --state-dir 路径  覆盖工作区外的本地状态目录\n"
@@ -87,34 +93,32 @@ void print_help(Console& console, const char* program) {
         << "  --log-level 级别  终端日志级别，默认 warn\n"
         << "  --log-file-level 级别  文件日志级别；off 关闭落盘\n"
         << "  --version         显示版本\n"
-        << "  -h, --help        显示帮助\n"
-        << "  --help-legacy     显示旧版兼容模式\n";
+        << "  -h, --help        显示帮助\n";
 }
 
-void print_legacy_help(Console& console, const char* program) {
+void print_exec_help(Console& console, const char* program) {
     console.output_stream()
-        << "mint 旧版兼容模式\n\n"
-        << "现有脚本仍可使用扁平参数；新任务建议使用 init / run / resume / status。\n\n"
+        << "mint exec - 显式策略执行\n\n"
+        << "面向自动化与高级调试。日常任务建议使用 init / run / resume / status。\n\n"
         << "用法:\n"
-        << "  " << program
-        << " [--allow-write] [--allow-write-path 路径] [--allow-command 程序]"
-           " [--require-verification] [--approve-each-command] [--approve-each-changeset]"
-           " [--max-seconds 秒] [--unsafe-no-command-sandbox] [--max-context-bytes 字节]"
-           " [--max-total-tokens 数量]"
-           " [--log-level 级别] [--log-file-level 级别] [--log-dir 路径]"
-           " [--events-jsonl 路径] [--session 路径] [--resume] [--retry-inflight] [--json]"
-           " [--config JSON路径] [--policy JSON路径] [--root 路径] [--max-turns 数量] [问题]\n\n"
-        << "能力与恢复:\n"
+        << "  " << program << " exec [选项] 任务\n"
+        << "  " << program << " exec --resume --session 路径 [选项]\n\n"
+        << "输入与状态:\n"
+        << "  --root 路径              项目根目录\n"
+        << "  --config 路径            模型配置\n"
+        << "  --policy 路径            显式 task policy\n"
+        << "  --session 路径           checkpoint 文件\n"
+        << "  --events-jsonl 路径      事件记录文件\n"
+        << "  --resume                 恢复 checkpoint\n"
+        << "  --retry-inflight         重试未确认完成的副作用工具\n"
+        << "  --json                   输出机器可读 JSON\n\n"
+        << "能力:\n"
         << "  --allow-write             允许文本写入\n"
         << "  --allow-write-path 路径   限制写入范围，可重复\n"
         << "  --allow-command 程序      授权可执行程序，可重复且不经过 shell\n"
-        << "  --policy 路径             使用显式 task policy\n"
         << "  --require-verification    修改后必须运行验证命令\n"
         << "  --approve-each-command    每次启动命令前确认\n"
         << "  --approve-each-changeset  每次多文件提交前确认\n"
-        << "  --session 路径            保存兼容模式 checkpoint\n"
-        << "  --resume                  恢复兼容模式 checkpoint\n"
-        << "  --retry-inflight          重试未确认完成的副作用工具\n"
         << "  --unsafe-no-command-sandbox  关闭命令 OS 沙箱\n\n"
         << "预算:\n"
         << "  --max-turns 数量          " << runtime_bounds::min_turns << " 到 "
@@ -142,10 +146,25 @@ CommandLine parse_arguments(int argc, char** argv) {
     CommandLine result;
     std::vector<std::string> question_parts;
     int begin = 1;
-    if (argc > 1) {
-        result.mode = parse_mode(argv[1]);
-        if (result.mode != CommandMode::legacy) {
+    if (argc <= 1) {
+        result.help = true;
+        return result;
+    } else {
+        const std::string first = argv[1];
+        if (const auto mode = parse_mode(first)) {
+            result.mode = *mode;
             begin = 2;
+        } else if (first == "-h" || first == "--help" || first == "--version") {
+            if (argc != 2) {
+                throw std::invalid_argument("全局入口只接受一个 --help 或 --version");
+            }
+            result.help = first != "--version";
+            result.version = first == "--version";
+            return result;
+        } else if (!first.starts_with('-')) {
+            throw std::invalid_argument("未知子命令: " + first + "；使用 mint --help 查看用法");
+        } else {
+            throw std::invalid_argument("未知全局选项: " + first + "；使用 mint --help 查看用法");
         }
     }
     if (result.mode == CommandMode::resume) {
@@ -202,9 +221,6 @@ CommandLine parse_arguments(int argc, char** argv) {
             result.retry_inflight = true;
         } else if (argument == "-h" || argument == "--help") {
             result.help = true;
-        } else if (argument == "--help-legacy") {
-            result.help = true;
-            result.legacy_help = true;
         } else if (argument == "--version") {
             result.version = true;
         } else if (argument == "--config") {
@@ -314,7 +330,7 @@ CommandLine parse_arguments(int argc, char** argv) {
         result.question += part;
     }
 
-    if (result.mode == CommandMode::legacy) {
+    if (result.mode == CommandMode::exec) {
         if (!result.state_dir.empty() || !result.task_id.empty() || !result.cancel_file.empty() ||
             result.force || result.interaction_jsonl) {
             throw std::invalid_argument(
