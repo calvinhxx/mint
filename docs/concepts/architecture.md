@@ -61,7 +61,9 @@ flowchart TD
 
 `application` 只依赖规则、运行时工具和 ports，不包含 `tools` 或 `infrastructure` 的具体头文件。`ToolRegistry`、`ModelProviderClient`、`SessionStore`、`EventLog` 和 `TaskControl` 实现这些接口，由 CLI 统一组装。
 
-目录边界同时也是编译边界。`mint::agent`、`mint::project`、`mint::model`、`mint::command`、`mint::persistence`、`mint::logging` 和 `mint::filesystem` 都能单独构建。`mint::application` 与 `mint::infrastructure` 只是兼容聚合入口，不再把实现编进一个大库。CLI 和 tools 直接声明实际依赖，新增模型代码不会触发命令模块重编译。
+目录边界同时也是编译边界。`mint::agent`、`mint::project`、`mint::model`、`mint::command`、`mint::persistence`、`mint::logging` 和 `mint::filesystem` 都能单独构建。CLI 和 tools 直接声明实际依赖；`mint::core` 只为需要完整内核的嵌入方聚合这些模块。新增模型代码不会触发命令模块重编译。
+
+公共头文件也使用同一分层路径，例如 `mint/application/agent.hpp`、`mint/ports/model_client.hpp` 和 `mint/infrastructure/model_provider_client.hpp`。仓库不再保留顶层转发头，调用方可以从 include 路径直接看出依赖的是接口还是具体适配器。
 
 ~~~mermaid
 flowchart LR

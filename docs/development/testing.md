@@ -22,9 +22,9 @@ cmake --build --preset vcpkg-dev --target format-check
 ctest --preset vcpkg-dev
 ~~~
 
-只运行某类测试可以使用 CTest 标签，例如 `ctest --preset vcpkg-dev -L unit`。当前主要标签是 `unit`、`integration`、`contract`、`acceptance` 和版本契约标签。
+只运行某类测试可以使用 CTest 标签，例如 `ctest --preset vcpkg-dev -L unit`。当前主要标签是 `unit`、`integration`、`contract`、`acceptance`、`architecture`、`provider` 和 `release`。
 
-测试源码按 `unit`、`integration` 和版本契约目录组织；临时工作区、回环 HTTP 服务和命令子进程放在 `tests/support`，避免重复实现环境准备。`architecture` 标签还会检查终端输出边界、application 对 ports 的依赖方向，以及源码目录和 CMake target 是否保持模块化。
+测试源码按 `unit`、`integration` 和 `contract` 组织，不再跟随历史版本号建目录。临时工作区、回环 HTTP 服务和命令子进程放在 `tests/support`，可复用的故障工程放在 `tests/fixtures`。`architecture` 标签还会检查终端输出边界、application 对 ports 的依赖方向，以及源码目录和 CMake target 是否保持模块化。
 
 ## 平台矩阵
 
@@ -84,14 +84,14 @@ python3 scripts/provider-regression.py \
 python3 scripts/fixture-regression.py \
   --mint build/vcpkg-release/mint \
   --config configs/providers/deepseek-chat.json \
-  --fixture tests/fixtures/v1_broken_project \
+  --fixture tests/fixtures/broken_cpp_project \
   --live \
   --output build/fixture-regression.json
 ~~~
 
 正式发布只要求一个 live profile 同时通过握手和 fixture。其他 provider 仍执行离线协议检查，不能因此声称都经过真实服务验证。脱敏后的正式证据保存在 `release/evidence/<version>`；原始响应、API Key 和临时 fixture 不进入仓库。
 
-握手固定发送两次请求且不重试；fixture 使用 profile 中的请求上限。本次 DeepSeek 模板也把 `max_retries` 固定为 `0`。缓存命中率直接来自这些必要请求的累计 usage，不单独发送缓存探针；DeepSeek 缓存是 best-effort，单次结果为 0% 不代表兼容失败。
+握手固定发送两次请求；生成正式证据时应把所选 profile 的 `max_retries` 设为 `0`，fixture 也使用该 profile 的请求上限。缓存命中率直接来自必要请求的累计 usage，不单独发送缓存探针；单次结果为 0% 不代表协议不兼容。
 
 ## 结果边界
 
@@ -100,4 +100,4 @@ python3 scripts/fixture-regression.py \
 - macOS 使用 Seatbelt，Linux 使用 Bubblewrap，Windows 使用 AppContainer；三者限制越界写入和网络，但 macOS/Linux 仍可能只读访问部分宿主路径，不能当作虚拟机。
 - Windows 尚无单文件大小硬限制；POSIX 资源统计和工作区磁盘限制也不是文件系统原生 quota。
 - Windows 和 macOS 包尚未签名，macOS 尚未 notarize。
-- OpenAI Responses + SSE 当前只有本地协议与回环服务证据；DeepSeek 的真实发布证据不扩大这一结论。
+- 三种 adapter 都有本地协议与回环服务测试；某个 provider 的真实握手不能替代其他 provider 的线上证据。当前 `v1.0.0` 尚无已提交的真实发布证据。
