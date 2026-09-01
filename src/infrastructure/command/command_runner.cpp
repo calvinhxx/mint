@@ -1,0 +1,593 @@
+#include "mint/infrastructure/command_runner.hpp"
+#include "mint/infrastructure/diagnostic_log.hpp"
+#include "mint/runtime/path.hpp"
+#include "mint/runtime/task_control.hpp"
+
+#include "command_process.hpp"
+#include "command_sandbox.hpp"
+
+#if defined(_WIN32)
+#include "command_appcontainer_windows.hpp"
+#endif
+
+#include <algorithm>
+#include <exception>
+#include <optional>
+#include <stdexcept>
+#include <string_view>
+#include <utility>
+
+namespace mint {
+namespace {
+
+std::string require_string(const Json& arguments, std::string_view name) {
+    const std::string key(name);
+    if (!arguments.contains(key) || !arguments.at(key).is_string()) {
+        throw std::invalid_argument("参数 " + key + " 必须是字符串");
+    }
+    return arguments.at(key).get<std::string>();
+}
+
+bool contains_nul(std::string_view value) {
+    return value.find('\0') != std::string_view::npos;
+}
+
+std::string display_path(const std::filesystem::path& root, const std::filesystem::path& path) {
+    const auto relative = path.lexically_relative(root);
+    return relative.empty() ? "." : relative.generic_string();
+}
+
+struct CommandInvocation {
+    std::string program;
+    std::filesystem::path executable;
+    std::vector<std::string> arguments;
+    std::filesystem::path cwd;
+    std::string cwd_label;
+    long timeout_seconds = 0;
+    CommandResourceLimits resource_limits{};
+};
+
+std::vector<std::string> command_arguments(const Json& arguments) {
+    std::vector<std::string> result;
+    if (!arguments.contains("args")) {
+        return result;
+    }
+    if (!arguments.at("args").is_array()) {
+        throw std::invalid_argument("参数 args 必须是字符串数组");
+    }
+    if (arguments.at("args").size() > runtime_bounds::max_command_arguments) {
+        throw std::invalid_argument("命令参数数量超过允许上限");
+    }
+
+    std::size_t total_bytes = 0;
+    for (const auto& argument : arguments.at("args")) {
+        if (!argument.is_string()) {
+            throw std::invalid_argument("参数 args 的每一项都必须是字符串");
+        }
+        auto value = argument.get<std::string>();
+        if (contains_nul(value)) {
+            throw std::invalid_argument("命令参数不能包含 NUL");
+        }
+        total_bytes += value.size();
+        if (total_bytes > runtime_bounds::max_command_argument_bytes) {
+            throw std::invalid_argument("命令参数总长度超过允许上限");
+        }
+        result.push_back(std::move(value));
+    }
+    return result;
+}
+
+std::filesystem::path command_cwd(const Json& arguments, const std::filesystem::path& root) {
+    const auto requested = arguments.contains("cwd") ? require_string(arguments, "cwd") : ".";
+    const std::filesystem::path relative(requested.empty() ? "." : requested);
+    if (relative.is_absolute()) {
+        throw std::invalid_argument("run_command 的 cwd 必须是工作区内的相对路径");
+    }
+
+    std::error_code error;
+    const auto resolved = std::filesystem::weakly_canonical(root / relative, error);
+    if (error || !is_path_within(root, resolved) || !std::filesystem::is_directory(resolved)) {
+        throw std::invalid_argument("命令 cwd 不存在、不是目录或超出工作区: " + requested);
+    }
+    return resolved;
+}
+
+long command_timeout(const Json& arguments, long default_timeout, long max_timeout) {
+    if (!arguments.contains("timeout_seconds")) {
+        return default_timeout;
+    }
+    if (!arguments.at("timeout_seconds").is_number_integer()) {
+        throw std::invalid_argument("timeout_seconds 必须是整数");
+    }
+    const auto timeout = arguments.at("timeout_seconds").get<long>();
+    if (timeout <= 0 || timeout > max_timeout) {
+        throw std::invalid_argument("timeout_seconds 必须在 1 到 " + std::to_string(max_timeout) +
+                                    " 之间");
+    }
+    return timeout;
+}
+
+CommandInvocation
+parse_invocation(const Json& arguments, const std::filesystem::path& root,
+                 const std::unordered_map<std::string, std::filesystem::path>& resolved_programs,
+                 long default_timeout, long max_timeout,
+                 const CommandResourceLimits& resource_limits) {
+    if (!arguments.is_object()) {
+        throw std::invalid_argument("run_command 参数必须是 JSON 对象");
+    }
+
+    CommandInvocation invocation;
+    invocation.program = require_string(arguments, "program");
+    const auto executable = resolved_programs.find(invocation.program);
+    if (executable == resolved_programs.end()) {
+        throw std::invalid_argument("程序未获用户授权: " + invocation.program);
+    }
+    invocation.executable = executable->second;
+    invocation.arguments = command_arguments(arguments);
+    invocation.cwd = command_cwd(arguments, root);
+    invocation.cwd_label = display_path(root, invocation.cwd);
+    invocation.timeout_seconds = command_timeout(arguments, default_timeout, max_timeout);
+    invocation.resource_limits = resource_limits;
+    return invocation;
+}
+
+Json command_result_base(const CommandInvocation& invocation, bool sandboxed,
+                         const std::string& sandbox_backend) {
+    return {{"program", invocation.program},
+            {"cwd", invocation.cwd_label},
+            {"sandboxed", sandboxed},
+            {"sandbox_backend", sandbox_backend},
+            {"resource_limits", command_resource_limits_to_json(invocation.resource_limits)}};
+}
+
+enum class UnstartedOutcome { cancelled, task_timed_out, denied };
+
+Json unstarted_result(const CommandInvocation& invocation, UnstartedOutcome outcome, bool sandboxed,
+                      const std::string& sandbox_backend) {
+    const bool cancelled = outcome == UnstartedOutcome::cancelled;
+    const bool task_timed_out = outcome == UnstartedOutcome::task_timed_out;
+    const bool denied = outcome == UnstartedOutcome::denied;
+    auto result = command_result_base(invocation, sandboxed, sandbox_backend);
+    result.update({{"ok", !denied},
+                   {"duration_ms", 0},
+                   {"status", denied ? "denied" : (cancelled ? "cancelled" : "task_timed_out")},
+                   {"exit_code", nullptr},
+                   {"signal", nullptr},
+                   {"timed_out", task_timed_out},
+                   {"task_timed_out", task_timed_out},
+                   {"cancelled", cancelled},
+                   {"output_truncated", false},
+                   {"output", ""}});
+    if (denied) {
+        result["error"] = "命令被用户逐次审批拒绝";
+    }
+    return result;
+}
+
+std::optional<Json> stopped_result(const CommandInvocation& invocation,
+                                   const std::shared_ptr<TaskControl>& task_control, bool sandboxed,
+                                   const std::string& sandbox_backend) {
+    const auto reason = task_control == nullptr ? std::string{} : task_control->stop_reason();
+    if (reason.empty()) {
+        return std::nullopt;
+    }
+    const auto outcome =
+        reason == "cancelled" ? UnstartedOutcome::cancelled : UnstartedOutcome::task_timed_out;
+    return unstarted_result(invocation, outcome, sandboxed, sandbox_backend);
+}
+
+Json denied_result(const CommandInvocation& invocation, bool sandboxed,
+                   const std::string& sandbox_backend) {
+    return unstarted_result(invocation, UnstartedOutcome::denied, sandboxed, sandbox_backend);
+}
+
+Json approval_result(const CommandInvocation& invocation, const ApprovalDecision& decision,
+                     bool sandboxed, const std::string& sandbox_backend) {
+    Json result;
+    if (decision.rejected_by_user()) {
+        result = denied_result(invocation, sandboxed, sandbox_backend);
+    } else if (decision.cancels_run()) {
+        result =
+            unstarted_result(invocation, UnstartedOutcome::cancelled, sandboxed, sandbox_backend);
+        result["error"] = "运行已取消，命令未执行";
+    } else {
+        result = denied_result(invocation, sandboxed, sandbox_backend);
+        result["status"] = "failed";
+        result["error"] = "审批未完成，命令未执行";
+    }
+    result["approval_decision_source"] = std::string(decision.source());
+    return result;
+}
+
+Json process_result_json(const CommandInvocation& invocation, command_detail::ProcessResult process,
+                         bool sandboxed, const std::string& sandbox_backend) {
+    auto result = command_result_base(invocation, sandboxed, sandbox_backend);
+    result.update(
+        {{"ok", true},
+         {"duration_ms", process.duration_ms},
+         {"status", std::move(process.status)},
+         {"exit_code", process.exit_code.has_value() ? Json(*process.exit_code) : Json(nullptr)},
+         {"signal", process.signal.has_value() ? Json(*process.signal) : Json(nullptr)},
+         {"timed_out", process.timed_out || process.task_timed_out},
+         {"task_timed_out", process.task_timed_out},
+         {"cancelled", process.cancelled},
+         {"resource_limited", process.resource_limited},
+         {"resource_limit",
+          process.resource_limit.empty() ? Json(nullptr) : Json(process.resource_limit)},
+         {"output_truncated", process.output_truncated},
+         {"output", std::move(process.output)}});
+    return result;
+}
+
+command_detail::ProcessRequest
+process_request(const CommandInvocation& invocation, const std::filesystem::path& workspace_root,
+                bool wraps_command, const std::filesystem::path& sandbox_executable,
+                const std::vector<std::string>& sandbox_arguments,
+                bool sandbox_sets_working_directory, std::size_t max_output_bytes,
+                const std::shared_ptr<TaskControl>& task_control) {
+    command_detail::ProcessRequest request;
+    request.executable = wraps_command ? sandbox_executable : invocation.executable;
+    request.workspace_root = workspace_root;
+    request.argv.reserve(invocation.arguments.size() + sandbox_arguments.size() + 4);
+    if (wraps_command) {
+        request.argv = sandbox_arguments;
+        if (sandbox_sets_working_directory) {
+            request.argv.insert(request.argv.end(),
+                                {"--chdir", invocation.cwd.generic_string(), "--"});
+        }
+        request.argv.push_back(invocation.executable.generic_string());
+    } else {
+        request.argv.push_back(invocation.program);
+    }
+    request.argv.insert(request.argv.end(), invocation.arguments.begin(),
+                        invocation.arguments.end());
+    request.cwd = invocation.cwd;
+    request.timeout_seconds = invocation.timeout_seconds;
+    request.max_output_bytes = max_output_bytes;
+    request.resource_limits = invocation.resource_limits;
+    request.task_control = task_control;
+    return request;
+}
+
+#if defined(__APPLE__)
+std::string command_exception_message(const std::exception_ptr& error) {
+    try {
+        std::rethrow_exception(error);
+    } catch (const std::exception& exception) {
+        return exception.what();
+    } catch (...) {
+        return "未知异常";
+    }
+}
+
+command_detail::ProcessResult
+execute_macos_sandboxed_process(command_detail::ProcessRequest request,
+                                const std::filesystem::path& workspace_root,
+                                const std::vector<std::string>& sandbox_arguments) {
+    if (sandbox_arguments.size() != 3 || sandbox_arguments[0] != "sandbox-exec" ||
+        sandbox_arguments[1] != "-p") {
+        throw std::logic_error("内部 macOS 沙箱参数无效");
+    }
+
+    const auto cleanup_executable = request.executable;
+    command_detail::CommandScratchDirectory scratch(workspace_root);
+    std::optional<command_detail::ProcessResult> result;
+    std::exception_ptr execution_error;
+    try {
+        const auto scratch_path = scratch.path().generic_string();
+        request.posix_environment_overrides = {
+            {"TMPDIR", scratch_path}, {"TMP", scratch_path}, {"TEMP", scratch_path}};
+        result.emplace(command_detail::execute_process(std::move(request)));
+    } catch (...) {
+        execution_error = std::current_exception();
+    }
+
+    try {
+        scratch.verify_cleanup_target();
+        command_detail::ProcessRequest cleanup_request;
+        cleanup_request.executable = cleanup_executable;
+        cleanup_request.argv = sandbox_arguments;
+        cleanup_request.argv.insert(cleanup_request.argv.end(),
+                                    {"/bin/rm", "-rf", "--", scratch.path().generic_string()});
+        cleanup_request.workspace_root = workspace_root;
+        cleanup_request.cwd = workspace_root;
+        cleanup_request.timeout_seconds = 5;
+        cleanup_request.max_output_bytes = 4 * 1024;
+        const auto cleanup = command_detail::execute_process(std::move(cleanup_request));
+        if (cleanup.status != "exited" || cleanup.exit_code.value_or(-1) != 0) {
+            auto message = std::string("命令私有临时目录清理进程失败: ") + cleanup.status;
+            if (!cleanup.output.empty()) {
+                message += "；" + cleanup.output;
+            }
+            throw std::runtime_error(std::move(message));
+        }
+        scratch.confirm_cleanup();
+    } catch (const std::exception& cleanup_error) {
+        if (execution_error != nullptr) {
+            throw std::runtime_error("命令执行失败: " + command_exception_message(execution_error) +
+                                     "；命令私有临时目录清理失败: " + cleanup_error.what());
+        }
+        throw;
+    }
+    if (execution_error != nullptr) {
+        std::rethrow_exception(execution_error);
+    }
+    return std::move(*result);
+}
+#endif
+
+struct CommandCatalog {
+    std::vector<std::string> allowed_programs;
+    std::unordered_map<std::string, std::filesystem::path> resolved_programs;
+    std::vector<CommandRecipe> recipes;
+    std::unordered_map<std::string, std::size_t> recipe_indices;
+    std::vector<std::string> recipe_names;
+};
+
+CommandCatalog build_command_catalog(CommandRunnerOptions& options, long max_timeout) {
+    CommandCatalog catalog;
+    std::vector<std::string> requested_programs = options.allowed_programs;
+    for (auto& recipe : options.recipes) {
+        if (recipe.name.empty() || recipe.program.empty() || recipe.timeout_seconds <= 0 ||
+            recipe.timeout_seconds > max_timeout || recipe.cwd.is_absolute()) {
+            throw std::invalid_argument("固定命令 recipe 配置无效: " + recipe.name);
+        }
+        if (catalog.recipe_indices.contains(recipe.name)) {
+            throw std::invalid_argument("固定命令 recipe 名称重复: " + recipe.name);
+        }
+        catalog.recipe_indices.emplace(recipe.name, catalog.recipes.size());
+        catalog.recipe_names.push_back(recipe.name);
+        if (std::find(requested_programs.begin(), requested_programs.end(), recipe.program) ==
+            requested_programs.end()) {
+            requested_programs.push_back(recipe.program);
+        }
+        catalog.recipes.push_back(std::move(recipe));
+    }
+
+    for (const auto& requested : requested_programs) {
+        if (catalog.resolved_programs.contains(requested)) {
+            continue;
+        }
+        catalog.resolved_programs.emplace(requested, command_detail::resolve_program(requested));
+        catalog.allowed_programs.push_back(requested);
+    }
+    return catalog;
+}
+
+} // namespace
+
+struct CommandRunner::NativeSandboxState {
+#if defined(_WIN32)
+    std::shared_ptr<const command_detail::WindowsAppContainer> windows_appcontainer;
+#endif
+};
+
+CommandRunner::CommandRunner(CommandRunnerOptions options)
+    : default_timeout_seconds_(options.default_timeout_seconds),
+      max_timeout_seconds_(options.max_timeout_seconds),
+      max_output_bytes_(options.max_output_bytes), resource_limits_(options.resource_limits),
+      task_control_(std::move(options.task_control)), approval_(std::move(options.approval)) {
+    std::error_code error;
+    root_ = std::filesystem::weakly_canonical(std::move(options.root), error);
+    if (error || root_.empty() || !std::filesystem::is_directory(root_)) {
+        throw std::invalid_argument("命令工作目录不存在或不是目录");
+    }
+    if (default_timeout_seconds_ <= 0 || max_timeout_seconds_ <= 0 ||
+        default_timeout_seconds_ > max_timeout_seconds_) {
+        throw std::invalid_argument("命令超时配置必须为正数，且默认值不能超过最大值");
+    }
+    if (max_output_bytes_ == 0 || max_output_bytes_ > runtime_bounds::max_command_output_bytes) {
+        throw std::invalid_argument("命令输出上限必须在 1 字节到 1 MiB 之间");
+    }
+    validate_command_resource_limits(resource_limits_, "CommandRunner resource_limits");
+    command_detail::validate_process_resource_support(resource_limits_);
+    if (!options.allowed_programs.empty() && !options.recipes.empty()) {
+        throw std::invalid_argument("原始程序授权与固定命令 recipe 不能同时启用");
+    }
+    if (options.allowed_programs.empty() && options.recipes.empty()) {
+        throw std::invalid_argument("至少需要显式授权一个命令程序");
+    }
+
+    auto catalog = build_command_catalog(options, max_timeout_seconds_);
+    allowed_programs_ = std::move(catalog.allowed_programs);
+    resolved_programs_ = std::move(catalog.resolved_programs);
+    recipes_ = std::move(catalog.recipes);
+    recipe_indices_ = std::move(catalog.recipe_indices);
+    recipe_names_ = std::move(catalog.recipe_names);
+
+    auto sandbox = command_detail::build_sandbox_config(
+        options.require_os_sandbox, root_, resolved_programs_, std::move(options.read_only_paths),
+        std::move(options.denied_read_paths));
+    sandbox_executable_ = std::move(sandbox.executable);
+    sandbox_arguments_ = std::move(sandbox.arguments);
+    sandbox_backend_ = std::move(sandbox.backend);
+    sandbox_sets_working_directory_ = sandbox.sets_working_directory;
+    sandbox_wraps_command_ = !sandbox_executable_.empty();
+    if (sandbox.uses_native_process_sandbox) {
+#if defined(_WIN32)
+        native_sandbox_ = std::make_unique<NativeSandboxState>();
+        native_sandbox_->windows_appcontainer = command_detail::WindowsAppContainer::create(
+            root_, std::move(sandbox.allowed_executables), std::move(sandbox.read_only_paths),
+            std::move(sandbox.denied_paths));
+#else
+        throw std::logic_error("当前平台未实现声明的原生进程沙箱");
+#endif
+    }
+}
+
+CommandRunner::~CommandRunner() = default;
+
+const std::vector<std::string>& CommandRunner::allowed_programs() const noexcept {
+    return allowed_programs_;
+}
+
+const std::vector<std::string>& CommandRunner::recipe_names() const noexcept {
+    return recipe_names_;
+}
+
+bool CommandRunner::uses_recipes() const noexcept {
+    return !recipes_.empty();
+}
+
+bool CommandRunner::requires_approval() const noexcept {
+    return static_cast<bool>(approval_);
+}
+
+bool CommandRunner::is_os_sandboxed() const noexcept {
+    return sandbox_backend_ != "none";
+}
+
+const std::string& CommandRunner::sandbox_backend() const noexcept {
+    return sandbox_backend_;
+}
+
+Json CommandRunner::definition() const {
+    if (uses_recipes()) {
+        std::string descriptions;
+        for (const auto& recipe : recipes_) {
+            if (!descriptions.empty()) {
+                descriptions += "; ";
+            }
+            descriptions += recipe.name;
+            if (!recipe.description.empty()) {
+                descriptions += "=" + recipe.description;
+            }
+            if (recipe.verification) {
+                descriptions += " [verification]";
+            }
+        }
+        return {{"type", "function"},
+                {"function",
+                 {{"name", "run_recipe"},
+                  {"description",
+                   "Run one fixed command recipe authorized by the user policy. Arguments, cwd and "
+                   "timeout are immutable. Available recipes: " +
+                       descriptions},
+                  {"parameters",
+                   {{"type", "object"},
+                    {"properties",
+                     {{"recipe",
+                       {{"type", "string"},
+                        {"enum", recipe_names_},
+                        {"description", "Exact recipe name from the user policy."}}}}},
+                    {"required", Json::array({"recipe"})},
+                    {"additionalProperties", false}}}}}};
+    }
+    return {{"type", "function"},
+            {"function",
+             {{"name", "run_command"},
+              {"description",
+               "Run one user-approved executable without a shell. Use it for focused build or "
+               "test commands. The working directory must remain inside the workspace."},
+              {"parameters",
+               {{"type", "object"},
+                {"properties",
+                 {{"program",
+                   {{"type", "string"},
+                    {"enum", allowed_programs_},
+                    {"description", "Exact executable label approved by the user."}}},
+                  {"args",
+                   {{"type", "array"},
+                    {"items", {{"type", "string"}}},
+                    {"maxItems", runtime_bounds::max_command_arguments},
+                    {"description",
+                     "Argument vector. Shell syntax and string interpolation are not used."}}},
+                  {"cwd",
+                   {{"type", "string"},
+                    {"description",
+                     "Relative working directory inside the workspace. Defaults to '.'."}}},
+                  {"timeout_seconds",
+                   {{"type", "integer"},
+                    {"minimum", 1},
+                    {"maximum", max_timeout_seconds_},
+                    {"description", "Wall-clock timeout. Defaults to the runner policy."}}}}},
+                {"required", Json::array({"program"})},
+                {"additionalProperties", false}}}}}};
+}
+
+Json CommandRunner::run(const Json& arguments) const {
+    if (!uses_recipes()) {
+        auto result = run_command(arguments);
+        result["verification_eligible"] = true;
+        return result;
+    }
+    if (!arguments.is_object() || arguments.size() != 1) {
+        throw std::invalid_argument("run_recipe 只接受 recipe 字段");
+    }
+    const auto recipe_name = require_string(arguments, "recipe");
+    const auto found = recipe_indices_.find(recipe_name);
+    if (found == recipe_indices_.end()) {
+        throw std::invalid_argument("recipe 未获用户 policy 授权: " + recipe_name);
+    }
+    const auto& recipe = recipes_.at(found->second);
+    Json expanded = {{"program", recipe.program},
+                     {"args", recipe.args},
+                     {"cwd", recipe.cwd.generic_string()},
+                     {"timeout_seconds", recipe.timeout_seconds}};
+    auto result = run_command(expanded);
+    result["recipe"] = recipe.name;
+    result["verification_eligible"] = recipe.verification;
+    return result;
+}
+
+Json CommandRunner::run_command(const Json& arguments) const {
+    const auto invocation =
+        parse_invocation(arguments, root_, resolved_programs_, default_timeout_seconds_,
+                         max_timeout_seconds_, resource_limits_);
+    diagnostics::emit(
+        diagnostics::Level::debug, "command.prepared",
+        {{"program", invocation.program},
+         {"cwd", invocation.cwd_label},
+         {"argument_count", invocation.arguments.size()},
+         {"timeout_seconds", invocation.timeout_seconds},
+         {"resource_limits", command_resource_limits_to_json(invocation.resource_limits)},
+         {"sandbox", sandbox_backend_}});
+    if (const auto stopped =
+            stopped_result(invocation, task_control_, is_os_sandboxed(), sandbox_backend_)) {
+        return *stopped;
+    }
+
+    const CommandApprovalRequest approval_request{.program = invocation.program,
+                                                  .args = invocation.arguments,
+                                                  .cwd = invocation.cwd_label,
+                                                  .timeout_seconds = invocation.timeout_seconds};
+    if (approval_) {
+        const auto decision = approval_(approval_request);
+        if (!decision.approved()) {
+            if (decision.cancels_run() && task_control_ != nullptr) {
+                task_control_->request_cancel();
+            }
+            return approval_result(invocation, decision, is_os_sandboxed(), sandbox_backend_);
+        }
+    }
+    if (const auto stopped =
+            stopped_result(invocation, task_control_, is_os_sandboxed(), sandbox_backend_)) {
+        return *stopped;
+    }
+
+    auto request = process_request(invocation, root_, sandbox_wraps_command_, sandbox_executable_,
+                                   sandbox_arguments_, sandbox_sets_working_directory_,
+                                   max_output_bytes_, task_control_);
+#if defined(_WIN32)
+    if (native_sandbox_ != nullptr) {
+        request.windows_appcontainer = native_sandbox_->windows_appcontainer;
+    }
+#endif
+#if defined(__APPLE__)
+    auto process =
+        sandbox_backend_ == "macos-seatbelt"
+            ? execute_macos_sandboxed_process(std::move(request), root_, sandbox_arguments_)
+            : command_detail::execute_process(std::move(request));
+#else
+    auto process = command_detail::execute_process(std::move(request));
+#endif
+    diagnostics::emit(diagnostics::Level::debug, "command.completed",
+                      {{"program", invocation.program},
+                       {"status", process.status},
+                       {"exit_code", process.exit_code.value_or(-1)},
+                       {"duration_ms", process.duration_ms},
+                       {"output_truncated", process.output_truncated}});
+    return process_result_json(invocation, std::move(process), is_os_sandboxed(), sandbox_backend_);
+}
+
+} // namespace mint
