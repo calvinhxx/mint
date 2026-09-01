@@ -24,20 +24,6 @@
 namespace mint {
 namespace {
 
-void reconcile_command_output_limit(ToolRuntimeSettings& runtime, std::size_t& legacy_limit) {
-    const ToolRuntimeSettings defaults;
-    const bool legacy_overridden = legacy_limit != defaults.command_output_bytes;
-    const bool runtime_overridden = runtime.command_output_bytes != defaults.command_output_bytes;
-    if (legacy_overridden && runtime_overridden && legacy_limit != runtime.command_output_bytes) {
-        throw std::invalid_argument("command output limit 配置冲突");
-    }
-    if (legacy_overridden) {
-        runtime.command_output_bytes = legacy_limit;
-    } else {
-        legacy_limit = runtime.command_output_bytes;
-    }
-}
-
 void upsert_workspace_risk(Json& changed_files, const std::string& path, std::string_view status) {
     for (auto entry = changed_files.begin(); entry != changed_files.end();) {
         if (entry->is_object() && entry->value("path", "") == path) {
@@ -84,7 +70,6 @@ ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions optio
       task_control_(options.task_control),
       change_set_approval_(std::move(options.change_set_approval)),
       policy_fingerprint_(std::move(options.policy_fingerprint)) {
-    reconcile_command_output_limit(runtime_, options.max_command_output_bytes);
     validate_tool_runtime_settings(runtime_, "ToolRegistry runtime");
     std::error_code error;
     root_ = std::filesystem::weakly_canonical(std::move(root), error);
@@ -183,7 +168,7 @@ ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions optio
                                  .recipes = std::move(options.command_recipes),
                                  .default_timeout_seconds = options.default_command_timeout_seconds,
                                  .max_timeout_seconds = max_timeout_seconds,
-                                 .max_output_bytes = options.max_command_output_bytes,
+                                 .max_output_bytes = runtime_.command_output_bytes,
                                  .resource_limits = runtime_.command_resources,
                                  .task_control = task_control_,
                                  .approval = std::move(options.command_approval),

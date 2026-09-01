@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -39,8 +38,6 @@ struct ToolRegistryOptions {
     std::string policy_fingerprint{};
     long default_command_timeout_seconds = runtime_defaults::command_timeout_seconds;
     long max_command_timeout_seconds = runtime_defaults::max_command_timeout_seconds;
-    // Backward-compatible alias. New policy code should use runtime.command_output_bytes.
-    std::size_t max_command_output_bytes = runtime_defaults::command_output_bytes;
     std::shared_ptr<TaskControl> task_control{};
     CommandApproval command_approval{};
     ChangeSetApproval change_set_approval{};
