@@ -1,0 +1,42 @@
+# mint
+
+mint 是一个轻量的通用 AI Agent 工具。它提供模型循环、工具调用、权限控制、任务恢复和结果验证，可以直接使用 CLI，也可以从源码嵌入 C++ 内核。
+
+当前自带文件读取、搜索、编辑和固定命令工具，适合本地工程与目录自动化。
+
+## 快速试用
+
+当前源码版本是 `v1.0.0`。版本历史正在重新建立，新的预编译包尚未发布，请先从源码构建。
+
+需要 CMake 3.24+、Ninja、C++20 编译器和 vcpkg。macOS / Linux 用 `export VCPKG_ROOT=/path/to/vcpkg`，Windows PowerShell 用 `$env:VCPKG_ROOT = 'C:\src\vcpkg'`。
+
+~~~bash
+cmake --preset vcpkg-release
+cmake --build --preset vcpkg-release
+
+./build/vcpkg-release/mint init --root .
+./build/vcpkg-release/mint run --root . --demo "总结这个目录"
+~~~
+
+`--demo` 不需要 API Key，不会修改文件或运行项目命令。
+
+## 文档
+
+所有文档都从这里进入：
+
+- 入门
+  - [开始使用](docs/getting-started/quickstart.md)：安装、配置模型和日常命令。
+- 原理
+  - [工作原理与代码结构](docs/concepts/architecture.md)：一次任务如何经过模型、工具和验证。
+- 指南
+  - [安全、权限与任务恢复](docs/guides/safety-and-recovery.md)：文件边界、固定命令和中断处理。
+- 开发
+  - [构建、测试与验收](docs/development/testing.md)：本地验证命令和证据边界。
+- 项目
+  - [项目状态](docs/project/roadmap.md)：已有能力、当前工作和已知边界。
+  - [更新记录](CHANGELOG.md)：每个版本的主要变化。
+  - [安全漏洞报告](SECURITY.md)：私下报告安全问题和确认当前安全边界。
+
+第一次使用只需阅读“开始使用”；需要理解源码时，再阅读“工作原理与代码结构”。
+
+源码构建矩阵覆盖 Windows、macOS、Linux 的 x64 / ARM64，具体 preset 见[构建、测试与验收](docs/development/testing.md)。三个系统都默认隔离项目命令：macOS 使用 Seatbelt，Linux 使用 Bubblewrap，Windows 使用 AppContainer。
