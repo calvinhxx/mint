@@ -905,11 +905,19 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
          "run_command",
          {{"program", program},
           {"args", mint::Json::array({"--command-helper", "write", inside.generic_string()})}}}));
+    ASSERT_TRUE(allowed.contains("exit_code")) << allowed.dump(2);
     MINT_EXPECT(allowed.at("sandboxed").get<bool>() &&
                     allowed.at("sandbox_backend").get<std::string>() == expected_backend,
                 "command result carries auditable sandbox metadata");
-    MINT_EXPECT(allowed.at("exit_code") == 0 && std::filesystem::exists(inside),
+    MINT_EXPECT(allowed.at("ok").get<bool>() && allowed.at("status") == "exited" &&
+                    allowed.at("exit_code") == 0 && std::filesystem::exists(inside),
                 "sandbox permits writes inside the workspace: " + allowed.dump());
+#if defined(__linux__)
+    for (const auto reserved : {".agents", ".codex", ".git", ".husky"}) {
+        MINT_EXPECT(!std::filesystem::exists(workspace / reserved),
+                    "sandbox setup does not create reserved workspace directories");
+    }
+#endif
 
 #if defined(__APPLE__)
     const auto lifecycle_directory = workspace / "build";

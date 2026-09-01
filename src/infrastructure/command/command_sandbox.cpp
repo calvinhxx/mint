@@ -338,15 +338,6 @@ bool is_covered_by(const std::vector<std::filesystem::path>& roots,
                        [&](const auto& root) { return is_path_within(root, candidate); });
 }
 
-bool is_reserved_workspace_directory(const std::filesystem::path& root,
-                                     const std::filesystem::path& path) {
-    if (path.parent_path() != root) {
-        return false;
-    }
-    static const std::unordered_set<std::string> names = {".agents", ".codex", ".git", ".husky"};
-    return names.contains(path.filename().string());
-}
-
 std::filesystem::path bubblewrap_executable() {
     if (const char* override_path = std::getenv("MINT_BWRAP_PATH");
         override_path != nullptr && *override_path != '\0') {
@@ -450,9 +441,6 @@ SandboxConfig linux_sandbox_config(
             continue;
         }
         if (!exists) {
-            if (is_reserved_workspace_directory(root, denied)) {
-                append_option(config.arguments, "--tmpfs", denied);
-            }
             continue;
         }
         if (std::filesystem::is_directory(denied, error) && !error) {
