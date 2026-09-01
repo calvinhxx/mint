@@ -1,4 +1,4 @@
-#include "console.hpp"
+#include "support/console.hpp"
 
 #include "mint/runtime/terminal_text.hpp"
 

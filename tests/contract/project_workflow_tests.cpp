@@ -17,7 +17,8 @@
 #include <gtest/gtest.h>
 
 #if defined(_WIN32)
-// Windows SDK base types must be declared before aclapi.h.
+// EN: Windows SDK base types must be declared before aclapi.h.
+// ZH-CN: 必须先声明 Windows SDK 基础类型，再包含 aclapi.h。
 #include <windows.h>
 
 #include <aclapi.h>
@@ -214,6 +215,7 @@ void test_project_detection(const std::filesystem::path& root) {
     const auto cmake = root / "cmake-project";
     std::filesystem::create_directories(cmake / "src");
     std::filesystem::create_directories(cmake / "tests");
+    std::filesystem::create_directories(cmake / "locales");
     write_text(cmake / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\n");
     write_text(cmake / "README.md", "# Fixture\n");
 
@@ -231,6 +233,7 @@ void test_project_detection(const std::filesystem::path& root) {
                 "CMake detection records evidence");
     MINT_EXPECT(contains_string(cmake_suggestion.policy.at("write_paths"), "src") &&
                     contains_string(cmake_suggestion.policy.at("write_paths"), "tests") &&
+                    contains_string(cmake_suggestion.policy.at("write_paths"), "locales") &&
                     contains_string(cmake_suggestion.policy.at("write_paths"), "CMakeLists.txt"),
                 "CMake policy suggests existing source and manifest paths");
 #if !defined(_WIN32)

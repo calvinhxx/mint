@@ -19,7 +19,7 @@ foreach(source IN LISTS application_sources)
     foreach(include IN LISTS mint_includes)
         string(REGEX REPLACE ".*[<\"]mint/([^>\"]+)[>\"].*" "\\1" include_path
                      "${include}")
-        if(NOT include_path MATCHES "^(application|domain|ports|runtime)/" AND
+        if(NOT include_path MATCHES "^(application|domain|localization|ports|runtime)/" AND
            NOT include_path STREQUAL "version.hpp")
             file(RELATIVE_PATH relative "${SOURCE_DIR}" "${source}")
             list(APPEND violations "${relative}: mint/${include_path}")
@@ -39,6 +39,7 @@ set(allowed_targets
     mint_agent
     mint_project
     mint::domain
+    mint::localization
     mint::ports
     mint::runtime
 )
@@ -55,6 +56,6 @@ if(violations)
     list(REMOVE_DUPLICATES violations)
     list(JOIN violations ", " violation_list)
     message(FATAL_ERROR
-        "Application may depend only on domain, ports, and runtime: ${violation_list}"
+        "Application may depend only on domain, localization, ports, and runtime: ${violation_list}"
     )
 endif()

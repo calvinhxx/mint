@@ -21,6 +21,7 @@ mint_add_gtest(mint_unit_tests
         unit/command_line_tests.cpp
         unit/diagnostic_log_tests.cpp
         unit/interaction_protocol_tests.cpp
+        unit/localization_tests.cpp
         unit/path_tests.cpp
         unit/runtime_settings_tests.cpp
     LIBRARIES mint_cli
@@ -121,6 +122,38 @@ add_test(
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyModuleLayout.cmake"
 )
 set_tests_properties(architecture_module_layout PROPERTIES LABELS "architecture;contract")
+
+add_test(
+    NAME localization_catalog_contract
+    COMMAND "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/tests/scripts/localization_catalog_tests.py"
+        "${PROJECT_SOURCE_DIR}"
+)
+set_tests_properties(localization_catalog_contract PROPERTIES LABELS "unit;contract;localization")
+
+add_test(
+    NAME comment_language_contract
+    COMMAND "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/tests/scripts/comment_language_tests.py"
+        "${PROJECT_SOURCE_DIR}"
+)
+set_tests_properties(comment_language_contract PROPERTIES LABELS "contract;style")
+
+add_test(NAME mint_cli_help_english COMMAND $<TARGET_FILE:mint> --lang en --help)
+set_tests_properties(
+    mint_cli_help_english
+    PROPERTIES
+        LABELS "smoke;localization"
+        PASS_REGULAR_EXPRESSION "Lightweight General AI Agent"
+)
+
+add_test(NAME mint_cli_help_chinese COMMAND $<TARGET_FILE:mint> --lang zh-CN --help)
+set_tests_properties(
+    mint_cli_help_chinese
+    PROPERTIES
+        LABELS "smoke;localization"
+        PASS_REGULAR_EXPRESSION "轻量通用 AI Agent"
+)
 
 add_test(NAME mint_cli_version COMMAND $<TARGET_FILE:mint> --version)
 string(REPLACE "." "\\." mint_version_regex "${PROJECT_VERSION}")
@@ -243,3 +276,10 @@ add_test(
         -P "${PROJECT_SOURCE_DIR}/tests/verify_project_workflow.cmake"
 )
 set_tests_properties(mint_project_cli_workflow PROPERTIES LABELS "project;acceptance")
+
+# EN: Keep assertions deterministic regardless of the developer machine's locale. Individual
+#     language-selection tests still override this with --lang.
+# ZH-CN: 无论开发机器使用何种区域设置，都保持断言结果稳定；各语言选择测试仍通过
+#        --lang 单独覆盖该值。
+get_property(mint_registered_tests DIRECTORY PROPERTY TESTS)
+set_tests_properties(${mint_registered_tests} PROPERTIES ENVIRONMENT "MINT_LANG=zh-CN")

@@ -46,5 +46,8 @@ function(mint_add_gtest target)
         EXTRA_ARGS ${test_EXTRA_ARGS}
         TEST_LIST registered_tests
     )
-    set_tests_properties(${registered_tests} PROPERTIES LABELS "${test_LABELS}")
+    set_tests_properties(${registered_tests} PROPERTIES
+        ENVIRONMENT "MINT_LANG=zh-CN"
+        LABELS "${test_LABELS}"
+    )
 endfunction()

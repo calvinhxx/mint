@@ -1,5 +1,5 @@
 #include "command_line.hpp"
-#include "console.hpp"
+#include "support/console.hpp"
 
 #include <chrono>
 #include <fstream>

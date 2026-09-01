@@ -1,9 +1,9 @@
 #include "mint/application/agent.hpp"
 #include "mint/tools/tool_registry.hpp"
 
-#include "agent_command.hpp"
-#include "console.hpp"
+#include "agent/agent_command.hpp"
 #include "scripted_http_server.hpp"
+#include "support/console.hpp"
 
 #include <chrono>
 #include <filesystem>

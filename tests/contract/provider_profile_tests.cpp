@@ -1,4 +1,4 @@
-#include "provider_command.hpp"
+#include "provider/provider_command.hpp"
 
 #include "mint/infrastructure/config.hpp"
 #include "mint/infrastructure/model_provider_client.hpp"

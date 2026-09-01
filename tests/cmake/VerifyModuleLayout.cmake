@@ -4,17 +4,51 @@ endif()
 
 set(required_directories
     src/application/agent
+    src/cli/agent
+    src/cli/project
+    src/cli/provider
+    src/cli/support
     src/infrastructure/command
     src/infrastructure/filesystem
     src/infrastructure/logging
     src/infrastructure/model
     src/infrastructure/persistence
+    src/tools/changes
+    src/tools/registry
+    src/tools/workspace
 )
 foreach(directory IN LISTS required_directories)
     if(NOT IS_DIRECTORY "${SOURCE_DIR}/${directory}")
         message(FATAL_ERROR "Missing module directory: ${directory}")
     endif()
 endforeach()
+
+file(GLOB ungrouped_cli_sources
+    LIST_DIRECTORIES FALSE
+    "${SOURCE_DIR}/src/cli/*.cpp"
+    "${SOURCE_DIR}/src/cli/*.hpp"
+)
+list(REMOVE_ITEM ungrouped_cli_sources
+    "${SOURCE_DIR}/src/cli/command_line.cpp"
+    "${SOURCE_DIR}/src/cli/command_line.hpp"
+    "${SOURCE_DIR}/src/cli/main.cpp"
+)
+if(ungrouped_cli_sources)
+    message(FATAL_ERROR
+        "CLI feature files must belong to a feature module: ${ungrouped_cli_sources}"
+    )
+endif()
+
+file(GLOB ungrouped_tool_sources
+    LIST_DIRECTORIES FALSE
+    "${SOURCE_DIR}/src/tools/*.cpp"
+    "${SOURCE_DIR}/src/tools/*.hpp"
+)
+if(ungrouped_tool_sources)
+    message(FATAL_ERROR
+        "Tool implementation files must belong to a feature module: ${ungrouped_tool_sources}"
+    )
+endif()
 
 file(GLOB ungrouped_infrastructure_sources
     LIST_DIRECTORIES FALSE

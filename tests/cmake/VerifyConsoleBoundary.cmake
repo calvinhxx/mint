@@ -9,7 +9,7 @@ file(GLOB_RECURSE production_sources
     "${SOURCE_DIR}/src/*.hpp"
 )
 
-set(system_console_adapter "${SOURCE_DIR}/src/cli/console.cpp")
+set(system_console_adapter "${SOURCE_DIR}/src/cli/support/console.cpp")
 set(violations)
 foreach(source IN LISTS production_sources)
     if(source STREQUAL system_console_adapter)
@@ -30,6 +30,6 @@ endforeach()
 if(violations)
     list(JOIN violations ", " violation_list)
     message(FATAL_ERROR
-        "Direct process I/O is restricted to src/cli/console.cpp: ${violation_list}"
+        "Direct process I/O is restricted to src/cli/support/console.cpp: ${violation_list}"
     )
 endif()

@@ -219,8 +219,10 @@ int run_command_helper(int argc, char** argv) {
         name += ".txt";
         const auto descriptor = ::open(name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
         if (descriptor < 0) {
-            // APFS rejects non-UTF-8 names. Force the same post-command snapshot failure there so
-            // the fail-closed checkpoint path remains covered on every POSIX test host.
+            // EN: APFS rejects non-UTF-8 names. Force the same post-command snapshot failure there
+            //     so the fail-closed checkpoint path remains covered on every POSIX test host.
+            // ZH-CN: APFS 会拒绝非 UTF-8 名称，因此在该平台主动制造相同的命令后快照失败，
+            //        让失败关闭的 checkpoint 路径在所有 POSIX 测试主机上都得到覆盖。
             std::ofstream fallback("src/invalid-name-unsupported.bin", std::ios::binary);
             fallback << std::string(4096, 'x');
             return fallback ? 0 : 11;

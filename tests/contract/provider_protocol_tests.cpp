@@ -1,9 +1,9 @@
 #include "mint/infrastructure/config.hpp"
 #include "mint/infrastructure/model_provider_client.hpp"
 
-#include "agent_command.hpp"
+#include "agent/agent_command.hpp"
 #include "model/model_protocol.hpp"
-#include "provider_command.hpp"
+#include "provider/provider_command.hpp"
 #include "scripted_http_server.hpp"
 
 #include <algorithm>

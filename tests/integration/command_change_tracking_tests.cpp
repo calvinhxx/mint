@@ -4,11 +4,11 @@
 #include "mint/version.hpp"
 
 #include "agent/agent_execution.hpp"
-#include "path_identity.hpp"
+#include "changes/workspace_change_tracker.hpp"
 #include "test_executable.hpp"
 #include "test_workspace.hpp"
-#include "tool_support.hpp"
-#include "workspace_change_tracker.hpp"
+#include "workspace/path_identity.hpp"
+#include "workspace/workspace_support.hpp"
 
 #include <filesystem>
 #include <initializer_list>
