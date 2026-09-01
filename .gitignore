@@ -1,0 +1,12 @@
+/build/
+/vcpkg_installed/
+/cmake-build-*/
+/.cache/
+__pycache__/
+*.py[cod]
+.qtcreator/
+.DS_Store
+/config.json
+/config-*.json
+/.mint-session.json
+/.mint-events.jsonl
