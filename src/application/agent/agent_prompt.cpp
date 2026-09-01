@@ -87,7 +87,8 @@ std::string Agent::system_prompt() const {
             "you must continue instead of answering finally. ";
     }
 
-    prompt += "The harness may stop the task for cancellation, total time budget, or turn budget. "
+    prompt += "The harness may stop the task for cancellation, total time, turn, or cumulative "
+              "token budget. "
               "Base the final answer on observed evidence, mention relevant relative file paths, "
               "and answer in the same language as the user.";
     return prompt;

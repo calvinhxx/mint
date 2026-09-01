@@ -48,7 +48,7 @@ bool tool_limits_match(const Json& snapshot, const ToolCapabilities& capabilitie
 
 bool capabilities_match(const Json& snapshot, const ToolCapabilities& capabilities,
                         bool require_verification, std::size_t max_context_bytes,
-                        int schema_version) {
+                        std::size_t max_total_tokens, int schema_version) {
     const bool recipes_match =
         snapshot.contains("command_recipes")
             ? snapshot.at("command_recipes") == Json(capabilities.command_recipes)
@@ -82,6 +82,7 @@ bool capabilities_match(const Json& snapshot, const ToolCapabilities& capabiliti
            snapshot.value("command_sandbox_backend", "none") ==
                capabilities.command_sandbox_backend &&
            snapshot.value("max_context_bytes", std::size_t{0}) == max_context_bytes &&
+           snapshot.value("max_total_tokens", std::size_t{0}) == max_total_tokens &&
            snapshot.contains("allowed_programs") &&
            snapshot.at("allowed_programs") == Json(capabilities.allowed_programs) &&
            recipes_match && policy_matches && changeset_approval_matches &&
@@ -135,7 +136,7 @@ Json make_checkpoint_document(const std::string& status, const std::string& user
                               const std::deque<ToolCall>& pending_calls,
                               const std::optional<ToolCall>& in_flight_call,
                               const AgentTools& tools, bool require_verification,
-                              std::size_t max_context_bytes) {
+                              std::size_t max_context_bytes, std::size_t max_total_tokens) {
     const auto capabilities = tools.capabilities();
     Json pending = Json::array();
     for (const auto& call : pending_calls) {
@@ -175,11 +176,13 @@ Json make_checkpoint_document(const std::string& status, const std::string& user
               {"require_verification", require_verification},
               {"command_sandboxed", capabilities.command_sandboxed},
               {"command_sandbox_backend", capabilities.command_sandbox_backend},
-              {"max_context_bytes", max_context_bytes}}}};
+              {"max_context_bytes", max_context_bytes},
+              {"max_total_tokens", max_total_tokens}}}};
 }
 
 RestoredSession restore_session(const Json& snapshot, AgentTools& tools, bool require_verification,
-                                std::size_t max_context_bytes, bool retry_in_flight_tool) {
+                                std::size_t max_context_bytes, std::size_t max_total_tokens,
+                                bool retry_in_flight_tool) {
     const auto capabilities = tools.capabilities();
     const auto schema_version = snapshot.is_object() ? snapshot.value("schema_version", 0) : 0;
     if (!snapshot.is_object() || !supported_session_schema(schema_version)) {
@@ -187,7 +190,7 @@ RestoredSession restore_session(const Json& snapshot, AgentTools& tools, bool re
     }
 
     const auto status = snapshot.value("status", "");
-    if (status == "completed" || status == "failed") {
+    if (status == "completed" || status == "failed" || status == "budget_exhausted") {
         throw std::invalid_argument("该会话已经结束，不能再次恢复");
     }
     if (!valid_session_status(status)) {
@@ -200,7 +203,7 @@ RestoredSession restore_session(const Json& snapshot, AgentTools& tools, bool re
         throw std::invalid_argument("会话快照缺少能力策略");
     }
     if (!capabilities_match(snapshot.at("capabilities"), capabilities, require_verification,
-                            max_context_bytes, schema_version)) {
+                            max_context_bytes, max_total_tokens, schema_version)) {
         throw std::invalid_argument("恢复会话时必须使用与原任务相同的能力授权");
     }
     if (!has_required_session_state(snapshot, schema_version)) {

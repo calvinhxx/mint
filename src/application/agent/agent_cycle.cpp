@@ -128,6 +128,7 @@ void AgentRun::accept_model_reply(ModelReply& reply) {
                              {"tool_call_count", pending_calls_.size()},
                              {"has_text", !reply.text.empty()},
                              {"usage", model_usage_json(reply.usage)},
+                             {"token_budget", token_budget_to_json(result_.model)},
                              {"metadata", model_metadata_json(reply.metadata)}});
     save_checkpoint("running");
 }

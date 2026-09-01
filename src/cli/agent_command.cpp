@@ -173,6 +173,7 @@ int run_agent_command(CommandLine command_line, std::optional<ManagedTaskPaths>&
     Agent agent(*model, tools, agent_output,
                 AgentOptions{.max_turns = command_line.max_turns,
                              .max_context_bytes = command_line.max_context_bytes,
+                             .max_total_tokens = command_line.max_total_tokens,
                              .require_verification_after_write = command_line.require_verification,
                              .resume_session = command_line.resume_session,
                              .retry_in_flight_tool = command_line.retry_inflight},

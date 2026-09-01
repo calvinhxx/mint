@@ -32,6 +32,7 @@ mint_add_gtest(mint_unit_tests
 mint_add_gtest(mint_tests
     SOURCES
         integration/agent_loop_tests.cpp
+        integration/agent_token_budget_tests.cpp
         integration/change_transaction_tests.cpp
         integration/command_change_tracking_tests.cpp
         integration/command_runner_tests.cpp

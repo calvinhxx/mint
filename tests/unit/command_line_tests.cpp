@@ -120,4 +120,15 @@ TEST(CommandLineTest, ExposesLegacyHelpOnlyWhenRequested) {
     EXPECT_NE(output.str().find("--allow-write"), std::string::npos);
 }
 
+TEST(CommandLineTest, ParsesOptionalLegacyTaskTokenBudget) {
+    const auto bounded = parse({"mint", "--max-total-tokens", "12345", "检查项目"});
+    EXPECT_EQ(bounded.max_total_tokens, 12345U);
+
+    const auto disabled = parse({"mint", "--max-total-tokens", "0", "检查项目"});
+    EXPECT_EQ(disabled.max_total_tokens, 0U);
+
+    EXPECT_THROW((void)parse({"mint", "--max-total-tokens", "100000001", "检查项目"}),
+                 std::invalid_argument);
+}
+
 } // namespace

@@ -100,6 +100,7 @@ void print_legacy_help(Console& console, const char* program) {
         << " [--allow-write] [--allow-write-path 路径] [--allow-command 程序]"
            " [--require-verification] [--approve-each-command] [--approve-each-changeset]"
            " [--max-seconds 秒] [--unsafe-no-command-sandbox] [--max-context-bytes 字节]"
+           " [--max-total-tokens 数量]"
            " [--log-level 级别] [--log-file-level 级别] [--log-dir 路径]"
            " [--events-jsonl 路径] [--session 路径] [--resume] [--retry-inflight] [--json]"
            " [--config JSON路径] [--policy JSON路径] [--root 路径] [--max-turns 数量] [问题]\n\n"
@@ -120,7 +121,8 @@ void print_legacy_help(Console& console, const char* program) {
         << runtime_bounds::max_turns << "\n"
         << "  --max-seconds 秒          1 到 " << runtime_bounds::max_seconds << "\n"
         << "  --max-context-bytes 字节  " << runtime_bounds::min_context_bytes << " 到 "
-        << runtime_bounds::max_context_bytes << "\n";
+        << runtime_bounds::max_context_bytes << "\n"
+        << "  --max-total-tokens 数量   0（关闭）到 " << runtime_bounds::max_total_tokens << "\n";
 }
 
 std::filesystem::path normalized_path(std::filesystem::path path) {
@@ -287,6 +289,16 @@ CommandLine parse_arguments(int argc, char** argv) {
                 throw std::invalid_argument("--max-context-bytes 超出允许范围");
             }
             result.max_context_bytes = parsed;
+            result.policy_conflict = true;
+        } else if (argument == "--max-total-tokens") {
+            if (++index >= argc) {
+                throw std::invalid_argument("--max-total-tokens 后面需要一个数字");
+            }
+            const auto parsed = parse_unsigned(argv[index], "--max-total-tokens");
+            if (parsed > runtime_bounds::max_total_tokens) {
+                throw std::invalid_argument("--max-total-tokens 超出允许范围");
+            }
+            result.max_total_tokens = parsed;
             result.policy_conflict = true;
         } else if (argument.starts_with('-')) {
             throw std::invalid_argument("未知选项: " + argument);

@@ -11,12 +11,14 @@ namespace runtime_defaults {
 
 inline constexpr std::size_t max_turns = 12;
 inline constexpr std::size_t max_context_bytes = 24 * 1024;
+inline constexpr std::size_t max_total_tokens = 0;
 inline constexpr long max_seconds = 0;
 inline constexpr long command_timeout_seconds = 60;
 inline constexpr long max_command_timeout_seconds = 120;
 
 inline constexpr std::size_t managed_max_turns = 24;
 inline constexpr std::size_t managed_max_context_bytes = 128 * 1024;
+inline constexpr std::size_t managed_max_total_tokens = 100'000;
 inline constexpr long managed_max_seconds = 900;
 inline constexpr long managed_recipe_timeout_seconds = 300;
 inline constexpr std::size_t read_file_bytes = 16 * 1024;
@@ -42,6 +44,7 @@ inline constexpr std::size_t min_turns = 1;
 inline constexpr std::size_t max_turns = 50;
 inline constexpr std::size_t min_context_bytes = 16 * 1024;
 inline constexpr std::size_t max_context_bytes = 8 * 1024 * 1024;
+inline constexpr std::size_t max_total_tokens = 100'000'000;
 inline constexpr long max_seconds = 86400;
 inline constexpr std::size_t max_command_arguments = 64;
 inline constexpr std::size_t max_command_argument_bytes = 32 * 1024;

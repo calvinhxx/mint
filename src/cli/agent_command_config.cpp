@@ -25,6 +25,7 @@ std::optional<TaskPolicy> apply_task_policy(CommandLine& command_line) {
     command_line.require_verification = policy.require_verification;
     command_line.max_turns = policy.max_turns;
     command_line.max_context_bytes = policy.max_context_bytes;
+    command_line.max_total_tokens = policy.max_total_tokens;
     command_line.max_seconds = policy.max_seconds;
     command_line.tool_limits = policy.tool_limits;
     command_line.policy_fingerprint = policy.fingerprint;

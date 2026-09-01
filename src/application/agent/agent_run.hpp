@@ -29,6 +29,7 @@ class AgentRun final {
     void emit(std::string type, Json data = Json::object());
     [[nodiscard]] std::string stop_reason() const;
     [[nodiscard]] std::optional<AgentResult> finish_if_stopped();
+    [[nodiscard]] std::optional<AgentResult> finish_if_token_budget_exhausted();
     [[nodiscard]] AgentResult finish(std::string status, std::string reason, std::string answer);
 
     void execute_next_tool();

@@ -28,6 +28,7 @@ struct TaskPolicy {
     bool require_verification = false;
     std::size_t max_turns = runtime_defaults::max_turns;
     std::size_t max_context_bytes = runtime_defaults::max_context_bytes;
+    std::size_t max_total_tokens = runtime_defaults::max_total_tokens;
     long max_seconds = runtime_defaults::max_seconds;
     std::string fingerprint{};
     ToolRuntimeSettings tool_limits{};

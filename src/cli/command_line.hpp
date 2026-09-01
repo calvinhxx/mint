@@ -53,6 +53,7 @@ struct CommandLine {
     std::string log_file_level;
     std::size_t max_turns = runtime_defaults::max_turns;
     std::size_t max_context_bytes = runtime_defaults::max_context_bytes;
+    std::size_t max_total_tokens = runtime_defaults::max_total_tokens;
     long max_seconds = runtime_defaults::max_seconds;
     ToolRuntimeSettings tool_limits;
     std::string question;

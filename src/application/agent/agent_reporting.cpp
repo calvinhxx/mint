@@ -81,6 +81,18 @@ void print_final_state(std::ostream& output, const AgentResult& result) {
         }
         output << '\n';
     }
+    if (result.model.max_total_tokens != 0) {
+        const auto budget = token_budget_to_json(result.model);
+        output << "[Token预算] 已报告 " << result.model.total_tokens << " / "
+               << result.model.max_total_tokens << " tokens";
+        const auto coverage = budget.at("usage_coverage").get<std::string>();
+        if (coverage == "unavailable") {
+            output << "（provider 未返回 usage，无法按累计 Token 停止）";
+        } else if (coverage == "partial") {
+            output << "（部分模型调用未返回 usage，只能按已报告值停止）";
+        }
+        output << '\n';
+    }
     output << "[任务状态] " << result.status << '\n'
            << "[验证状态] " << result.verification_status << '\n';
     if (result.changes.files.empty()) {

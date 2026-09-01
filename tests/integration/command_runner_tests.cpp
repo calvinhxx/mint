@@ -579,6 +579,7 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
             {"require_verification", true},
             {"max_turns", 24},
             {"max_context_bytes", 131072},
+            {"max_total_tokens", 100000},
             {"max_seconds", 900},
             {"tool_limits",
              {{"read_file_bytes", 4096},
@@ -602,7 +603,8 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
                     policy.recipes.front().verification && policy.require_verification,
                 "task policy loads write paths, immutable recipes and verification contract");
     MINT_EXPECT(policy.max_turns == 24 && policy.max_context_bytes == 131072 &&
-                    policy.max_seconds == 900 && !policy.fingerprint.empty(),
+                    policy.max_total_tokens == 100000 && policy.max_seconds == 900 &&
+                    !policy.fingerprint.empty(),
                 "task policy loads bounded task budgets and a stable fingerprint");
     MINT_EXPECT(policy.tool_limits.read_file_bytes == 4096 &&
                     policy.tool_limits.list_max_entries == 50 &&
@@ -679,6 +681,23 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
         rejected_unknown = std::string(error.what()).find("未知字段") != std::string::npos;
     }
     MINT_EXPECT(rejected_unknown, "task policy rejects unknown capability fields");
+
+    const auto disabled_budget =
+        mint::parse_task_policy({{"schema_version", 1}, {"max_total_tokens", 0}});
+    const auto omitted_budget = mint::parse_task_policy({{"schema_version", 1}});
+    MINT_EXPECT(disabled_budget.max_total_tokens == 0 &&
+                    disabled_budget.fingerprint == omitted_budget.fingerprint,
+                "zero disables the task token budget without changing legacy policy identity");
+    expect_failure(
+        [] { (void)mint::parse_task_policy({{"schema_version", 1}, {"max_total_tokens", -1}}); },
+        "task policy rejects negative cumulative token budgets");
+    expect_failure(
+        [] {
+            (void)mint::parse_task_policy(
+                {{"schema_version", 1},
+                 {"max_total_tokens", mint::runtime_bounds::max_total_tokens + 1}});
+        },
+        "task policy rejects cumulative token budgets above the supported bound");
 
     const auto unverifiable_policy = temporary.path() / "unverifiable-policy.json";
     write_text(unverifiable_policy, mint::Json{{"schema_version", 1},

@@ -191,7 +191,7 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
     reject_unknown_fields(document,
                           {"schema_version", "write_paths", "command_read_paths", "recipes",
                            "require_verification", "max_turns", "max_context_bytes", "max_seconds",
-                           "tool_limits"},
+                           "max_total_tokens", "tool_limits"},
                           "task policy");
     if (!document.contains("schema_version") ||
         !document.at("schema_version").is_number_integer() ||
@@ -206,6 +206,8 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
     policy.max_context_bytes =
         optional_size(document, "max_context_bytes", policy.max_context_bytes,
                       runtime_bounds::min_context_bytes, runtime_bounds::max_context_bytes);
+    policy.max_total_tokens = optional_size(document, "max_total_tokens", policy.max_total_tokens,
+                                            0, runtime_bounds::max_total_tokens);
     policy.max_seconds =
         optional_long(document, "max_seconds", policy.max_seconds, 0, runtime_bounds::max_seconds);
     if (document.contains("tool_limits")) {
@@ -302,6 +304,11 @@ TaskPolicy parse_task_policy(const Json& document, std::filesystem::path source_
                        {"max_turns", policy.max_turns},
                        {"max_context_bytes", policy.max_context_bytes},
                        {"max_seconds", policy.max_seconds}};
+    // Keep policies that omit the disabled budget fingerprint-compatible with
+    // checkpoints written before this optional field existed.
+    if (policy.max_total_tokens != 0) {
+        normalized["max_total_tokens"] = policy.max_total_tokens;
+    }
     if (policy.tool_limits != ToolRuntimeSettings{}) {
         normalized["tool_limits"] = tool_runtime_settings_to_json(policy.tool_limits);
     }

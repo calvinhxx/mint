@@ -34,7 +34,9 @@ AgentRun::AgentRun(ModelClient& model, AgentTools& tools, std::ostream& output,
     : model_(model), tools_(tools), output_(output), options_(options), services_(services),
       started_at_(std::chrono::steady_clock::now()), user_request_(requested_task),
       system_prompt_(std::move(system_prompt)),
-      conversation_(Conversation::start(system_prompt_, user_request_)) {}
+      conversation_(Conversation::start(system_prompt_, user_request_)) {
+    result_.model.max_total_tokens = options_.max_total_tokens;
+}
 
 AgentResult AgentRun::run() {
     initialize();
@@ -49,6 +51,9 @@ AgentResult AgentRun::run() {
         if (tools_.workspace_integrity_failed()) {
             return finish("failed", "workspace_integrity_failed",
                           "命令修改了未获授权或无法安全审计的工作区路径；任务已失败。");
+        }
+        if (auto exhausted = finish_if_token_budget_exhausted()) {
+            return std::move(*exhausted);
         }
         if (!pending_calls_.empty()) {
             execute_next_tool();
@@ -74,6 +79,11 @@ AgentResult AgentRun::run() {
 
         if (auto stopped = finish_if_stopped()) {
             return std::move(*stopped);
+        }
+        if ((reply.text.empty() || !pending_calls_.empty()) &&
+            token_budget_exhausted(result_.model)) {
+            auto exhausted = finish_if_token_budget_exhausted();
+            return std::move(*exhausted);
         }
         if (final_answer_only && !pending_calls_.empty()) {
             return finish(
@@ -120,9 +130,12 @@ void AgentRun::initialize() {
         throw std::invalid_argument("找不到要恢复的会话快照");
     }
 
-    auto restored = restore_session(services_.session_repository->load(), tools_,
-                                    options_.require_verification_after_write,
-                                    options_.max_context_bytes, options_.retry_in_flight_tool);
+    auto restored = restore_session(
+        services_.session_repository->load(), tools_, options_.require_verification_after_write,
+        options_.max_context_bytes, options_.max_total_tokens, options_.retry_in_flight_tool);
+    if (restored.result.model.max_total_tokens != options_.max_total_tokens) {
+        throw std::invalid_argument("恢复会话时必须使用与原任务相同的累计 Token 预算");
+    }
     user_request_ = std::move(restored.user_request);
     conversation_ = Conversation::restore(std::move(restored.messages));
     result_ = std::move(restored.result);
@@ -145,6 +158,7 @@ void AgentRun::start_task() {
           {"previous_turns", result_.turns},
           {"max_turns_this_run", options_.max_turns},
           {"max_context_bytes", options_.max_context_bytes},
+          {"max_total_tokens", options_.max_total_tokens},
           {"max_context_estimated_tokens",
            model_token_estimation::from_serialized_bytes(options_.max_context_bytes)},
           {"require_verification", options_.require_verification_after_write}});
@@ -163,7 +177,7 @@ void AgentRun::save_checkpoint(const std::string& status) {
         services_.session_repository->save(make_checkpoint_document(
             status, user_request_, conversation_.messages(), result_, pending_calls_,
             in_flight_call_, tools_, options_.require_verification_after_write,
-            options_.max_context_bytes));
+            options_.max_context_bytes, options_.max_total_tokens));
         tools_.finalize_change_transaction();
     }
 }
@@ -188,6 +202,19 @@ std::optional<AgentResult> AgentRun::finish_if_stopped() {
                   reason == "cancelled" ? "任务已取消。" : "任务超过总时间预算。");
 }
 
+std::optional<AgentResult> AgentRun::finish_if_token_budget_exhausted() {
+    if (!token_budget_exhausted(result_.model)) {
+        return std::nullopt;
+    }
+    emit("token_budget_exhausted", {{"max_total_tokens", options_.max_total_tokens},
+                                    {"reported_total_tokens", result_.model.total_tokens},
+                                    {"model_calls", result_.model.calls},
+                                    {"usage_reports", result_.model.usage_reports},
+                                    {"pending_tool_call_count", pending_calls_.size()}});
+    return finish("budget_exhausted", "max_total_tokens_exhausted",
+                  "达到任务累计 Token 预算；已停止后续模型请求和工具执行。");
+}
+
 AgentResult AgentRun::finish(std::string status, std::string reason, std::string answer) {
     if (status != "failed" && tools_.workspace_integrity_failed()) {
         status = "failed";
@@ -208,6 +235,9 @@ AgentResult AgentRun::finish(std::string status, std::string reason, std::string
           {"duration_ms", result_.duration_ms},
           {"verification_status", result_.verification_status},
           {"tool_calls", result_.execution.tool_calls},
+          {"max_total_tokens", result_.model.max_total_tokens},
+          {"reported_total_tokens", result_.model.total_tokens},
+          {"token_usage_coverage", token_budget_to_json(result_.model).at("usage_coverage")},
           {"model", model_summary_to_json(result_.model)},
           {"changed_file_count", result_.changes.files.size()}});
     if (result_.completed) {

@@ -157,6 +157,7 @@ ProjectSuggestion suggest_project_policy(const std::filesystem::path& root) {
                          {"require_verification", require_verification},
                          {"max_turns", runtime_defaults::managed_max_turns},
                          {"max_context_bytes", runtime_defaults::managed_max_context_bytes},
+                         {"max_total_tokens", runtime_defaults::managed_max_total_tokens},
                          {"max_seconds", runtime_defaults::managed_max_seconds},
                          {"tool_limits", tool_runtime_settings_to_json({})}};
     return suggestion;

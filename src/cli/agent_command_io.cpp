@@ -337,6 +337,11 @@ void print_run_configuration(const CommandLine& command_line, const ToolRegistry
            << (command_line.max_seconds == 0 ? "不限制"
                                              : std::to_string(command_line.max_seconds) + " 秒")
            << '\n'
+           << "累计 Token 预算: "
+           << (command_line.max_total_tokens == 0
+                   ? "不限制"
+                   : std::to_string(command_line.max_total_tokens) + " tokens")
+           << '\n'
            << "会话模式: " << (command_line.resume_session ? "恢复" : "新任务") << '\n';
     if (managed_task.has_value()) {
         output << "任务 ID: " << escape_terminal_field(managed_task->id) << '\n'

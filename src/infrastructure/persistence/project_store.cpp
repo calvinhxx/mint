@@ -184,7 +184,7 @@ bool is_resumable_status(const std::string& status) {
 }
 
 bool is_terminal_status(const std::string& status) {
-    return status == "completed" || status == "failed";
+    return status == "completed" || status == "failed" || status == "budget_exhausted";
 }
 
 std::optional<ManagedTaskMode> parse_task_mode(const Json& task) {

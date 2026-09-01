@@ -76,14 +76,19 @@ constexpr auto task_start_fields = std::to_array<FieldRule>({
     {"previous_turns", FieldKind::integer},
     {"max_turns", FieldKind::integer},
     {"max_context_bytes", FieldKind::integer},
+    {"max_total_tokens", FieldKind::integer},
     {"verification_required", FieldKind::boolean},
 });
 constexpr auto task_finish_fields = std::to_array<FieldRule>({
     {"status", FieldKind::text},
+    {"stop_reason", FieldKind::text},
     {"turns", FieldKind::integer},
     {"duration_ms", FieldKind::integer},
     {"verification_status", FieldKind::text},
     {"tool_calls", FieldKind::integer},
+    {"max_total_tokens", FieldKind::integer},
+    {"reported_total_tokens", FieldKind::integer},
+    {"token_usage_coverage", FieldKind::text},
     {"changed_file_count", FieldKind::integer},
 });
 constexpr auto tool_fields = std::to_array<FieldRule>({

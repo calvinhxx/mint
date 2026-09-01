@@ -1,8 +1,41 @@
 #include "agent_model_summary.hpp"
 
+#include <limits>
 #include <stdexcept>
+#include <string_view>
 
 namespace mint::agent_detail {
+namespace {
+
+void saturating_add(std::size_t& target, std::size_t value) noexcept {
+    constexpr auto maximum = std::numeric_limits<std::size_t>::max();
+    target = value > maximum - target ? maximum : target + value;
+}
+
+std::string_view token_usage_coverage(const ModelSummary& summary) noexcept {
+    if (summary.calls == 0) {
+        return "not_started";
+    }
+    if (summary.usage_reports == 0) {
+        return "unavailable";
+    }
+    return summary.usage_reports == summary.calls ? "complete" : "partial";
+}
+
+std::string_view token_budget_enforcement(const ModelSummary& summary) noexcept {
+    if (summary.max_total_tokens == 0) {
+        return "disabled";
+    }
+    if (summary.calls == 0) {
+        return "not_started";
+    }
+    if (summary.usage_reports == summary.calls) {
+        return "reported_usage";
+    }
+    return summary.usage_reports == 0 ? "unavailable" : "best_effort";
+}
+
+} // namespace
 
 Json model_usage_json(const ModelUsage& usage) {
     if (!usage.available) {
@@ -70,11 +103,23 @@ void record_model_call(ModelSummary& summary, const ModelReply& reply) {
     }
     if (reply.usage.available) {
         ++summary.usage_reports;
-        summary.prompt_tokens += reply.usage.prompt_tokens;
-        summary.completion_tokens += reply.usage.completion_tokens;
-        summary.total_tokens += reply.usage.total_tokens;
-        summary.cached_tokens += reply.usage.cached_tokens;
+        saturating_add(summary.prompt_tokens, reply.usage.prompt_tokens);
+        saturating_add(summary.completion_tokens, reply.usage.completion_tokens);
+        saturating_add(summary.total_tokens, reply.usage.total_tokens);
+        saturating_add(summary.cached_tokens, reply.usage.cached_tokens);
     }
+}
+
+bool token_budget_exhausted(const ModelSummary& summary) noexcept {
+    return summary.max_total_tokens != 0 && summary.total_tokens >= summary.max_total_tokens;
+}
+
+Json token_budget_to_json(const ModelSummary& summary) {
+    return {{"max_total_tokens", summary.max_total_tokens},
+            {"reported_total_tokens", summary.total_tokens},
+            {"usage_coverage", token_usage_coverage(summary)},
+            {"enforcement", token_budget_enforcement(summary)},
+            {"exhausted", token_budget_exhausted(summary)}};
 }
 
 Json model_summary_to_json(const ModelSummary& summary) {
@@ -87,6 +132,7 @@ Json model_summary_to_json(const ModelSummary& summary) {
         {"completion_tokens", summary.completion_tokens},
         {"total_tokens", summary.total_tokens},
         {"cached_tokens", summary.cached_tokens},
+        {"token_budget", token_budget_to_json(summary)},
         {"cache_hit_rate",
          model_usage::cache_hit_rate_json(summary.cached_tokens, summary.prompt_tokens)},
         {"streamed_calls", summary.streamed_calls},
@@ -140,6 +186,29 @@ ModelSummary model_summary_from_json(const Json& value) {
     summary.streamed_calls = read_optional_size("streamed_calls");
     summary.stream_events = read_optional_size("stream_events");
     summary.streamed_bytes = read_optional_size("streamed_bytes");
+    if (value.contains("token_budget")) {
+        const auto& budget = value.at("token_budget");
+        if (!budget.is_object() || !budget.contains("max_total_tokens") ||
+            !budget.at("max_total_tokens").is_number_unsigned() ||
+            !budget.contains("reported_total_tokens") ||
+            !budget.at("reported_total_tokens").is_number_unsigned() ||
+            !budget.contains("usage_coverage") || !budget.at("usage_coverage").is_string() ||
+            !budget.contains("enforcement") || !budget.at("enforcement").is_string() ||
+            !budget.contains("exhausted") || !budget.at("exhausted").is_boolean()) {
+            throw std::invalid_argument("会话模型摘要 Token 预算无效");
+        }
+        summary.max_total_tokens = budget.at("max_total_tokens").get<std::size_t>();
+        if (summary.max_total_tokens > runtime_bounds::max_total_tokens) {
+            throw std::invalid_argument("会话模型摘要 Token 预算超出范围");
+        }
+        const auto expected = token_budget_to_json(summary);
+        if (budget.at("reported_total_tokens") != expected.at("reported_total_tokens") ||
+            budget.at("usage_coverage") != expected.at("usage_coverage") ||
+            budget.at("enforcement") != expected.at("enforcement") ||
+            budget.at("exhausted") != expected.at("exhausted")) {
+            throw std::invalid_argument("会话模型摘要 Token 预算状态不一致");
+        }
+    }
     if (!value.contains("duration_ms") || !value.at("duration_ms").is_number_integer() ||
         !value.contains("adapter") || !value.at("adapter").is_string() ||
         !value.contains("model") || !value.at("model").is_string()) {
@@ -184,6 +253,11 @@ ModelSummary model_summary_from_json(const Json& value) {
         summary.usage_reports > summary.calls || summary.duration_ms < 0 ||
         summary.cached_tokens > summary.prompt_tokens || summary.streamed_calls > summary.calls) {
         throw std::invalid_argument("会话模型摘要计数不一致");
+    }
+    if (summary.usage_reports == 0 &&
+        (summary.prompt_tokens != 0 || summary.completion_tokens != 0 ||
+         summary.total_tokens != 0 || summary.cached_tokens != 0)) {
+        throw std::invalid_argument("会话模型摘要在缺少 usage 时包含 Token 计数");
     }
     return summary;
 }

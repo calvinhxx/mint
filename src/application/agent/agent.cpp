@@ -18,6 +18,9 @@ Agent::Agent(ModelClient& model, AgentTools& tools, std::ostream& output, AgentO
         options_.max_context_bytes > runtime_bounds::max_context_bytes) {
         throw std::invalid_argument("max_context_bytes 必须在 16 KiB 到 8 MiB 之间");
     }
+    if (options_.max_total_tokens > runtime_bounds::max_total_tokens) {
+        throw std::invalid_argument("max_total_tokens 超出允许范围");
+    }
     const auto capabilities = tools_.capabilities();
     if (options_.require_verification_after_write &&
         (!capabilities.write_enabled || !capabilities.commands_enabled)) {

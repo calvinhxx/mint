@@ -301,6 +301,9 @@ void test_project_detection(const std::filesystem::path& root) {
                     generic_suggestion.policy.at("write_paths").empty() &&
                     generic_suggestion.policy.at("recipes").empty(),
                 "unknown project starts read-only");
+    MINT_EXPECT(generic_suggestion.policy.at("max_total_tokens") ==
+                    mint::runtime_defaults::managed_max_total_tokens,
+                "new managed projects start with a finite cumulative token safety limit");
 }
 
 void test_project_and_task_store(const std::filesystem::path& root) {
@@ -450,6 +453,18 @@ void test_project_and_task_store(const std::filesystem::path& root) {
     MINT_EXPECT(listed_failure != tasks_after_failure.end() && listed_failure->status == "failed" &&
                     !listed_failure->completed && !listed_failure->resumable,
                 "task listing preserves failed without treating the project state as corrupt");
+
+    const auto exhausted_task = store.create_task("exhaust the cumulative token budget");
+    mint::SessionStore(exhausted_task.session)
+        .save({{"schema_version", mint::session_schema_version},
+               {"workspace_root", store.workspace_root().generic_string()},
+               {"status", "budget_exhausted"},
+               {"verification_status", "not_required"},
+               {"turns", std::size_t{2}}});
+    const auto exhausted_summary = store.task_summary(exhausted_task.id);
+    MINT_EXPECT(exhausted_summary.has_value() && exhausted_summary->status == "budget_exhausted" &&
+                    !exhausted_summary->completed && !exhausted_summary->resumable,
+                "an exhausted task token budget is a stable non-resumable terminal state");
 
     MINT_EXPECT(!store.task_summary("missing-task").has_value(), "missing task query is explicit");
     expect_failure([&] { (void)store.task_paths("../escape"); },
