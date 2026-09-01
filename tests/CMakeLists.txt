@@ -31,13 +31,13 @@ mint_add_gtest(mint_unit_tests
 
 mint_add_gtest(mint_tests
     SOURCES
-        mint_tests.cpp
         integration/agent_loop_tests.cpp
         integration/change_transaction_tests.cpp
         integration/command_change_tracking_tests.cpp
         integration/command_runner_tests.cpp
         integration/model_client_tests.cpp
         integration/terminal_output_tests.cpp
+        integration/tool_registry_tests.cpp
     LIBRARIES mint::core mint_cli mint_test_support
     INCLUDE_DIRECTORIES
         "${PROJECT_SOURCE_DIR}/src/application"
@@ -49,48 +49,48 @@ target_compile_definitions(mint_tests PRIVATE
     MINT_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
 
-mint_add_gtest(mint_v1_2_tests
-    SOURCES v1_2/policy_and_recovery_tests.cpp
+mint_add_gtest(mint_policy_recovery_tests
+    SOURCES contract/policy_and_recovery_tests.cpp
     LIBRARIES mint::core
-    TEST_PREFIX "contract.v1_2."
-    LABELS v1.2 contract
+    TEST_PREFIX "contract.policy."
+    LABELS contract policy recovery
 )
 
-mint_add_gtest(mint_v1_3_tests
+mint_add_gtest(mint_project_workflow_tests
     GTEST_MAIN
-    SOURCES v1_3/project_workflow_tests.cpp
+    SOURCES contract/project_workflow_tests.cpp
     LIBRARIES mint::core
-    TEST_PREFIX "contract.v1_3."
-    LABELS v1.3 contract
+    TEST_PREFIX "contract.project."
+    LABELS contract project
 )
 
-mint_add_gtest(mint_v1_4_tests
+mint_add_gtest(mint_provider_protocol_tests
     GTEST_MAIN
-    SOURCES v1_4/provider_contract_tests.cpp
+    SOURCES contract/provider_protocol_tests.cpp
     LIBRARIES mint_cli mint_test_support
     INCLUDE_DIRECTORIES
         "${PROJECT_SOURCE_DIR}/src/cli"
         "${PROJECT_SOURCE_DIR}/src/infrastructure"
-    TEST_PREFIX "contract.v1_4."
-    LABELS v1.4 contract acceptance
+    TEST_PREFIX "contract.protocol."
+    LABELS contract provider acceptance
 )
 
-mint_add_gtest(mint_v1_5_tests
+mint_add_gtest(mint_provider_tests
     GTEST_MAIN
     SOURCES
-        v1_5/mainstream_provider_tests.cpp
-        v1_5/model_usage_tests.cpp
-        v1_5/provider_acceptance_tests.cpp
-        v1_5/provider_profile_tests.cpp
+        contract/model_usage_tests.cpp
+        contract/provider_acceptance_tests.cpp
+        contract/provider_catalog_tests.cpp
+        contract/provider_profile_tests.cpp
     LIBRARIES mint_cli mint_test_support
     INCLUDE_DIRECTORIES
         "${PROJECT_SOURCE_DIR}/src/application"
         "${PROJECT_SOURCE_DIR}/src/cli"
         "${PROJECT_SOURCE_DIR}/src/infrastructure"
-    TEST_PREFIX "contract.v1_5."
-    LABELS v1.5 contract acceptance
+    TEST_PREFIX "contract.provider."
+    LABELS contract provider acceptance
 )
-target_compile_definitions(mint_v1_5_tests PRIVATE
+target_compile_definitions(mint_provider_tests PRIVATE
     MINT_PROVIDER_CONFIG_DIR="${PROJECT_SOURCE_DIR}/configs/providers"
 )
 
@@ -153,7 +153,7 @@ add_test(
 set_tests_properties(
     mint_provider_profile
     PROPERTIES
-        LABELS "v1.5;smoke"
+        LABELS "provider;smoke"
         PASS_REGULAR_EXPRESSION "\"provider\":\"groq\""
 )
 
@@ -162,21 +162,21 @@ add_test(
     COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/tests/scripts/provider_regression_tests.py"
 )
-set_tests_properties(provider_regression_script_unit PROPERTIES LABELS "unit;v1.5")
+set_tests_properties(provider_regression_script_unit PROPERTIES LABELS "unit;provider")
 
 add_test(
     NAME fixture_regression_script_unit
     COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/tests/scripts/fixture_regression_tests.py"
 )
-set_tests_properties(fixture_regression_script_unit PROPERTIES LABELS "unit;v1.5")
+set_tests_properties(fixture_regression_script_unit PROPERTIES LABELS "unit;acceptance")
 
 add_test(
     NAME release_evidence_script_unit
     COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/tests/scripts/release_evidence_tests.py"
 )
-set_tests_properties(release_evidence_script_unit PROPERTIES LABELS "unit;v1.5")
+set_tests_properties(release_evidence_script_unit PROPERTIES LABELS "unit;release")
 
 add_test(
     NAME validate_version_script_unit
@@ -202,7 +202,7 @@ add_test(
 set_tests_properties(
     provider_regression_offline
     PROPERTIES
-        LABELS "v1.5;acceptance"
+        LABELS "provider;acceptance"
         PASS_REGULAR_EXPRESSION "\"operation\": \"provider_regression\""
 )
 
@@ -212,31 +212,31 @@ add_test(
         "${PROJECT_SOURCE_DIR}/scripts/fixture-regression.py"
         --mint $<TARGET_FILE:mint>
         --config "${PROJECT_SOURCE_DIR}/configs/providers/openai-responses.json"
-        --fixture "${PROJECT_SOURCE_DIR}/tests/fixtures/v1_broken_project"
+        --fixture "${PROJECT_SOURCE_DIR}/tests/fixtures/broken_cpp_project"
 )
 set_tests_properties(
     fixture_regression_offline
     PROPERTIES
-        LABELS "v1.5;acceptance"
+        LABELS "provider;acceptance"
         PASS_REGULAR_EXPRESSION "\"operation\": \"fixture_regression\""
 )
 
 add_test(
-    NAME v1_fixture_lifecycle
+    NAME broken_fixture_lifecycle
     COMMAND "${CMAKE_COMMAND}"
-        -DFIXTURE_DIR=${PROJECT_SOURCE_DIR}/tests/fixtures/v1_broken_project
-        -DWORK_DIR=${PROJECT_BINARY_DIR}/v1-fixture-lifecycle
+        -DFIXTURE_DIR=${PROJECT_SOURCE_DIR}/tests/fixtures/broken_cpp_project
+        -DWORK_DIR=${PROJECT_BINARY_DIR}/broken-fixture-lifecycle
         -DCTEST_COMMAND=${CMAKE_CTEST_COMMAND}
-        -P "${PROJECT_SOURCE_DIR}/tests/verify_v1_fixture.cmake"
+        -P "${PROJECT_SOURCE_DIR}/tests/verify_fixture_lifecycle.cmake"
 )
-set_tests_properties(v1_fixture_lifecycle PROPERTIES LABELS acceptance)
+set_tests_properties(broken_fixture_lifecycle PROPERTIES LABELS acceptance)
 
 add_test(
-    NAME mint_v1_3_cli_workflow
+    NAME mint_project_cli_workflow
     COMMAND "${CMAKE_COMMAND}"
         -DMINT_EXECUTABLE=$<TARGET_FILE:mint>
-        -DFIXTURE_DIR=${PROJECT_SOURCE_DIR}/tests/fixtures/v1_broken_project
-        -DSTATE_DIR=${PROJECT_BINARY_DIR}/v1-3-cli-state
-        -P "${PROJECT_SOURCE_DIR}/tests/verify_v1_3_cli.cmake"
+        -DFIXTURE_DIR=${PROJECT_SOURCE_DIR}/tests/fixtures/broken_cpp_project
+        -DSTATE_DIR=${PROJECT_BINARY_DIR}/project-cli-state
+        -P "${PROJECT_SOURCE_DIR}/tests/verify_project_workflow.cmake"
 )
-set_tests_properties(mint_v1_3_cli_workflow PROPERTIES LABELS "v1.3;acceptance")
+set_tests_properties(mint_project_cli_workflow PROPERTIES LABELS "project;acceptance")

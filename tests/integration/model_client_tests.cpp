@@ -1,5 +1,5 @@
-#include "mint/config.hpp"
-#include "mint/model_client.hpp"
+#include "mint/infrastructure/config.hpp"
+#include "mint/infrastructure/model_provider_client.hpp"
 
 #include "scripted_http_server.hpp"
 #include "test_workspace.hpp"
@@ -26,7 +26,7 @@ TEST(ModelConfigTest, LoadsAndValidatesJson) {
                            R"("max_retries":4,"retry_initial_delay_ms":123,)"
                            R"("max_completion_tokens":777})");
 
-    const auto config = mint::load_chat_completions_config(valid_path);
+    const auto config = mint::load_model_provider_config(valid_path);
     EXPECT_EQ(config.api_url, "https://example.test/chat/completions");
     EXPECT_EQ(config.api_key, "secret");
     EXPECT_EQ(config.model, "example-model");
@@ -41,17 +41,17 @@ TEST(ModelConfigTest, LoadsAndValidatesJson) {
     const auto invalid_path = temporary.path() / "invalid.json";
     write_text(invalid_path, R"({"api_url":"https://example.test","api_key":"x"})");
     try {
-        (void)mint::load_chat_completions_config(invalid_path);
+        (void)mint::load_model_provider_config(invalid_path);
         FAIL() << "missing model must be rejected";
     } catch (const std::runtime_error& error) {
         EXPECT_NE(std::string(error.what()).find("model"), std::string::npos);
     }
 
     EXPECT_THROW(
-        (void)mint::ChatCompletionsClient({.api_url = "https://example.test/chat/completions",
-                                           .model = "example-model",
-                                           .connect_timeout_seconds = 0,
-                                           .request_timeout_seconds = 1}),
+        (void)mint::ModelProviderClient({.api_url = "https://example.test/chat/completions",
+                                         .model = "example-model",
+                                         .connect_timeout_seconds = 0,
+                                         .request_timeout_seconds = 1}),
         std::invalid_argument);
 }
 
@@ -68,7 +68,7 @@ TEST(ModelClientTest, RetriesWithServerDirectedBackoff) {
          {.status = 503, .body = transient_error},
          {.body = success}});
     std::vector<mint::ModelProgress> progress;
-    mint::ChatCompletionsClient client(
+    mint::ModelProviderClient client(
         {.api_url = server.url("/v1/chat/completions"),
          .model = "retry-test-model",
          .connect_timeout_seconds = 2,

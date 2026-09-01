@@ -1,5 +1,5 @@
-#include "mint/task_runtime.hpp"
-#include "mint/tools.hpp"
+#include "mint/runtime/task_control.hpp"
+#include "mint/tools/tool_registry.hpp"
 #include "mint/version.hpp"
 
 #include "command_helper.hpp"
@@ -168,20 +168,6 @@ TEST(ToolRegistryTest, ConfigurableRuntimeLimits) {
     const auto definitions = tools.definitions().dump();
     MINT_EXPECT(definitions.find("Defaults to 1024") != std::string::npos,
                 "tool schema reports the configured read chunk default");
-
-    mint::ToolRegistry legacy_limit(workspace,
-                                    mint::ToolRegistryOptions{.max_command_output_bytes = 512});
-    MINT_EXPECT(legacy_limit.runtime_settings().command_output_bytes == 512,
-                "legacy command output option maps into the unified runtime settings");
-    expect_failure(
-        [&] {
-            auto conflicting = limits;
-            conflicting.command_output_bytes = 1024;
-            (void)mint::ToolRegistry(
-                workspace,
-                mint::ToolRegistryOptions{.max_command_output_bytes = 512, .runtime = conflicting});
-        },
-        "conflicting legacy and unified command output limits are rejected");
 
     auto invalid = limits;
     invalid.search_max_hits = 0;

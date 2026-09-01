@@ -346,7 +346,7 @@ def _provider_matrix(root: Path) -> tuple[list[str], str]:
 
 
 def _fixture_digest(root: Path) -> str:
-    fixture = root / "tests" / "fixtures" / "v1_broken_project"
+    fixture = root / "tests" / "fixtures" / "broken_cpp_project"
     inventory: dict[str, str] = {}
     for path in sorted(fixture.rglob("*")):
         relative = path.relative_to(fixture)
@@ -361,7 +361,7 @@ def _fixture_digest(root: Path) -> str:
             "CMakeLists.txt",
             "README.md",
             "include/calculator.hpp",
-            "policy.v1_2.json",
+            "policy.json",
             "src/calculator.cpp",
             "tests/calculator_tests.cpp",
         },
@@ -378,7 +378,7 @@ def _fixture_digest(root: Path) -> str:
 
 def _fixture_policy_limits(root: Path) -> dict[str, int]:
     policy = _load_json(
-        root / "tests" / "fixtures" / "v1_broken_project" / "policy.v1_2.json",
+        root / "tests" / "fixtures" / "broken_cpp_project" / "policy.json",
         "release fixture policy",
     )
     limits: dict[str, int] = {}

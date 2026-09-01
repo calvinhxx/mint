@@ -26,7 +26,7 @@ SPEC.loader.exec_module(fixture_regression)
 import release_evidence  # noqa: E402
 
 GROQ_CONFIG = ROOT / "configs" / "providers" / "groq-chat.json"
-FIXTURE = ROOT / "tests" / "fixtures" / "v1_broken_project"
+FIXTURE = ROOT / "tests" / "fixtures" / "broken_cpp_project"
 BASELINE = {
     "configure": "passed",
     "build": "passed",
@@ -576,7 +576,7 @@ class FixtureRegressionTests(unittest.TestCase):
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["status"], "passed")
 
     def test_live_mode_stops_before_model_work_when_the_key_is_missing(self) -> None:
-        fixture = ROOT / "tests" / "fixtures" / "v1_broken_project"
+        fixture = ROOT / "tests" / "fixtures" / "broken_cpp_project"
         config = ROOT / "configs" / "providers" / "openai-responses.json"
         inspection = {
             "operation": "inspect",

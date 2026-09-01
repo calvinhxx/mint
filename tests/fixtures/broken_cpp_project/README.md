@@ -1,4 +1,4 @@
-# V1 acceptance fixture
+# Broken calculator fixture
 
 This tiny C++ project contains one intentional implementation bug.
 

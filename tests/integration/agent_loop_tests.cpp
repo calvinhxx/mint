@@ -1,9 +1,10 @@
-#include "mint/agent.hpp"
-#include "mint/event_log.hpp"
-#include "mint/model_client.hpp"
-#include "mint/session_store.hpp"
-#include "mint/task_runtime.hpp"
-#include "mint/tools.hpp"
+#include "mint/application/agent.hpp"
+#include "mint/infrastructure/event_log.hpp"
+#include "mint/infrastructure/model_provider_client.hpp"
+#include "mint/infrastructure/session_store.hpp"
+#include "mint/ports/model_client.hpp"
+#include "mint/runtime/task_control.hpp"
+#include "mint/tools/tool_registry.hpp"
 #include "mint/version.hpp"
 
 #include "agent/agent_context.hpp"
@@ -158,7 +159,7 @@ class ProviderBudgetModel final : public mint::ModelClient {
 class WritingModel final : public mint::ModelClient {
   public:
     mint::ModelReply complete(const mint::Json& messages, const mint::Json& tools) override {
-        MINT_EXPECT(tools.size() == 6, "write-enabled agent exposes six tools in v1.2");
+        MINT_EXPECT(tools.size() == 6, "write-enabled agent exposes six tools");
         MINT_EXPECT(messages.at(0).at("content").get<std::string>().find("apply_patch") !=
                         std::string::npos,
                     "write-enabled system prompt explains apply_patch");
@@ -218,7 +219,7 @@ class PatchThenVerifyModel final : public mint::ModelClient {
     explicit PatchThenVerifyModel(std::string program) : program_(std::move(program)) {}
 
     mint::ModelReply complete(const mint::Json& messages, const mint::Json& tools) override {
-        MINT_EXPECT(tools.size() == 7, "write-and-command agent exposes seven tools in v1.2");
+        MINT_EXPECT(tools.size() == 7, "write-and-command agent exposes seven tools");
         const auto system_prompt = messages.at(0).at("content").get<std::string>();
         MINT_EXPECT(system_prompt.find("apply_patch") != std::string::npos,
                     "validation system prompt explains apply_patch");

@@ -24,7 +24,7 @@ from release_evidence import EvidenceError, release_source_digest, require_relea
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "configs" / "provider-regression.json"
 DEFAULT_CONFIG = ROOT / "configs" / "providers" / "openai-responses.json"
-DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "v1_broken_project"
+DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "broken_cpp_project"
 EXPECTED_SOURCE_CHANGES = {"FIX_REPORT.md", "src/calculator.cpp"}
 IGNORED_WORKSPACE_DIRECTORIES = {"build"}
 PROCESS_STATUSES = {"failed", "invalid_json", "start_failed", "timed_out"}
@@ -188,7 +188,7 @@ def validate_fixture(fixture: Path) -> dict[str, str]:
         "CMakeLists.txt",
         "README.md",
         "include/calculator.hpp",
-        "policy.v1_2.json",
+        "policy.json",
         "src/calculator.cpp",
         "tests/calculator_tests.cpp",
     }
@@ -197,7 +197,7 @@ def validate_fixture(fixture: Path) -> dict[str, str]:
         raise FixtureRegressionError("fixture_validation", "fixture source inventory is unexpected")
 
     try:
-        policy = json.loads((fixture / "policy.v1_2.json").read_text(encoding="utf-8"))
+        policy = json.loads((fixture / "policy.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise FixtureRegressionError("fixture_validation", "fixture policy is invalid") from error
     if not isinstance(policy, dict):
@@ -631,7 +631,7 @@ def run_agent(executable: Path, config: Path, project: Path, runtime: Path) -> t
         "--config",
         str(config),
         "--policy",
-        str(project / "policy.v1_2.json"),
+        str(project / "policy.json"),
         "--root",
         str(project),
         "--session",

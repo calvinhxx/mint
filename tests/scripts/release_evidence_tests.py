@@ -334,11 +334,11 @@ class ReleaseEvidenceTests(unittest.TestCase):
     def test_source_digest_ignores_only_release_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "release" / "evidence" / "v1.5.0").mkdir(parents=True)
+            (root / "release" / "evidence" / "v1.0.0").mkdir(parents=True)
             (root / "src.cpp").write_text("one\n", encoding="utf-8")
             (root / "keep.cpp").write_text("keep\n", encoding="utf-8")
             (root / "CHANGELOG.md").write_text("draft\n", encoding="utf-8")
-            evidence = root / "release" / "evidence" / "v1.5.0" / "provider-regression.json"
+            evidence = root / "release" / "evidence" / "v1.0.0" / "provider-regression.json"
             evidence.write_text("{}\n", encoding="utf-8")
             subprocess.run(["git", "init", "-q", str(root)], check=True)
             subprocess.run(["git", "-C", str(root), "add", "."], check=True)

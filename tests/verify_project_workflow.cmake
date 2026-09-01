@@ -13,13 +13,13 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 if(NOT init_result EQUAL 0)
-    message(FATAL_ERROR "v1.3 init failed: ${init_output}${init_error}")
+    message(FATAL_ERROR "project init failed: ${init_output}${init_error}")
 endif()
 string(JSON init_status GET "${init_output}" status)
 string(JSON project_kind GET "${init_output}" project_kind)
 string(JSON managed_state GET "${init_output}" state_directory)
 if(NOT init_status STREQUAL "initialized" OR NOT project_kind STREQUAL "cmake")
-    message(FATAL_ERROR "v1.3 init returned an unexpected contract: ${init_output}")
+    message(FATAL_ERROR "project init returned an unexpected contract: ${init_output}")
 endif()
 string(FIND "${managed_state}" "${FIXTURE_DIR}" state_inside_workspace)
 if(NOT state_inside_workspace EQUAL -1)
@@ -34,7 +34,7 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 if(NOT empty_status_result EQUAL 0)
-    message(FATAL_ERROR "empty v1.3 status failed: ${empty_status_output}${empty_status_error}")
+    message(FATAL_ERROR "empty project status failed: ${empty_status_output}${empty_status_error}")
 endif()
 string(JSON empty_task_count LENGTH "${empty_status_output}" tasks)
 if(NOT empty_task_count EQUAL 0)
@@ -80,7 +80,7 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 if(NOT populated_status_result EQUAL 0)
-    message(FATAL_ERROR "populated v1.3 status failed: ${populated_status_output}${populated_status_error}")
+    message(FATAL_ERROR "populated project status failed: ${populated_status_output}${populated_status_error}")
 endif()
 string(JSON task_count LENGTH "${populated_status_output}" tasks)
 string(JSON listed_task_id GET "${populated_status_output}" tasks 0 id)

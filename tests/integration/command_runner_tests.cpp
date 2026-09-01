@@ -1,6 +1,6 @@
 #include "mint/domain/task_policy.hpp"
-#include "mint/task_runtime.hpp"
-#include "mint/tools.hpp"
+#include "mint/runtime/task_control.hpp"
+#include "mint/tools/tool_registry.hpp"
 
 #include "test_executable.hpp"
 #include "test_workspace.hpp"
@@ -243,7 +243,7 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
                              mint::ToolRegistryOptions{.allowed_programs = {program},
                                                        .default_command_timeout_seconds = 2,
                                                        .max_command_timeout_seconds = 5,
-                                                       .max_command_output_bytes = 256});
+                                                       .runtime = {.command_output_bytes = 256}});
     MINT_EXPECT(tools.can_run_commands(), "command runner reports enabled capability");
     MINT_EXPECT(tools.definitions().size() == 4,
                 "command-only registry exposes run_command as the fourth tool");

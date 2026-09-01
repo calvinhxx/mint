@@ -1,4 +1,3 @@
-#include "mint/infrastructure/chat_completions_client.hpp"
 #include "mint/infrastructure/config.hpp"
 #include "mint/infrastructure/model_provider_client.hpp"
 
@@ -141,35 +140,14 @@ mint::Json tool_definitions() {
                                    {"additionalProperties", false}}}}}}});
 }
 
-TEST(ProviderConfigContractTest, PreservesV13Compatibility) {
-    const mint::ChatCompletionsConfig positional{"https://example.test/v1/chat/completions",
-                                                 "secret",
-                                                 "positional-model",
-                                                 7,
-                                                 42,
-                                                 4,
-                                                 123,
-                                                 777,
-                                                 {},
-                                                 {},
-                                                 mint::ModelAdapter::chat_completions,
-                                                 false,
-                                                 {}};
-    MINT_EXPECT(positional.api_url == "https://example.test/v1/chat/completions" &&
-                    positional.max_completion_tokens == 777 &&
-                    positional.adapter == mint::ModelAdapter::chat_completions,
-                "v1.3 positional aggregate field order remains compatible");
-
+TEST(ProviderConfigContractTest, LoadsLegacyEndpointFieldAndSelectsAdapters) {
     TemporaryDirectory temporary;
     const auto legacy_path = temporary.path() / "legacy.json";
     write_text(legacy_path, R"({"api_url":"https://example.test/v1/chat/completions",)"
                             R"("api_key":"secret","model":"test-model"})");
     const auto legacy = mint::load_model_provider_config(legacy_path);
     MINT_EXPECT(legacy.adapter == mint::ModelAdapter::chat_completions && !legacy.stream,
-                "v1.3 config defaults to non-streaming Chat Completions");
-    const auto compatibility = mint::load_chat_completions_config(legacy_path);
-    MINT_EXPECT(compatibility.adapter == legacy.adapter && compatibility.model == legacy.model,
-                "legacy loader remains source and behavior compatible");
+                "legacy endpoint field defaults to non-streaming Chat Completions");
 
     const auto responses_path = temporary.path() / "responses.json";
     write_text(responses_path,

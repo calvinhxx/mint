@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(v1_broken_calculator LANGUAGES CXX)
+project(broken_calculator_fixture LANGUAGES CXX)
 
 add_executable(calculator_tests
     src/calculator.cpp

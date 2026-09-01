@@ -643,12 +643,12 @@ TEST(CommandRunnerTest, RunsRepairFixtureRecipesAfterManagedEdits) {
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
     const auto fixture =
-        std::filesystem::path{MINT_TEST_SOURCE_DIR} / "tests/fixtures/v1_broken_project";
+        std::filesystem::path{MINT_TEST_SOURCE_DIR} / "tests/fixtures/broken_cpp_project";
     std::filesystem::copy(fixture, workspace,
                           std::filesystem::copy_options::recursive |
                               std::filesystem::copy_options::overwrite_existing);
 
-    const auto policy = mint::load_task_policy(workspace / "policy.v1_2.json");
+    const auto policy = mint::load_task_policy(workspace / "policy.json");
     const auto make_tools = [&](bool allow_write) {
         return mint::ToolRegistry(
             workspace,
