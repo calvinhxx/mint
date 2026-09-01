@@ -114,9 +114,9 @@ mint status --root .      # 查看任务状态
 mint 默认把不含正文和密钥的轮转 JSONL 日志写到系统状态目录的 `logs` 子目录。使用 `--log-file-level debug` 增加 provider、模型、工具和命令名称，使用 `--log-file-level off` 关闭磁盘日志。
 
 ~~~bash
-mint status --root . --log-file-level debug
-jq . "$HOME/Library/Application Support/mint/logs"/mint-*.jsonl
-jq 'select(.event == "model.request.completed") | .fields' "$HOME/Library/Application Support/mint/logs"/mint-*.jsonl
+mint status --root . --log-dir ../mint-logs --log-file-level debug
+jq . ../mint-logs/mint-*.jsonl
+jq 'select(.event == "model.request.completed") | .fields' ../mint-logs/mint-*.jsonl
 ~~~
 
-日志不会记录 API Key、模型正文、命令输出、diff 或文件内容。三个平台默认要求命令沙箱；权限、日志路径、恢复方式和 `--unsafe-no-command-sandbox` 的风险统一见[安全、权限与任务恢复](../guides/safety-and-recovery.md)。
+日志不会记录 API Key、模型正文、命令输出、diff 或文件内容。三个平台的日常任务都要求项目命令使用 OS 沙箱；高级执行接口和完整权限边界见[安全、权限与任务恢复](../guides/safety-and-recovery.md)。

@@ -13,6 +13,7 @@ mint 不把 shell 或文件句柄交给模型。模型只能从本次任务提�
 - 大小写别名按文件系统身份判断，硬链接不会继承另一个目录项的精确写授权；
 - 符号链接不能绕出项目；
 - 配置、密钥和任务存档等保护路径不可访问；
+- `.env`、`.env.*`（公开模板除外）、常见私钥扩展名以及 `.ssh`、`.aws`、`.kube` 等凭据目录默认不可访问；
 - 多文件修改必须先整体通过预检查。
 
 相关实现集中在 `src/tools/tool_registry.cpp`、`path_identity.cpp`、`workspace_tools.cpp` 和 `change_set.cpp`。
@@ -22,9 +23,9 @@ mint 不把 shell 或文件句柄交给模型。模型只能从本次任务提�
 模型不能提交一段任意 shell。项目初始化后，命令以 recipe 保存为程序、参数和工作目录，例如：
 
 ~~~text
-configure -> cmake -S . -B build
-build     -> cmake --build build
-test      -> ctest --test-dir build --output-on-failure
+configure -> cmake -S . -B build/mint-managed
+build     -> cmake --build build/mint-managed
+test      -> ctest --test-dir build/mint-managed --output-on-failure
 ~~~
 
 运行时只能选择已经登记且被 policy 允许的 recipe。`CommandRunner` 还负责超时、输出限制、资源上限和平台沙箱。
@@ -52,7 +53,7 @@ Windows 使用 `CreateProcessW` 直接启动程序，不经过 shell。每个 `C
 
 Windows 可写成 `C:\toolchains\llvm`。路径必须已经存在，不能位于工作区内、包含整个工作区或与保护路径重叠。授权只增加读取和执行权限，不增加写权限；关闭 OS 沙箱时也不能使用这个字段。
 
-AppContainer 不是虚拟机，仍可见部分 Windows 公共系统资源。`--unsafe-no-command-sandbox` 会关闭当前平台的 OS 隔离，只应由信任工作区和命令的本地操作者显式使用。
+AppContainer 不是虚拟机，仍可见部分 Windows 公共系统资源。日常任务不允许关闭项目命令的 OS 隔离；高级 `mint exec` 接口中的 `--unsafe-no-command-sandbox` 只供完全信任工作区和命令的本地操作者显式使用。
 
 ## 命令资源上限
 
@@ -72,7 +73,7 @@ AppContainer 不是虚拟机，仍可见部分 Windows 公共系统资源。`--u
 }
 ~~~
 
-数值为 `0` 表示不启用该项；旧 policy 没有这些字段时保持原行为。
+数值为 `0` 表示不启用该项；旧 policy 没有这些字段时保持原行为。`mint init` 为识别出的 CMake、Cargo 和 npm 项目默认设置 300 秒 CPU、256 个进程和 16 GiB 工作区文件上限；不含可执行 recipe 的只读项目不设置无意义的命令限额。
 
 - `max_processes` 计算一次命令的完整进程树。Windows 使用 Job Object；macOS 和 Linux 由 mint 跟踪子孙进程，超限后终止整棵树。
 - `workspace_disk_bytes` 统计工作区内普通文件的逻辑大小，不跟随符号链接。命令启动前、运行中和结束后都会检查。
@@ -100,7 +101,7 @@ AppContainer 不是虚拟机，仍可见部分 Windows 公共系统资源。`--u
 
 远程模型地址必须使用 HTTPS。明文 HTTP 只允许严格的本机回环地址：`localhost`、`127.0.0.0/8` 和 `::1`，并强制绕过环境代理。模型响应正文、SSE 行与事件、文本、推理内容和工具调用都有独立上限；默认值适合普通任务，需要进一步收紧时可在模型配置的 `response_limits` 对象中覆盖对应字段。
 
-模型密钥应通过 `api_key_env` 引用环境变量。内联 `api_key` 在 `1.0.x` 只为兼容旧配置而保留，使用时会显示迁移警告；provider 检查和诊断日志都不会输出密钥值。
+模型密钥应通过 `api_key_env` 引用环境变量。内联 `api_key` 在 `1.0.x` 只为兼容旧配置而保留，使用时会显示迁移警告；provider 检查和诊断日志都不会输出密钥值。当前使用的模型配置会单独加入保护路径；工作区里的 `.env` 和常见凭据文件也不会进入模型上下文。
 
 新建任务 policy 默认设置 `max_total_tokens: 100000`。mint 按 provider 报告的 usage 跨轮、跨恢复累计；检查发生在响应返回后，因此单次响应可能越过目标值。越界后待执行工具和下一次模型请求都会被阻断，任务以 `budget_exhausted` 结束。没有 usage 的调用无法换算成可靠 Token 数，因此机器结果会标记为 `best_effort` 或 `unavailable`。这个限制不能代替供应商后台的消费上限，也不代表固定金额。
 

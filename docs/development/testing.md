@@ -97,13 +97,22 @@ python3 scripts/fixture-regression.py \
 
 `evals/scenarios.json` 目前包含 6 个核心场景，用来检查读取、搜索、修改、验证和工具边界。它是种子回归集，不是统计充分的模型能力榜单。Token 指标同时保留 usage 覆盖状态，缺失上报不会被解释为零成本。
 
-每次场景运行应保留 `mint --json` 的原始结果和 `--events-jsonl` 事件文件。下面的 collector 只抽取状态、计数、变更路径和工具生命周期；回答、diff、工具参数与结果正文不会进入评测产物：
+每次场景运行应保留 `mint run --json` 的原始结果。结果中的 `events_path` 指向该托管任务自动保存的事件文件，不需要给日常命令追加内部参数：
+
+~~~bash
+mkdir -p build/evals
+mint run --root /path/to/scenario-project --config config.json --json "按场景执行任务" \
+  > build/evals/raw-result.json
+events_path="$(jq -r '.events_path' build/evals/raw-result.json)"
+~~~
+
+下面的 collector 只抽取状态、计数、变更路径和工具生命周期；回答、diff、工具参数与结果正文不会进入评测产物：
 
 ~~~bash
 python3 scripts/eval-regression.py collect \
   --scenario read-project-overview \
   --result build/evals/raw-result.json \
-  --events build/evals/raw-events.jsonl \
+  --events "$events_path" \
   --artifacts build/evals/artifacts
 ~~~
 

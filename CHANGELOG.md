@@ -9,4 +9,6 @@
 - 支持本地任务状态、结构化诊断日志、离线回归和六平台构建配置。
 - 增加任务级累计 Token 上限、usage 覆盖说明和跨 checkpoint 统计。
 - 严格执行工具参数契约，提示内联密钥迁移，并提供脱敏 Agent 评测回放。
+- 默认保护常见凭据路径，关闭命令子进程 stdin，并为托管 recipe 设置有限资源预算。
+- 将高级策略执行收敛为显式 `mint exec` 子命令，托管 JSON 结果返回事件文件路径。
 - 按 domain、ports、application、tools、runtime 与 infrastructure 划分核心模块，并使用分层公共头文件。

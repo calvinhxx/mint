@@ -9,6 +9,7 @@
 - Windows、macOS、Linux 的 x64 / ARM64 原生构建配置；
 - Chat Completions、Responses、Anthropic Messages 和 SSE 统一模型接口；
 - 默认关闭写入，命令不经过 shell，并受 policy 与操作系统沙箱约束；
+- 常见凭据文件默认不进入模型上下文，命令子进程不继承 mint 的 stdin；
 - checkpoint、changeset 事务和中断恢复；
 - Debug、Sanitizer、契约测试、离线 provider 回归与六平台发布配置。
 
@@ -24,6 +25,7 @@
 - 三种协议统一统计输入、输出、缓存 tokens 和加权缓存命中率；
 - 任务 policy 可限制累计 Token，预算与已报告 usage 会跨 checkpoint 恢复；
 - 面向人的终端输出会转义控制字符，JSON / JSONL 机器协议保持原始结构；
+- 日常 CLI 与显式 `exec` 自动化接口分开，托管 JSON 结果直接返回任务事件路径；
 - 发布包包含完整文档树、安全策略和唯一一组 provider 模板；
 - 日常 CI 只跑一条快速 Debug 门禁，六平台测试和发布包留给候选版与 Tag；
 - Anthropic 流式工具调用在 Clang、GCC 和 MSVC 的严格告警模式下均可构建。
