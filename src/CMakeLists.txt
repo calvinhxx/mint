@@ -8,8 +8,13 @@ add_subdirectory(application)
 add_library(mint_core INTERFACE)
 add_library(mint::core ALIAS mint_core)
 target_link_libraries(mint_core INTERFACE
-    mint::application
-    mint::infrastructure
+    mint::agent
+    mint::command
+    mint::filesystem
+    mint::logging
+    mint::model
+    mint::persistence
+    mint::project
     mint::runtime
     mint::tools
 )

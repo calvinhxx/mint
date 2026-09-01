@@ -57,15 +57,23 @@ foreach(target IN ITEMS mint_command mint_filesystem mint_logging mint_model min
         message(FATAL_ERROR "Infrastructure module target is missing: ${target}")
     endif()
 endforeach()
-string(REGEX MATCH "add_library\\(mint_infrastructure[ \t\r\n]+STATIC" monolith_definition
-             "${infrastructure_cmake}")
-if(monolith_definition)
-    message(FATAL_ERROR "mint_infrastructure must remain an interface facade, not a monolith")
+foreach(module_cmake IN ITEMS application_cmake infrastructure_cmake)
+    string(REGEX MATCH "add_library\\(mint_(application|infrastructure)" facade_definition
+                 "${${module_cmake}}")
+    if(facade_definition)
+        message(FATAL_ERROR "Layer-wide compatibility facades must not be reintroduced")
+    endif()
+endforeach()
+
+file(READ "${SOURCE_DIR}/src/CMakeLists.txt" root_cmake)
+string(REGEX MATCH "mint::(application|infrastructure)" facade_dependency "${root_cmake}")
+if(facade_dependency)
+    message(FATAL_ERROR "mint_core must aggregate feature targets directly")
 endif()
 
 foreach(cmake_file IN ITEMS src/tools/CMakeLists.txt src/cli/CMakeLists.txt)
     file(READ "${SOURCE_DIR}/${cmake_file}" consumer_cmake)
-    string(REGEX MATCH "mint::(core|infrastructure)" umbrella_dependency "${consumer_cmake}")
+    string(REGEX MATCH "mint::core" umbrella_dependency "${consumer_cmake}")
     if(umbrella_dependency)
         message(FATAL_ERROR
             "${cmake_file} must link the feature modules it uses, not ${umbrella_dependency}"

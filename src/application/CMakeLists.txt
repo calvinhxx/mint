@@ -32,11 +32,3 @@ target_link_libraries(mint_project
     PRIVATE
         mint::runtime
 )
-
-# Compatibility facade for consumers that want the complete application layer.
-add_library(mint_application INTERFACE)
-add_library(mint::application ALIAS mint_application)
-target_link_libraries(mint_application INTERFACE
-    mint::agent
-    mint::project
-)

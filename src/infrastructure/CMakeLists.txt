@@ -100,14 +100,3 @@ target_link_libraries(mint_persistence
         mint::filesystem
         mint::runtime
 )
-
-# Stable facade for callers that intentionally use every infrastructure adapter.
-add_library(mint_infrastructure INTERFACE)
-add_library(mint::infrastructure ALIAS mint_infrastructure)
-target_link_libraries(mint_infrastructure INTERFACE
-    mint::command
-    mint::filesystem
-    mint::logging
-    mint::model
-    mint::persistence
-)
