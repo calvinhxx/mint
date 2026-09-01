@@ -30,6 +30,10 @@ constexpr DWORD workspace_access =
 constexpr DWORD readonly_access = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
 constexpr DWORD denied_access = workspace_access;
 
+bool path_equal(const std::filesystem::path& left, const std::filesystem::path& right) noexcept {
+    return ::CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_EQUAL;
+}
+
 [[noreturn]] void throw_windows_error(DWORD error, std::string_view context) {
     throw std::system_error(static_cast<int>(error), std::system_category(), std::string(context));
 }
@@ -113,7 +117,7 @@ executable_read_paths(const std::filesystem::path& workspace,
     std::sort(paths.begin(), paths.end(), [](const auto& left, const auto& right) {
         return ::CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_LESS_THAN;
     });
-    paths.erase(std::unique(paths.begin(), paths.end(), path_component_equal), paths.end());
+    paths.erase(std::unique(paths.begin(), paths.end(), path_equal), paths.end());
     return paths;
 }
 
@@ -378,9 +382,8 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
                   return ::CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) ==
                          CSTR_LESS_THAN;
               });
-    read_only_paths.erase(
-        std::unique(read_only_paths.begin(), read_only_paths.end(), path_component_equal),
-        read_only_paths.end());
+    read_only_paths.erase(std::unique(read_only_paths.begin(), read_only_paths.end(), path_equal),
+                          read_only_paths.end());
 
     profile_name_ = unique_profile_name();
     const HRESULT create_result =
