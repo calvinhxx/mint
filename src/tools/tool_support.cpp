@@ -68,6 +68,20 @@ Json error_result(std::string message) {
     return {{"ok", false}, {"error", std::move(message)}};
 }
 
+void require_only_fields(const Json& arguments, std::string_view context,
+                         std::initializer_list<std::string_view> allowed_fields) {
+    if (!arguments.is_object()) {
+        throw std::invalid_argument(std::string(context) + " 参数必须是 JSON 对象");
+    }
+    for (auto field = arguments.begin(); field != arguments.end(); ++field) {
+        const auto allowed = std::find(allowed_fields.begin(), allowed_fields.end(), field.key()) !=
+                             allowed_fields.end();
+        if (!allowed) {
+            throw std::invalid_argument(std::string(context) + " 包含未知字段: " + field.key());
+        }
+    }
+}
+
 std::string require_string(const Json& arguments, std::string_view name) {
     const std::string key(name);
     if (!arguments.contains(key) || !arguments.at(key).is_string()) {

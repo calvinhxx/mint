@@ -19,6 +19,7 @@ using tools::detail::display_path;
 using tools::detail::error_result;
 using tools::detail::is_entry_within;
 using tools::detail::is_ignored_directory;
+using tools::detail::require_only_fields;
 using tools::detail::require_string;
 using tools::detail::shorten_line;
 
@@ -38,6 +39,7 @@ std::filesystem::path ToolRegistry::resolve_inside_root(const std::string& reque
 }
 
 Json ToolRegistry::list_files(const Json& arguments) const {
+    require_only_fields(arguments, "list_files", {"path", "max_depth"});
     std::string requested = ".";
     if (arguments.contains("path")) {
         requested = require_string(arguments, "path");
@@ -150,6 +152,7 @@ Json ToolRegistry::list_files(const Json& arguments) const {
 }
 
 Json ToolRegistry::read_file(const Json& arguments) const {
+    require_only_fields(arguments, "read_file", {"path", "offset", "max_bytes"});
     const auto requested = require_string(arguments, "path");
     const auto path = resolve_inside_root(requested);
     if (is_protected(path)) {
@@ -234,6 +237,7 @@ Json ToolRegistry::read_file(const Json& arguments) const {
 }
 
 Json ToolRegistry::search_text(const Json& arguments) const {
+    require_only_fields(arguments, "search_text", {"query", "path", "case_sensitive"});
     const auto query = require_string(arguments, "query");
     if (query.empty()) {
         throw std::invalid_argument("搜索内容不能为空");

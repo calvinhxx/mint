@@ -248,6 +248,15 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
     MINT_EXPECT(tools.definitions().size() == 4,
                 "command-only registry exposes run_command as the fourth tool");
 
+    const auto unknown_field = mint::Json::parse(
+        tools.execute({"command-extra",
+                       "run_command",
+                       {{"program", program}, {"unexpected", "must-not-be-ignored"}}}));
+    MINT_EXPECT(unknown_field.size() == 2 && !unknown_field.at("ok").get<bool>() &&
+                    unknown_field.at("error").get<std::string>().find(
+                        "run_command 包含未知字段: unexpected") != std::string::npos,
+                "run_command rejects unknown fields with the stable tool error envelope");
+
     const auto echoed = mint::Json::parse(tools.execute(echo_call));
     MINT_EXPECT(echoed.at("ok").get<bool>(), "approved command starts successfully");
     MINT_EXPECT(echoed.at("status") == "exited", "approved command exits normally");
@@ -669,8 +678,10 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
         tools.execute({"recipe-override",
                        "run_recipe",
                        {{"recipe", "verify"}, {"args", mint::Json::array({"override"})}}}));
-    MINT_EXPECT(!override_attempt.at("ok").get<bool>(),
-                "run_recipe rejects model attempts to override fixed arguments");
+    MINT_EXPECT(override_attempt.size() == 2 && !override_attempt.at("ok").get<bool>() &&
+                    override_attempt.at("error").get<std::string>().find(
+                        "run_recipe 包含未知字段: args") != std::string::npos,
+                "run_recipe rejects overrides with the stable tool error envelope");
 
     const auto invalid_policy = temporary.path() / "invalid-policy.json";
     write_text(invalid_policy, R"({"schema_version":1,"unknown_capability":true})");

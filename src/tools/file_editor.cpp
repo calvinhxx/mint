@@ -18,12 +18,22 @@ using tools::detail::display_path;
 using tools::detail::error_result;
 using tools::detail::is_valid_utf8;
 using tools::detail::replace_file_safely;
+using tools::detail::require_only_fields;
 using tools::detail::require_string;
 
 Json ToolRegistry::apply_patch(const Json& arguments) const {
+    require_only_fields(arguments, "apply_patch", {"path", "operation", "old_text", "new_text"});
     const auto requested = require_string(arguments, "path");
     const auto operation = require_string(arguments, "operation");
     const auto new_text = require_string(arguments, "new_text");
+    if (operation == "create") {
+        require_only_fields(arguments, "apply_patch create", {"path", "operation", "new_text"});
+    } else if (operation == "replace") {
+        require_only_fields(arguments, "apply_patch replace",
+                            {"path", "operation", "old_text", "new_text"});
+    } else {
+        throw std::invalid_argument("operation 只支持 replace 或 create");
+    }
 
     const std::filesystem::path input(requested);
     if (input.empty() || input == "." || input.is_absolute()) {
@@ -61,14 +71,6 @@ Json ToolRegistry::apply_patch(const Json& arguments) const {
     }
 
     if (operation == "create") {
-        if (arguments.contains("old_text")) {
-            if (!arguments.at("old_text").is_string()) {
-                throw std::invalid_argument("参数 old_text 必须是字符串");
-            }
-            if (!arguments.at("old_text").get_ref<const std::string&>().empty()) {
-                throw std::invalid_argument("create 操作不能提供非空 old_text");
-            }
-        }
         if (exists) {
             return error_result("create 拒绝覆盖已经存在的路径: " + requested);
         }
@@ -84,10 +86,6 @@ Json ToolRegistry::apply_patch(const Json& arguments) const {
                 {"path", relative_path},
                 {"bytes_before", 0},
                 {"bytes_after", new_text.size()}};
-    }
-
-    if (operation != "replace") {
-        throw std::invalid_argument("operation 只支持 replace 或 create");
     }
 
     const auto old_text = require_string(arguments, "old_text");

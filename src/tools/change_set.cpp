@@ -7,11 +7,10 @@
 #include "change_transaction.hpp"
 #include "file_support.hpp"
 #include "tool_contract.hpp"
+#include "tool_support.hpp"
 
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <initializer_list>
 #include <iterator>
 #include <map>
 #include <set>
@@ -45,18 +44,6 @@ std::string required_string(const Json& object, std::string_view key) {
         throw std::invalid_argument("apply_changeset 参数 " + name + " 必须是字符串");
     }
     return object.at(name).get<std::string>();
-}
-
-void require_exact_fields(const Json& object,
-                          std::initializer_list<std::string_view> allowed_fields) {
-    for (auto iterator = object.begin(); iterator != object.end(); ++iterator) {
-        const auto allowed =
-            std::any_of(allowed_fields.begin(), allowed_fields.end(),
-                        [&](std::string_view field) { return iterator.key() == field; });
-        if (!allowed) {
-            throw std::invalid_argument("apply_changeset 操作包含未知字段: " + iterator.key());
-        }
-    }
 }
 
 std::string read_text_file(const std::filesystem::path& path) {
@@ -106,8 +93,8 @@ Json unapproved_changeset_result(const ApprovalDecision& decision) {
 } // namespace
 
 Json ToolRegistry::apply_changeset(const Json& arguments) const {
-    if (!arguments.is_object() || arguments.size() != 1 || !arguments.contains("changes") ||
-        !arguments.at("changes").is_array()) {
+    tools::detail::require_only_fields(arguments, "apply_changeset", {"changes"});
+    if (!arguments.contains("changes") || !arguments.at("changes").is_array()) {
         throw std::invalid_argument("apply_changeset 只接受 changes 数组");
     }
     const auto& changes = arguments.at("changes");
@@ -155,13 +142,17 @@ Json ToolRegistry::apply_changeset(const Json& arguments) const {
         PlannedChange change;
         change.operation = required_string(item, "operation");
         if (change.operation == "create") {
-            require_exact_fields(item, {"operation", "path", "new_text"});
+            tools::detail::require_only_fields(item, "apply_changeset create",
+                                               {"operation", "path", "new_text"});
         } else if (change.operation == "replace") {
-            require_exact_fields(item, {"operation", "path", "old_text", "new_text"});
+            tools::detail::require_only_fields(item, "apply_changeset replace",
+                                               {"operation", "path", "old_text", "new_text"});
         } else if (change.operation == "delete") {
-            require_exact_fields(item, {"operation", "path", "old_text"});
+            tools::detail::require_only_fields(item, "apply_changeset delete",
+                                               {"operation", "path", "old_text"});
         } else if (change.operation == "move") {
-            require_exact_fields(item, {"operation", "path", "old_text", "destination"});
+            tools::detail::require_only_fields(item, "apply_changeset move",
+                                               {"operation", "path", "old_text", "destination"});
         } else {
             throw std::invalid_argument(
                 "apply_changeset operation 只支持 create、replace、delete 或 move");

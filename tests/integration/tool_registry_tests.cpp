@@ -10,6 +10,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -25,6 +26,16 @@ using mint::test::TemporaryDirectory;
 using mint::test::write_text;
 
 std::filesystem::path test_executable;
+
+void expect_contract_rejection(mint::ToolRegistry& tools, const mint::ToolCall& call,
+                               std::string_view context) {
+    const auto result = mint::Json::parse(tools.execute(call));
+    ASSERT_TRUE(result.is_object());
+    EXPECT_EQ(result.size(), 2U);
+    EXPECT_EQ(result.at("ok"), false);
+    ASSERT_TRUE(result.at("error").is_string());
+    EXPECT_NE(result.at("error").get_ref<const std::string&>().find(context), std::string::npos);
+}
 
 TEST(ToolRegistryTest, ReadOnlyTools) {
     TemporaryDirectory temporary;
@@ -115,6 +126,41 @@ TEST(ToolRegistryTest, ReadOnlyTools) {
             mint::Json::parse(tools.execute({"symlink", "read_file", {{"path", "outside-link"}}}));
         MINT_EXPECT(!followed_symlink.at("ok").get<bool>(), "escaping symlink is rejected");
     }
+}
+
+TEST(ToolRegistryTest, RejectsArgumentsOutsidePublishedContracts) {
+    TemporaryDirectory temporary;
+    const auto workspace = temporary.path() / "workspace";
+    write_text(workspace / "README.md", "contract\n");
+
+    mint::ToolRegistry tools(workspace, mint::ToolRegistryOptions{.allow_write = true});
+    expect_contract_rejection(tools,
+                              {"list-extra", "list_files", {{"path", "."}, {"unexpected", true}}},
+                              "list_files 包含未知字段: unexpected");
+    expect_contract_rejection(
+        tools, {"read-extra", "read_file", {{"path", "README.md"}, {"unexpected", true}}},
+        "read_file 包含未知字段: unexpected");
+    expect_contract_rejection(
+        tools, {"search-extra", "search_text", {{"query", "contract"}, {"unexpected", true}}},
+        "search_text 包含未知字段: unexpected");
+    expect_contract_rejection(
+        tools,
+        {"patch-extra",
+         "apply_patch",
+         {{"path", "new.txt"}, {"operation", "create"}, {"new_text", "new\n"}, {"old_text", ""}}},
+        "apply_patch create 包含未知字段: old_text");
+    expect_contract_rejection(
+        tools,
+        {"changeset-extra",
+         "apply_changeset",
+         {{"changes", mint::Json::array(
+                          {{{"operation", "create"}, {"path", "new.txt"}, {"new_text", "new\n"}}})},
+          {"unexpected", true}}},
+        "apply_changeset 包含未知字段: unexpected");
+    expect_contract_rejection(tools, {"changes-extra", "workspace_changes", {{"unexpected", true}}},
+                              "workspace_changes 包含未知字段: unexpected");
+
+    EXPECT_FALSE(std::filesystem::exists(workspace / "new.txt"));
 }
 
 TEST(ToolRegistryTest, ConfigurableRuntimeLimits) {

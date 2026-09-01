@@ -513,8 +513,8 @@ Json ToolRegistry::execute_json(const ToolCall& call) const {
         if (!allow_write_ || change_journal_ == nullptr) {
             return error_result("变更日志未启用；请由用户使用 --allow-write 显式授权");
         }
-        return call.arguments.empty() ? workspace_change_snapshot()
-                                      : error_result("workspace_changes 不接受参数");
+        tools::detail::require_only_fields(call.arguments, "workspace_changes", {});
+        return workspace_change_snapshot();
     }
     if (call.name == "run_command" || call.name == "run_recipe") {
         return execute_command(call);

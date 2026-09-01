@@ -75,6 +75,12 @@ void append_unique_string(std::vector<std::string>& values, const std::string& v
 } // namespace
 
 Json ToolRegistry::execute_command(const ToolCall& call) const {
+    if (call.name == "run_recipe") {
+        tools::detail::require_only_fields(call.arguments, "run_recipe", {"recipe"});
+    } else {
+        tools::detail::require_only_fields(call.arguments, "run_command",
+                                           {"program", "args", "cwd", "timeout_seconds"});
+    }
     if (command_runner_ == nullptr) {
         return tools::detail::error_result(
             "命令执行未启用；请由用户显式授权程序或 task policy recipe");
