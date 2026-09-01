@@ -1,0 +1,8 @@
+{
+  "provider": "openai",
+  "adapter": "responses",
+  "api_key_env": "OPENAI_API_KEY",
+  "model": "gpt-5.3-codex",
+  "stream": true,
+  "max_completion_tokens": 2048
+}

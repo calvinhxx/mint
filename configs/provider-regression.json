@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "openai-responses",
+      "config": "providers/openai-responses.json"
+    },
+    {
+      "id": "groq-chat",
+      "config": "providers/groq-chat.json"
+    },
+    {
+      "id": "deepseek-chat",
+      "config": "providers/deepseek-chat.json"
+    },
+    {
+      "id": "openai-codex",
+      "config": "providers/openai-codex.json"
+    },
+    {
+      "id": "claude-messages",
+      "config": "providers/claude-messages.json"
+    },
+    {
+      "id": "gemini-chat",
+      "config": "providers/gemini-chat.json"
+    },
+    {
+      "id": "grok-responses",
+      "config": "providers/grok-responses.json"
+    },
+    {
+      "id": "kimi-chat",
+      "config": "providers/kimi-chat.json"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "provider": "anthropic",
+  "adapter": "anthropic_messages",
+  "api_key_env": "ANTHROPIC_API_KEY",
+  "model": "claude-sonnet-5",
+  "stream": true,
+  "max_completion_tokens": 2048
+}

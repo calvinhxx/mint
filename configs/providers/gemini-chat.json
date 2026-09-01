@@ -1,0 +1,8 @@
+{
+  "provider": "google",
+  "adapter": "chat_completions",
+  "api_key_env": "GEMINI_API_KEY",
+  "model": "gemini-3.7-flash",
+  "stream": true,
+  "max_completion_tokens": 2048
+}

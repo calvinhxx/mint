@@ -1,0 +1,10 @@
+{
+  "provider": "groq",
+  "adapter": "chat_completions",
+  "api_key_env": "GROQ_API_KEY",
+  "model": "openai/gpt-oss-20b",
+  "stream": false,
+  "max_completion_tokens": 1024,
+  "max_request_tokens": 8000,
+  "request_token_estimate_bytes_per_token": 2
+}

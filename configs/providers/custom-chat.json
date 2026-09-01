@@ -1,0 +1,19 @@
+{
+  "provider": "custom",
+  "adapter": "chat_completions",
+  "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+  "api_key_env": "MINT_MODEL_API_KEY",
+  "model": "replace-with-model-id",
+  "stream": true,
+  "max_completion_tokens": 1024,
+  "capabilities": {
+    "function_tools": true,
+    "streaming": true,
+    "stream_usage": false,
+    "stateless_reasoning_replay": false,
+    "token_limit_parameter": "max_tokens",
+    "explicit_tool_choice": true,
+    "chat_reasoning_replay": false,
+    "requires_tool_call_content": false
+  }
+}

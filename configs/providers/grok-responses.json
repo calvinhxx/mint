@@ -1,0 +1,8 @@
+{
+  "provider": "xai",
+  "adapter": "responses",
+  "api_key_env": "XAI_API_KEY",
+  "model": "grok-4.6",
+  "stream": true,
+  "max_completion_tokens": 2048
+}
