@@ -45,6 +45,10 @@ TEST(ToolRegistryTest, ReadOnlyTools) {
     write_text(workspace / "src" / "main.cpp", "int main() { return 0; }\n");
     write_text(workspace / "large.txt", std::string(24 * 1024, 'x'));
     write_text(workspace / "config.json", R"({"api_key":"must-not-leak"})");
+    write_text(workspace / ".env", "MINT_KEY=must-not-leak\n");
+    write_text(workspace / ".env.example", "MINT_KEY=replace-me\n");
+    write_text(workspace / ".ssh" / "id_ed25519", "must-not-leak\n");
+    write_text(workspace / "client.pem", "must-not-leak\n");
     write_text(workspace / ".git" / "config", "token=must-not-leak\n");
     write_text(temporary.path() / "outside.txt", "secret\n");
 
@@ -58,6 +62,12 @@ TEST(ToolRegistryTest, ReadOnlyTools) {
     MINT_EXPECT(has_entry(listed.at("entries"), "src/main.cpp"), "list_files respects depth");
     MINT_EXPECT(!has_entry(listed.at("entries"), "config.json"),
                 "list_files hides the protected config file");
+    MINT_EXPECT(!has_entry(listed.at("entries"), ".env") &&
+                    !has_entry(listed.at("entries"), ".ssh") &&
+                    !has_entry(listed.at("entries"), "client.pem"),
+                "list_files hides common credential paths without extra configuration");
+    MINT_EXPECT(has_entry(listed.at("entries"), ".env.example"),
+                "list_files keeps public environment templates visible");
     MINT_EXPECT(!has_entry(listed.at("entries"), ".git"),
                 "list_files hides ignored metadata directories");
 
@@ -91,6 +101,14 @@ TEST(ToolRegistryTest, ReadOnlyTools) {
     const auto protected_config =
         mint::Json::parse(tools.execute({"config", "read_file", {{"path", "config.json"}}}));
     MINT_EXPECT(!protected_config.at("ok").get<bool>(), "read_file rejects protected config");
+
+    const auto environment =
+        mint::Json::parse(tools.execute({"environment", "read_file", {{"path", ".env"}}}));
+    MINT_EXPECT(!environment.at("ok").get<bool>(), "read_file rejects environment secrets");
+    const auto environment_template = mint::Json::parse(
+        tools.execute({"environment-template", "read_file", {{"path", ".env.example"}}}));
+    MINT_EXPECT(environment_template.at("ok").get<bool>(),
+                "read_file permits public environment templates");
 
     const auto git_config =
         mint::Json::parse(tools.execute({"git-config", "read_file", {{"path", ".git/config"}}}));
@@ -233,6 +251,7 @@ TEST(ToolRegistryTest, ApplyPatch) {
     invalid_utf8.push_back('(');
     write_text(workspace / "invalid.txt", invalid_utf8);
     write_text(workspace / "config.json", R"({"api_key":"must-stay-secret"})");
+    write_text(workspace / ".husky" / "pre-commit", "run checks\n");
     write_text(workspace / ".git" / "config", "token=must-stay-secret\n");
     write_text(temporary.path() / "outside.txt", "outside\n");
 
@@ -337,6 +356,29 @@ TEST(ToolRegistryTest, ApplyPatch) {
                 "apply_patch rejects the protected config file");
     MINT_EXPECT(read_text(workspace / "config.json").find("must-stay-secret") != std::string::npos,
                 "protected config remains unchanged");
+
+    const auto hook_read = mint::Json::parse(
+        tools.execute({"read-hook", "read_file", {{"path", ".husky/pre-commit"}}}));
+    MINT_EXPECT(hook_read.at("ok").get<bool>(), "project metadata remains readable for inspection");
+    const auto hook_write = mint::Json::parse(tools.execute({"patch-hook",
+                                                             "apply_patch",
+                                                             {{"path", ".husky/pre-commit"},
+                                                              {"operation", "replace"},
+                                                              {"old_text", "run checks\n"},
+                                                              {"new_text", "skip checks\n"}}}));
+    MINT_EXPECT(!hook_write.at("ok").get<bool>() &&
+                    read_text(workspace / ".husky" / "pre-commit") == "run checks\n",
+                "apply_patch cannot modify repository control metadata");
+
+    const auto environment =
+        mint::Json::parse(tools.execute({"patch-environment",
+                                         "apply_patch",
+                                         {{"path", ".env.local"},
+                                          {"operation", "create"},
+                                          {"new_text", "TOKEN=must-stay-secret\n"}}}));
+    MINT_EXPECT(!environment.at("ok").get<bool>() &&
+                    !std::filesystem::exists(workspace / ".env.local"),
+                "apply_patch cannot create a sensitive environment file");
 
     const auto git_config = mint::Json::parse(tools.execute({"patch-git-config",
                                                              "apply_patch",

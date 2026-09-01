@@ -256,14 +256,21 @@ ProcessResult execute_process(ProcessRequest request) {
         return result;
     }
 
+    const auto input_descriptor = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+    if (input_descriptor < 0) {
+        throw std::runtime_error("无法打开命令空输入设备: " + std::string(std::strerror(errno)));
+    }
+
     std::array<int, 2> output_pipe{};
     if (::pipe(output_pipe.data()) != 0) {
+        ::close(input_descriptor);
         throw std::runtime_error("无法创建命令输出管道: " + std::string(std::strerror(errno)));
     }
 
     const auto read_flags = ::fcntl(output_pipe[0], F_GETFL, 0);
     if (read_flags < 0 || ::fcntl(output_pipe[0], F_SETFL, read_flags | O_NONBLOCK) != 0) {
         const auto message = std::string(std::strerror(errno));
+        ::close(input_descriptor);
         ::close(output_pipe[0]);
         ::close(output_pipe[1]);
         throw std::runtime_error("无法配置命令输出管道: " + message);
@@ -272,6 +279,7 @@ ProcessResult execute_process(ProcessRequest request) {
     const auto process = ::fork();
     if (process < 0) {
         const auto message = std::string(std::strerror(errno));
+        ::close(input_descriptor);
         ::close(output_pipe[0]);
         ::close(output_pipe[1]);
         throw std::runtime_error("无法启动命令进程: " + message);
@@ -279,12 +287,14 @@ ProcessResult execute_process(ProcessRequest request) {
 
     if (process == 0) {
         (void)::setpgid(0, 0);
-        if (::chdir(request.cwd.c_str()) != 0 || ::dup2(output_pipe[1], STDOUT_FILENO) < 0 ||
+        if (::chdir(request.cwd.c_str()) != 0 || ::dup2(input_descriptor, STDIN_FILENO) < 0 ||
+            ::dup2(output_pipe[1], STDOUT_FILENO) < 0 ||
             ::dup2(output_pipe[1], STDERR_FILENO) < 0) {
             constexpr char message[] = "mint: failed to prepare approved command\n";
             write_best_effort(output_pipe[1], std::string_view(message, sizeof(message) - 1));
             ::_exit(126);
         }
+        ::close(input_descriptor);
         reset_resource_signals();
         const auto limit_error = apply_resource_limits(request.resource_limits);
         if (limit_error != ResourceLimitError::none) {
@@ -301,6 +311,7 @@ ProcessResult execute_process(ProcessRequest request) {
         ::_exit(127);
     }
 
+    ::close(input_descriptor);
     ::close(output_pipe[1]);
     (void)::setpgid(process, process);
 

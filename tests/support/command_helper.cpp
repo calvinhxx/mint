@@ -74,6 +74,14 @@ int run_command_helper(int argc, char** argv) {
         std::cout << "environment filtered\n";
         return 0;
     }
+    if (mode == "stdin-eof") {
+        if (std::cin.get() != std::char_traits<char>::eof()) {
+            std::cerr << "command inherited caller input\n";
+            return 14;
+        }
+        std::cout << "stdin closed\n";
+        return 0;
+    }
     if (mode == "verify") {
         if (argc != 5) {
             return 65;

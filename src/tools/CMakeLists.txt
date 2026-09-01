@@ -4,6 +4,7 @@ add_library(mint_tools STATIC
     file_editor.cpp
     file_support.cpp
     path_identity.cpp
+    sensitive_path.cpp
     tool_catalog.cpp
     tool_registry.cpp
     tool_registry_command.cpp

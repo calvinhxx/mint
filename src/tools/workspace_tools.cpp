@@ -2,6 +2,7 @@
 
 #include "file_support.hpp"
 #include "path_identity.hpp"
+#include "sensitive_path.hpp"
 #include "tool_contract.hpp"
 #include "tool_support.hpp"
 
@@ -19,6 +20,7 @@ using tools::detail::display_path;
 using tools::detail::error_result;
 using tools::detail::is_entry_within;
 using tools::detail::is_ignored_directory;
+using tools::detail::is_sensitive_path;
 using tools::detail::require_only_fields;
 using tools::detail::require_string;
 using tools::detail::shorten_line;
@@ -58,8 +60,8 @@ Json ToolRegistry::list_files(const Json& arguments) const {
     }
 
     const auto target = resolve_inside_root(requested);
-    if (is_protected(target)) {
-        return error_result("拒绝访问受保护的配置文件: " + requested);
+    if (is_protected(target) || is_sensitive_path(root_, target)) {
+        return error_result("拒绝访问受保护或敏感的路径: " + requested);
     }
     if (contains_ignored_component(root_, target)) {
         return error_result("拒绝访问忽略目录中的路径: " + requested);
@@ -93,7 +95,11 @@ Json ToolRegistry::list_files(const Json& arguments) const {
         }
 
         const auto path = iterator->path();
-        if (is_protected(path)) {
+        if (is_protected(path) || is_sensitive_path(root_, path)) {
+            if (std::filesystem::is_directory(path, error) && !error) {
+                iterator.disable_recursion_pending();
+            }
+            error.clear();
             iterator.increment(error);
             continue;
         }
@@ -155,8 +161,8 @@ Json ToolRegistry::read_file(const Json& arguments) const {
     require_only_fields(arguments, "read_file", {"path", "offset", "max_bytes"});
     const auto requested = require_string(arguments, "path");
     const auto path = resolve_inside_root(requested);
-    if (is_protected(path)) {
-        return error_result("拒绝访问受保护的配置文件: " + requested);
+    if (is_protected(path) || is_sensitive_path(root_, path)) {
+        return error_result("拒绝访问受保护或敏感的路径: " + requested);
     }
     if (contains_ignored_component(root_, path)) {
         return error_result("拒绝访问忽略目录中的路径: " + requested);
@@ -259,8 +265,8 @@ Json ToolRegistry::search_text(const Json& arguments) const {
     }
 
     const auto target = resolve_inside_root(requested);
-    if (is_protected(target)) {
-        return error_result("拒绝访问受保护的配置文件: " + requested);
+    if (is_protected(target) || is_sensitive_path(root_, target)) {
+        return error_result("拒绝访问受保护或敏感的路径: " + requested);
     }
     if (contains_ignored_component(root_, target)) {
         return error_result("拒绝访问忽略目录中的路径: " + requested);
@@ -278,7 +284,7 @@ Json ToolRegistry::search_text(const Json& arguments) const {
             truncated = true;
             return;
         }
-        if (is_protected(path)) {
+        if (is_protected(path) || is_sensitive_path(root_, path)) {
             return;
         }
 
@@ -343,7 +349,8 @@ Json ToolRegistry::search_text(const Json& arguments) const {
             if (std::filesystem::is_symlink(status)) {
                 iterator.disable_recursion_pending();
             } else if (std::filesystem::is_directory(status)) {
-                if (is_ignored_directory(iterator->path())) {
+                if (is_ignored_directory(iterator->path()) ||
+                    is_sensitive_path(root_, iterator->path())) {
                     iterator.disable_recursion_pending();
                 }
             } else if (std::filesystem::is_regular_file(status)) {

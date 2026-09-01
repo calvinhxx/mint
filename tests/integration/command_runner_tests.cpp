@@ -312,6 +312,35 @@ TEST(CommandRunnerTest, ExecutesAuthorizedCommands) {
                     std::string::npos,
                 "unapproved environment values are not inherited");
 
+#if defined(_WIN32)
+    const auto closed_stdin_text = tools.execute(
+        {"command-stdin",
+         "run_command",
+         {{"program", program}, {"args", mint::Json::array({"--command-helper", "stdin-eof"})}}});
+#else
+    int input_pipe[2] = {-1, -1};
+    ASSERT_EQ(::pipe(input_pipe), 0);
+    const auto original_stdin = ::dup(STDIN_FILENO);
+    ASSERT_GE(original_stdin, 0);
+    constexpr std::string_view caller_input = "must-not-reach-child\n";
+    ASSERT_EQ(::write(input_pipe[1], caller_input.data(), caller_input.size()),
+              static_cast<ssize_t>(caller_input.size()));
+    ASSERT_EQ(::close(input_pipe[1]), 0);
+    ASSERT_EQ(::dup2(input_pipe[0], STDIN_FILENO), STDIN_FILENO);
+    ASSERT_EQ(::close(input_pipe[0]), 0);
+    const auto closed_stdin_text = tools.execute(
+        {"command-stdin",
+         "run_command",
+         {{"program", program}, {"args", mint::Json::array({"--command-helper", "stdin-eof"})}}});
+    ASSERT_EQ(::dup2(original_stdin, STDIN_FILENO), STDIN_FILENO);
+    ASSERT_EQ(::close(original_stdin), 0);
+#endif
+    const auto closed_stdin = mint::Json::parse(closed_stdin_text);
+    MINT_EXPECT(closed_stdin.at("exit_code") == 0 &&
+                    closed_stdin.at("output").get<std::string>().find("stdin closed") !=
+                        std::string::npos,
+                "command child receives a closed stdin instead of caller input");
+
     const auto inherited_path = workspace / "inherited.txt";
     write_text(inherited_path, "must not be inherited\n");
 #if defined(_WIN32)
@@ -527,6 +556,22 @@ TEST(CommandRunnerTest, EnforcesResourceLimits) {
                                                           .runtime = unsupported_runtime}),
                  std::invalid_argument);
 #endif
+}
+
+TEST(CommandRunnerTest, BoundsSensitivePathDiscovery) {
+    TemporaryDirectory temporary;
+    const auto workspace = temporary.path() / "workspace";
+    write_text(workspace / "first.txt", "first\n");
+    write_text(workspace / "second.txt", "second\n");
+
+    mint::ToolRuntimeSettings runtime;
+    runtime.workspace_snapshot_entries = 1;
+    EXPECT_THROW((void)mint::ToolRegistry(
+                     workspace,
+                     mint::ToolRegistryOptions{
+                         .allowed_programs = {mint_test_executable_path().generic_string()},
+                         .runtime = runtime}),
+                 std::invalid_argument);
 }
 
 TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
@@ -826,7 +871,9 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
     const auto workspace = temporary.path() / "workspace";
     const auto program = mint_test_executable_path().generic_string();
     const auto protected_secret = workspace / "protected-secret.txt";
+    const auto implicit_secret = workspace / ".env";
     write_text(protected_secret, "sandbox secret\n");
+    write_text(implicit_secret, "MINT_KEY=implicit secret\n");
 #if defined(__APPLE__)
     const auto host_temp = temporary.path() / "host-temp";
     std::filesystem::create_directories(host_temp);
@@ -957,6 +1004,16 @@ TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {
                                       protected_secret.generic_string(), "sandbox secret\n"})}}}));
     MINT_EXPECT(blocked_read.at("exit_code") != 0,
                 "sandbox blocks command reads of protected runtime files");
+
+    const auto blocked_implicit_secret = mint::Json::parse(tools.execute(
+        {"sandbox-implicit-secret-read",
+         "run_command",
+         {{"program", program},
+          {"args",
+           mint::Json::array({"--command-helper", "verify", implicit_secret.generic_string(),
+                              "MINT_KEY=implicit secret\n"})}}}));
+    MINT_EXPECT(blocked_implicit_secret.at("exit_code") != 0,
+                "sandbox blocks command reads of common credential files by default");
 
 #if defined(_WIN32)
     const auto external_directory = temporary.path() / "external-toolchain";

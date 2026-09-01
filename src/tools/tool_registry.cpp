@@ -8,6 +8,7 @@
 
 #include "file_support.hpp"
 #include "path_identity.hpp"
+#include "sensitive_path.hpp"
 #include "tool_catalog.hpp"
 #include "tool_contract.hpp"
 #include "tool_registry_command.hpp"
@@ -128,6 +129,18 @@ ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions optio
     const bool commands_enabled =
         !options.allowed_programs.empty() || !options.command_recipes.empty();
     if (commands_enabled) {
+        auto sensitive =
+            tools::detail::scan_sensitive_paths(root_, runtime_.workspace_snapshot_entries);
+        if (sensitive.truncated) {
+            throw std::invalid_argument(
+                "工作区敏感路径扫描超过 workspace_snapshot_entries 上限，拒绝启用命令");
+        }
+        for (const auto& path : sensitive.paths) {
+            append_unique_path(protected_paths_, path);
+            append_unique_path(snapshot_protected_paths_, path);
+        }
+    }
+    if (commands_enabled) {
         command_workspace_state_ = std::make_unique<CommandWorkspaceState>();
     }
     if (allow_write_ || commands_enabled) {
@@ -158,6 +171,7 @@ ToolRegistry::ToolRegistry(std::filesystem::path root, ToolRegistryOptions optio
         command_denied_paths.push_back(root_ / ".git");
         command_denied_paths.push_back(root_ / ".codex");
         command_denied_paths.push_back(root_ / ".agents");
+        command_denied_paths.push_back(root_ / ".husky");
         auto max_timeout_seconds = options.max_command_timeout_seconds;
         for (const auto& recipe : options.command_recipes) {
             max_timeout_seconds = std::max(max_timeout_seconds, recipe.timeout_seconds);
@@ -455,7 +469,8 @@ bool ToolRegistry::is_snapshot_entry_protected(const std::filesystem::path& path
 }
 
 bool ToolRegistry::is_write_allowed(const std::filesystem::path& path) const {
-    if (contains_ignored_component(root_, path)) {
+    if (contains_ignored_component(root_, path) || tools::detail::is_sensitive_path(root_, path) ||
+        tools::detail::is_reserved_write_path(root_, path)) {
         return false;
     }
     if (write_scopes_.empty()) {

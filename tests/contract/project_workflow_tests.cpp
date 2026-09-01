@@ -241,9 +241,18 @@ void test_project_detection(const std::filesystem::path& root) {
                     cmake_suggestion.policy.at("recipes").at(2).at("name") == "test" &&
                     cmake_suggestion.policy.at("recipes").at(2).at("verification") == true,
                 "CMake policy has configure/build/test recipes and a verification gate");
-    MINT_EXPECT(cmake_suggestion.policy.at("tool_limits").at("read_file_bytes") == 16 * 1024 &&
-                    cmake_suggestion.policy.at("tool_limits").at("search_max_files") == 2000,
-                "generated policy exposes tunable tool budgets instead of hiding them in code");
+    MINT_EXPECT(
+        cmake_suggestion.policy.at("tool_limits").at("read_file_bytes") == 16 * 1024 &&
+            cmake_suggestion.policy.at("tool_limits").at("search_max_files") == 2000 &&
+            cmake_suggestion.policy.at("tool_limits").at("command_resources").at("cpu_seconds") ==
+                mint::runtime_defaults::managed_command_cpu_seconds &&
+            cmake_suggestion.policy.at("tool_limits").at("command_resources").at("max_processes") ==
+                mint::runtime_defaults::managed_command_max_processes &&
+            cmake_suggestion.policy.at("tool_limits")
+                    .at("command_resources")
+                    .at("workspace_disk_bytes") ==
+                mint::runtime_defaults::managed_command_workspace_disk_bytes,
+        "generated policy exposes finite tool and command budgets");
 
     const auto cargo = root / "cargo-project";
     std::filesystem::create_directories(cargo / "src");
@@ -304,6 +313,8 @@ void test_project_detection(const std::filesystem::path& root) {
     MINT_EXPECT(generic_suggestion.policy.at("max_total_tokens") ==
                     mint::runtime_defaults::managed_max_total_tokens,
                 "new managed projects start with a finite cumulative token safety limit");
+    MINT_EXPECT(!generic_suggestion.policy.at("tool_limits").contains("command_resources"),
+                "read-only projects do not pretend to enforce unused command limits");
 }
 
 void test_project_and_task_store(const std::filesystem::path& root) {

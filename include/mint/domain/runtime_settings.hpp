@@ -21,6 +21,10 @@ inline constexpr std::size_t managed_max_context_bytes = 128 * 1024;
 inline constexpr std::size_t managed_max_total_tokens = 100'000;
 inline constexpr long managed_max_seconds = 900;
 inline constexpr long managed_recipe_timeout_seconds = 300;
+inline constexpr std::size_t managed_command_cpu_seconds = 300;
+inline constexpr std::size_t managed_command_max_processes = 256;
+inline constexpr std::size_t managed_command_workspace_disk_bytes =
+    std::size_t{16} * 1024 * 1024 * 1024;
 inline constexpr std::size_t read_file_bytes = 16 * 1024;
 inline constexpr std::size_t list_max_entries = 200;
 inline constexpr std::size_t search_file_bytes = 1024 * 1024;

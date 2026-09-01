@@ -151,6 +151,15 @@ ProjectSuggestion suggest_project_policy(const std::filesystem::path& root) {
         suggestion.evidence.push_back("no supported build manifest");
     }
 
+    ToolRuntimeSettings tool_limits;
+    if (!recipes.empty()) {
+        tool_limits.command_resources.cpu_seconds = runtime_defaults::managed_command_cpu_seconds;
+        tool_limits.command_resources.max_processes =
+            runtime_defaults::managed_command_max_processes;
+        tool_limits.command_resources.workspace_disk_bytes =
+            runtime_defaults::managed_command_workspace_disk_bytes;
+    }
+
     suggestion.policy = {{"schema_version", policy_schema_version},
                          {"write_paths", std::move(write_paths)},
                          {"recipes", std::move(recipes)},
@@ -159,7 +168,7 @@ ProjectSuggestion suggest_project_policy(const std::filesystem::path& root) {
                          {"max_context_bytes", runtime_defaults::managed_max_context_bytes},
                          {"max_total_tokens", runtime_defaults::managed_max_total_tokens},
                          {"max_seconds", runtime_defaults::managed_max_seconds},
-                         {"tool_limits", tool_runtime_settings_to_json({})}};
+                         {"tool_limits", tool_runtime_settings_to_json(tool_limits)}};
     return suggestion;
 }
 
