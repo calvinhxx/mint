@@ -1,6 +1,7 @@
 #include "provider_command.hpp"
 
 #include "provider_acceptance.hpp"
+#include "provider_credentials.hpp"
 
 #include "mint/infrastructure/config.hpp"
 #include "mint/infrastructure/model_provider_client.hpp"
@@ -56,9 +57,14 @@ Json provider_report(const CommandLine& command_line, const ModelProviderConfig&
     if (!config.api_key_env.empty()) {
         report["authentication"] = "environment";
         report["api_key_env"] = config.api_key_env;
+        report["credential_warning"] = nullptr;
     } else {
         report["authentication"] = config.api_key.empty() ? "none" : "inline_api_key";
         report["api_key_env"] = nullptr;
+        report["credential_warning"] =
+            config.api_key.empty()
+                ? Json(nullptr)
+                : Json(std::string(provider_detail::inline_api_key_deprecation_message));
     }
     return report;
 }
@@ -81,6 +87,10 @@ void print_provider(const Json& report, Console& console) {
     if (report.at("api_key_env").is_string()) {
         console.write_line("API Key env: ",
                            escape_terminal_field(report.at("api_key_env").get<std::string>()));
+    }
+    if (report.at("credential_warning").is_string()) {
+        console.write_line(
+            "Warning: ", escape_terminal_field(report.at("credential_warning").get<std::string>()));
     }
     console.write_line(
         "Capabilities: tools=", enabled(capabilities.at("function_tools").get<bool>()),

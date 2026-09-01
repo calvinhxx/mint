@@ -1,4 +1,5 @@
 #include "agent_command_internal.hpp"
+#include "provider_credentials.hpp"
 
 #include "mint/infrastructure/config.hpp"
 #include "mint/runtime/terminal_text.hpp"
@@ -283,6 +284,9 @@ std::unique_ptr<ModelClient> create_model(const CommandLine& command_line,
                 " 中的 api_key 为空；只有不需要密钥的本地接口可以这样运行。");
         } else if (!config.api_key_env.empty()) {
             console.write_line("模型认证: 环境变量 ", escape_terminal_field(config.api_key_env));
+        } else {
+            console.write_line("警告: ", escape_terminal_field(
+                                             provider_detail::inline_api_key_deprecation_message));
         }
         console.write_line(
             "模型配置: ", escape_terminal_field(command_line.config.generic_string()), "（",

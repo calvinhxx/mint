@@ -574,6 +574,7 @@ TEST(ProviderCliContractTest, ReportsCapabilitiesWithoutReadingOrPrintingApiKeys
     EXPECT_EQ(report.at("adapter"), "chat_completions");
     EXPECT_EQ(report.at("authentication"), "environment");
     EXPECT_EQ(report.at("api_key_env"), "GROQ_API_KEY");
+    EXPECT_TRUE(report.at("credential_warning").is_null());
     EXPECT_EQ(report.at("limits").at("max_request_tokens"), 8000);
     EXPECT_EQ(report.at("limits").at("max_request_tokens_source"), "config");
     EXPECT_TRUE(report.at("limits").at("response_header_max_request_tokens").is_null());
@@ -608,6 +609,18 @@ TEST(ProviderCliContractTest, ReportsCapabilitiesWithoutReadingOrPrintingApiKeys
     EXPECT_TRUE(inline_report.at("limits").at("response_header_max_request_tokens").is_null());
     EXPECT_EQ(inline_report.at("limits").at("request_token_safety_margin"), 384);
     EXPECT_EQ(inline_report.at("limits").at("request_token_estimate_bytes_per_token"), 2);
+    EXPECT_EQ(inline_report.at("authentication"), "inline_api_key");
+    const auto credential_warning = inline_report.at("credential_warning").get<std::string>();
+    EXPECT_NE(credential_warning.find("api_key_env"), std::string::npos);
+    EXPECT_NE(credential_warning.find("仍兼容内联密钥"), std::string::npos);
+    EXPECT_EQ(inline_report.dump().find("do-not-print-this"), std::string::npos);
+
+    command_line.json_output = false;
+    output.str({});
+    output.clear();
+    EXPECT_EQ(mint::cli::run_provider_command(command_line, console), 0);
+    EXPECT_NE(output.str().find(credential_warning), std::string::npos);
+    EXPECT_EQ(output.str().find("do-not-print-this"), std::string::npos);
 }
 
 TEST(ProviderCliContractTest, HumanReportEscapesTerminalControls) {
