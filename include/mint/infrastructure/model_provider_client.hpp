@@ -67,8 +67,10 @@ inline constexpr long max_request_tokens = 0;
 inline constexpr long request_token_safety_margin = 256;
 inline constexpr long request_token_estimate_bytes_per_token =
     static_cast<long>(model_token_estimation::serialized_bytes_per_token);
-// Used until a provider advertises its own token-rate ceiling. Keeping the
-// first request modest makes unknown OpenAI-compatible endpoints predictable.
+// EN: Used until a provider advertises its own token-rate ceiling. Keeping the first request
+//     modest makes unknown OpenAI-compatible endpoints predictable.
+// ZH-CN: 在供应商返回自身 token 速率上限前使用该值。控制首次请求规模，可让未知的
+//        OpenAI 兼容端点保持可预测。
 inline constexpr std::size_t automatic_max_request_tokens = 8'000;
 
 } // namespace model_provider_defaults
@@ -209,7 +211,8 @@ class ModelProviderClient final : public ModelClient {
     std::size_t learned_max_request_tokens_ = 0;
 };
 
-// Deterministic and network-free. It demonstrates the loop, not model quality.
+// EN: Deterministic and network-free. It demonstrates the loop, not model quality.
+// ZH-CN: 行为确定且不访问网络；它只演示 Agent 循环，不代表模型质量。
 class DemoModelClient final : public ModelClient {
   public:
     ModelReply complete(const Json& messages, const Json& tools) override;

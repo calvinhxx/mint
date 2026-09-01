@@ -1,0 +1,34 @@
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <string_view>
+
+namespace mint::localization {
+
+enum class Message : std::size_t {
+@MINT_MESSAGE_ENUMERATORS@};
+
+enum class Placeholder : std::size_t {
+@MINT_PLACEHOLDER_ENUMERATORS@};
+
+namespace detail {
+
+inline constexpr std::array<std::string_view, @MINT_MESSAGE_COUNT@> message_keys = {
+@MINT_MESSAGE_KEYS@};
+
+inline constexpr std::array<std::string_view, @MINT_PLACEHOLDER_COUNT@> placeholder_names = {
+@MINT_PLACEHOLDER_NAMES@};
+
+[[nodiscard]] constexpr std::string_view message_key(Message message) noexcept {
+    const auto index = static_cast<std::size_t>(message);
+    return index < message_keys.size() ? message_keys[index] : std::string_view{};
+}
+
+[[nodiscard]] constexpr std::string_view placeholder_name(Placeholder placeholder) noexcept {
+    const auto index = static_cast<std::size_t>(placeholder);
+    return index < placeholder_names.size() ? placeholder_names[index] : std::string_view{};
+}
+
+} // namespace detail
+} // namespace mint::localization

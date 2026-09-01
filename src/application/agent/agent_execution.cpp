@@ -1,5 +1,7 @@
 #include "agent_execution.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
@@ -7,9 +9,15 @@
 namespace mint::agent_detail {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 std::size_t required_size(const Json& object, const char* field) {
     if (!object.contains(field) || !object.at(field).is_number_unsigned()) {
-        throw std::invalid_argument("会话执行摘要字段无效: " + std::string(field));
+        throw std::invalid_argument(
+            message(Message::agent_execution_field_invalid, {arg(Placeholder::field, field)}));
     }
     return object.at(field).get<std::size_t>();
 }
@@ -120,7 +128,7 @@ Json execution_to_json(const ExecutionSummary& summary) {
 
 ExecutionSummary execution_from_json(const Json& value) {
     if (!value.is_object()) {
-        throw std::invalid_argument("会话执行摘要格式无效");
+        throw std::invalid_argument(message(Message::agent_execution_invalid));
     }
     ExecutionSummary result;
     result.tool_calls = required_size(value, "tool_calls");
@@ -140,12 +148,13 @@ ExecutionSummary execution_from_json(const Json& value) {
     result.last_file_change_call = required_size(value, "last_file_change_call");
     result.last_command_call = required_size(value, "last_command_call");
     if (!value.contains("last_command_outcome") || !value.at("last_command_outcome").is_string()) {
-        throw std::invalid_argument("会话执行摘要缺少 last_command_outcome");
+        throw std::invalid_argument(message(Message::agent_execution_command_outcome_missing));
     }
     result.last_command_outcome = value.at("last_command_outcome").get<std::string>();
     if (value.contains("last_command_verification_eligible")) {
         if (!value.at("last_command_verification_eligible").is_boolean()) {
-            throw std::invalid_argument("会话执行摘要 last_command_verification_eligible 无效");
+            throw std::invalid_argument(
+                message(Message::agent_execution_verification_eligible_invalid));
         }
         result.last_command_verification_eligible =
             value.at("last_command_verification_eligible").get<bool>();
@@ -172,7 +181,7 @@ ExecutionSummary execution_from_json(const Json& value) {
         (result.command_calls != 0 && result.last_command_call == 0) ||
         (result.file_changes == 0 && result.last_file_change_call != 0) ||
         (result.file_changes != 0 && result.last_file_change_call == 0)) {
-        throw std::invalid_argument("会话执行摘要计数不一致");
+        throw std::invalid_argument(message(Message::agent_execution_count_mismatch));
     }
     return result;
 }
@@ -185,7 +194,7 @@ ToolCall tool_call_from_json(const Json& value) {
     if (!value.is_object() || !value.contains("id") || !value.at("id").is_string() ||
         !value.contains("name") || !value.at("name").is_string() || !value.contains("arguments") ||
         !value.at("arguments").is_object()) {
-        throw std::invalid_argument("会话中的待执行工具调用格式无效");
+        throw std::invalid_argument(message(Message::agent_execution_pending_tool_invalid));
     }
     return {value.at("id").get<std::string>(), value.at("name").get<std::string>(),
             value.at("arguments")};

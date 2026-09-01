@@ -5,6 +5,7 @@
 #include "agent_model_summary.hpp"
 #include "agent_reporting.hpp"
 
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/terminal_text.hpp"
 
 #include <chrono>
@@ -13,6 +14,10 @@
 
 namespace mint::agent_detail {
 namespace {
+
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 const char* recovery_name(ChangeTransactionRecovery recovery) {
     switch (recovery) {
@@ -50,7 +55,7 @@ AgentResult AgentRun::run() {
         }
         if (tools_.workspace_integrity_failed()) {
             return finish("failed", "workspace_integrity_failed",
-                          "命令修改了未获授权或无法安全审计的工作区路径；任务已失败。");
+                          message(Message::agent_finish_workspace_integrity_failed));
         }
         if (auto exhausted = finish_if_token_budget_exhausted()) {
             return std::move(*exhausted);
@@ -63,7 +68,7 @@ AgentResult AgentRun::run() {
             model_calls_this_run_ >= options_.max_turns && can_request_verified_final_answer();
         if (model_calls_this_run_ >= options_.max_turns && !final_answer_only) {
             return finish("max_turns", "max_turns_exhausted",
-                          "达到本次运行的最大轮数，任务尚未完成；可以使用会话快照继续。");
+                          message(Message::agent_finish_max_turns));
         }
 
         ModelReply reply;
@@ -86,20 +91,18 @@ AgentResult AgentRun::run() {
             return std::move(*exhausted);
         }
         if (final_answer_only && !pending_calls_.empty()) {
-            return finish(
-                "max_turns", "verified_final_answer_missing",
-                "最新修改已经通过验证，但模型没有在最终回答轮返回文本；可以使用会话快照继续。");
+            return finish("max_turns", "verified_final_answer_missing",
+                          message(Message::agent_finish_final_answer_missing));
         }
         if (final_answer_only && reply.text.empty()) {
-            return finish(
-                "max_turns", "verified_final_answer_missing",
-                "最新修改已经通过验证，但模型没有在最终回答轮返回文本；可以使用会话快照继续。");
+            return finish("max_turns", "verified_final_answer_missing",
+                          message(Message::agent_finish_final_answer_missing));
         }
         if (!pending_calls_.empty()) {
             continue;
         }
         if (reply.text.empty()) {
-            throw std::runtime_error("模型既没有回答，也没有调用工具");
+            throw std::runtime_error(message(Message::agent_reply_empty));
         }
         if (block_unverified_finish()) {
             continue;
@@ -111,30 +114,31 @@ AgentResult AgentRun::run() {
 void AgentRun::initialize() {
     if (!options_.resume_session) {
         if (user_request_.empty()) {
-            throw std::invalid_argument("任务内容不能为空");
+            throw std::invalid_argument(message(Message::agent_task_empty));
         }
         const auto capabilities = tools_.capabilities();
         if (capabilities.durable_change_transactions && services_.session_repository == nullptr) {
-            throw std::invalid_argument("changeset 事务日志必须与会话 checkpoint 一起使用");
+            throw std::invalid_argument(
+                message(Message::agent_session_transaction_requires_checkpoint));
         }
         if (services_.session_repository != nullptr && services_.session_repository->exists()) {
-            throw std::invalid_argument("会话快照已存在；请使用恢复模式或选择新的会话路径");
+            throw std::invalid_argument(message(Message::agent_session_snapshot_exists));
         }
         transaction_recovery_ = tools_.reconcile_change_transaction(std::nullopt);
         return;
     }
     if (!user_request_.empty()) {
-        throw std::invalid_argument("恢复会话时不能同时提供新的任务内容");
+        throw std::invalid_argument(message(Message::agent_session_resume_task_conflict));
     }
     if (!services_.session_repository->exists()) {
-        throw std::invalid_argument("找不到要恢复的会话快照");
+        throw std::invalid_argument(message(Message::agent_session_snapshot_missing));
     }
 
     auto restored = restore_session(
         services_.session_repository->load(), tools_, options_.require_verification_after_write,
         options_.max_context_bytes, options_.max_total_tokens, options_.retry_in_flight_tool);
     if (restored.result.model.max_total_tokens != options_.max_total_tokens) {
-        throw std::invalid_argument("恢复会话时必须使用与原任务相同的累计 Token 预算");
+        throw std::invalid_argument(message(Message::agent_session_token_budget_mismatch));
     }
     user_request_ = std::move(restored.user_request);
     conversation_ = Conversation::restore(std::move(restored.messages));
@@ -199,7 +203,8 @@ std::optional<AgentResult> AgentRun::finish_if_stopped() {
     }
     return finish(reason == "cancelled" ? "cancelled" : "timed_out",
                   reason == "cancelled" ? "user_cancelled" : "total_budget_exhausted",
-                  reason == "cancelled" ? "任务已取消。" : "任务超过总时间预算。");
+                  message(reason == "cancelled" ? Message::agent_finish_cancelled
+                                                : Message::agent_finish_timed_out));
 }
 
 std::optional<AgentResult> AgentRun::finish_if_token_budget_exhausted() {
@@ -212,14 +217,14 @@ std::optional<AgentResult> AgentRun::finish_if_token_budget_exhausted() {
                                     {"usage_reports", result_.model.usage_reports},
                                     {"pending_tool_call_count", pending_calls_.size()}});
     return finish("budget_exhausted", "max_total_tokens_exhausted",
-                  "达到任务累计 Token 预算；已停止后续模型请求和工具执行。");
+                  message(Message::agent_finish_token_budget_exhausted));
 }
 
 AgentResult AgentRun::finish(std::string status, std::string reason, std::string answer) {
     if (status != "failed" && tools_.workspace_integrity_failed()) {
         status = "failed";
         reason = "workspace_integrity_failed";
-        answer = "命令修改了未获授权或无法安全审计的工作区路径；任务已失败。";
+        answer = message(Message::agent_finish_workspace_integrity_failed);
     }
     result_.status = std::move(status);
     result_.completed = result_.status == "completed";
@@ -241,9 +246,12 @@ AgentResult AgentRun::finish(std::string status, std::string reason, std::string
           {"model", model_summary_to_json(result_.model)},
           {"changed_file_count", result_.changes.files.size()}});
     if (result_.completed) {
-        output_ << "\n[最终回答]\n" << escape_terminal_text(result_.answer) << '\n';
+        output_ << message(Message::agent_output_final_answer)
+                << escape_terminal_text(result_.answer) << '\n';
     } else {
-        output_ << "\n[停止] " << escape_terminal_field(result_.answer) << '\n';
+        output_ << message(
+            Message::agent_output_stopped,
+            {localization::arg(Placeholder::reason, escape_terminal_field(result_.answer))});
     }
     print_final_state(output_, result_);
     return result_;

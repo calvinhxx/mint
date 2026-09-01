@@ -1,11 +1,18 @@
 #include "agent_model_summary.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <limits>
 #include <stdexcept>
 #include <string_view>
 
 namespace mint::agent_detail {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 void saturating_add(std::size_t& target, std::size_t value) noexcept {
     constexpr auto maximum = std::numeric_limits<std::size_t>::max();
@@ -157,12 +164,13 @@ Json model_summary_to_json(const ModelSummary& summary) {
 
 ModelSummary model_summary_from_json(const Json& value) {
     if (!value.is_object()) {
-        throw std::invalid_argument("会话模型摘要格式无效");
+        throw std::invalid_argument(message(Message::agent_model_summary_invalid));
     }
     ModelSummary summary;
     const auto read_size = [&](const char* field) {
         if (!value.contains(field) || !value.at(field).is_number_unsigned()) {
-            throw std::invalid_argument("会话模型摘要字段无效: " + std::string(field));
+            throw std::invalid_argument(message(Message::agent_model_summary_field_invalid,
+                                                {arg(Placeholder::field, field)}));
         }
         return value.at(field).get<std::size_t>();
     };
@@ -179,7 +187,8 @@ ModelSummary model_summary_from_json(const Json& value) {
             return std::size_t{0};
         }
         if (!value.at(field).is_number_unsigned()) {
-            throw std::invalid_argument("会话模型摘要字段无效: " + std::string(field));
+            throw std::invalid_argument(message(Message::agent_model_summary_field_invalid,
+                                                {arg(Placeholder::field, field)}));
         }
         return value.at(field).get<std::size_t>();
     };
@@ -195,30 +204,31 @@ ModelSummary model_summary_from_json(const Json& value) {
             !budget.contains("usage_coverage") || !budget.at("usage_coverage").is_string() ||
             !budget.contains("enforcement") || !budget.at("enforcement").is_string() ||
             !budget.contains("exhausted") || !budget.at("exhausted").is_boolean()) {
-            throw std::invalid_argument("会话模型摘要 Token 预算无效");
+            throw std::invalid_argument(message(Message::agent_model_summary_token_budget_invalid));
         }
         summary.max_total_tokens = budget.at("max_total_tokens").get<std::size_t>();
         if (summary.max_total_tokens > runtime_bounds::max_total_tokens) {
-            throw std::invalid_argument("会话模型摘要 Token 预算超出范围");
+            throw std::invalid_argument(message(Message::agent_model_summary_token_budget_range));
         }
         const auto expected = token_budget_to_json(summary);
         if (budget.at("reported_total_tokens") != expected.at("reported_total_tokens") ||
             budget.at("usage_coverage") != expected.at("usage_coverage") ||
             budget.at("enforcement") != expected.at("enforcement") ||
             budget.at("exhausted") != expected.at("exhausted")) {
-            throw std::invalid_argument("会话模型摘要 Token 预算状态不一致");
+            throw std::invalid_argument(
+                message(Message::agent_model_summary_token_budget_mismatch));
         }
     }
     if (!value.contains("duration_ms") || !value.at("duration_ms").is_number_integer() ||
         !value.contains("adapter") || !value.at("adapter").is_string() ||
         !value.contains("model") || !value.at("model").is_string()) {
-        throw std::invalid_argument("会话模型摘要标识或耗时无效");
+        throw std::invalid_argument(message(Message::agent_model_summary_identity_invalid));
     }
     summary.duration_ms = value.at("duration_ms").get<long long>();
     summary.adapter = value.at("adapter").get<std::string>();
     if (value.contains("provider")) {
         if (!value.at("provider").is_string()) {
-            throw std::invalid_argument("会话模型摘要 provider 无效");
+            throw std::invalid_argument(message(Message::agent_model_summary_provider_invalid));
         }
         summary.provider = value.at("provider").get<std::string>();
     }
@@ -226,7 +236,7 @@ ModelSummary model_summary_from_json(const Json& value) {
     if (value.contains("last_response_id") && value.at("last_response_id").is_string()) {
         summary.last_response_id = value.at("last_response_id").get<std::string>();
     } else if (!value.contains("last_response_id") || !value.at("last_response_id").is_null()) {
-        throw std::invalid_argument("会话模型摘要 response id 无效");
+        throw std::invalid_argument(message(Message::agent_model_summary_response_id_invalid));
     }
     summary.max_request_tokens = read_optional_size("max_request_tokens");
     if (value.contains("max_request_tokens_source") &&
@@ -235,7 +245,8 @@ ModelSummary model_summary_from_json(const Json& value) {
             value.at("max_request_tokens_source").get<std::string>();
     } else if (value.contains("max_request_tokens_source") &&
                !value.at("max_request_tokens_source").is_null()) {
-        throw std::invalid_argument("会话模型摘要请求预算来源无效");
+        throw std::invalid_argument(
+            message(Message::agent_model_summary_request_budget_source_invalid));
     }
     if (value.contains("response_header_max_request_tokens") &&
         !value.at("response_header_max_request_tokens").is_null()) {
@@ -246,18 +257,19 @@ ModelSummary model_summary_from_json(const Json& value) {
         summary.request_token_estimate_bytes_per_token =
             read_optional_size("request_token_estimate_bytes_per_token");
         if (summary.request_token_estimate_bytes_per_token == 0) {
-            throw std::invalid_argument("会话模型摘要 Token 估算无效");
+            throw std::invalid_argument(
+                message(Message::agent_model_summary_token_estimate_invalid));
         }
     }
     if (summary.attempts < summary.calls || summary.retries > summary.attempts ||
         summary.usage_reports > summary.calls || summary.duration_ms < 0 ||
         summary.cached_tokens > summary.prompt_tokens || summary.streamed_calls > summary.calls) {
-        throw std::invalid_argument("会话模型摘要计数不一致");
+        throw std::invalid_argument(message(Message::agent_model_summary_count_mismatch));
     }
     if (summary.usage_reports == 0 &&
         (summary.prompt_tokens != 0 || summary.completion_tokens != 0 ||
          summary.total_tokens != 0 || summary.cached_tokens != 0)) {
-        throw std::invalid_argument("会话模型摘要在缺少 usage 时包含 Token 计数");
+        throw std::invalid_argument(message(Message::agent_model_summary_usage_missing));
     }
     return summary;
 }
@@ -266,12 +278,18 @@ void print_model_usage(std::ostream& output, const ModelUsage& usage) {
     if (!usage.available) {
         return;
     }
-    output << "[Token] 输入 " << usage.prompt_tokens;
+    output << message(Message::agent_output_token_input,
+                      {arg(Placeholder::input, usage.prompt_tokens)});
     if (usage.prompt_tokens != 0) {
-        output << "（缓存 " << usage.cached_tokens << "，命中 "
-               << static_cast<std::size_t>(*model_usage::cache_hit_rate(usage) * 100.0) << "%）";
+        output << message(
+            Message::agent_output_token_cache,
+            {arg(Placeholder::cached, usage.cached_tokens),
+             arg(Placeholder::hit_rate,
+                 static_cast<std::size_t>(*model_usage::cache_hit_rate(usage) * 100.0))});
     }
-    output << "，输出 " << usage.completion_tokens << "，合计 " << usage.total_tokens << '\n';
+    output << message(Message::agent_output_token_output,
+                      {arg(Placeholder::output, usage.completion_tokens),
+                       arg(Placeholder::total, usage.total_tokens)});
 }
 
 } // namespace mint::agent_detail

@@ -15,8 +15,10 @@ using Json = nlohmann::json;
 
 namespace model_token_estimation {
 
-// Two serialized bytes per token is deliberately conservative for mixed CJK,
-// code and JSON payloads. Providers with a known tokenizer may override it.
+// EN: Two serialized bytes per token is deliberately conservative for mixed CJK, code and JSON
+//     payloads. Providers with a known tokenizer may override it.
+// ZH-CN: 对中英文、代码和 JSON 混合载荷，按每个 token 两个序列化字节估算是有意采用的
+//        保守值；已知 tokenizer 的供应商可以覆盖它。
 inline constexpr std::size_t serialized_bytes_per_token = 2;
 
 [[nodiscard]] constexpr std::size_t
@@ -52,9 +54,12 @@ struct ModelUsage {
 
 namespace model_usage {
 
-// Cache hits are always measured against normalized prompt/input tokens. Providers use
-// different wire names for these values, but protocol adapters populate ModelUsage before this
-// calculation. A response with no prompt tokens has no meaningful hit-rate denominator.
+// EN: Cache hits are always measured against normalized prompt/input tokens. Providers use
+//     different wire names for these values, but protocol adapters populate ModelUsage before
+//     this calculation. A response with no prompt tokens has no meaningful hit-rate denominator.
+// ZH-CN: 缓存命中始终相对归一化后的 prompt/input token 计算。供应商在线路协议中使用不同
+//        字段名，但协议适配器会在计算前填充 ModelUsage。没有 prompt token 的响应不存在
+//        有意义的命中率分母。
 [[nodiscard]] constexpr std::optional<double> cache_hit_rate(std::size_t cached_tokens,
                                                              std::size_t prompt_tokens) noexcept {
     if (prompt_tokens == 0) {
@@ -110,9 +115,11 @@ struct ModelCallMetadata {
     bool streamed = false;
     std::size_t stream_events = 0;
     std::size_t streamed_bytes = 0;
-    // The current response header, retained for transport diagnostics.
+    // EN: The current response header, retained for transport diagnostics.
+    // ZH-CN: 当前响应返回的上限，保留用于传输诊断。
     std::size_t request_token_limit = 0;
-    // Effective request budget after applying config and learned headers.
+    // EN: Effective request budget after applying config and learned headers.
+    // ZH-CN: 合并配置与已学习响应头后生效的请求预算。
     std::size_t max_request_tokens = 0;
     ModelRequestLimitSource max_request_tokens_source = ModelRequestLimitSource::unknown;
     std::size_t response_header_max_request_tokens = 0;
@@ -128,8 +135,9 @@ struct ModelReply {
     ModelCallMetadata metadata{};
 };
 
-// A zero maximum means that the provider has not advertised a request budget.
-// Reserved values describe tokens unavailable to conversation messages.
+// EN: A zero maximum means that the provider has not advertised a request budget. Reserved values
+//     describe tokens unavailable to conversation messages.
+// ZH-CN: 最大值为零表示供应商尚未声明请求预算；预留值表示不能分配给会话消息的 token。
 struct ModelRequestLimits {
     std::size_t max_request_tokens = 0;
     std::size_t reserved_output_tokens = 0;

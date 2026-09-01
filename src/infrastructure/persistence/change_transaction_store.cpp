@@ -1,6 +1,7 @@
 #include "mint/infrastructure/change_transaction_store.hpp"
 
 #include "mint/infrastructure/session_store.hpp"
+#include "mint/localization/localization.hpp"
 
 #include "filesystem/output_path.hpp"
 
@@ -22,9 +23,15 @@
 namespace mint {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 std::filesystem::path checked_transaction_path(std::filesystem::path path) {
     return infrastructure_detail::validated_output_path(
-        std::move(path), "changeset 事务日志", infrastructure_detail::HardLinkPolicy::reject);
+        std::move(path), message(Message::label_changeset_journal),
+        infrastructure_detail::HardLinkPolicy::reject);
 }
 
 } // namespace
@@ -56,7 +63,7 @@ std::unique_ptr<ChangeTransactionStore::LockState>
 ChangeTransactionStore::acquire_lock(const std::filesystem::path& transaction_path) {
     auto state = std::make_unique<ChangeTransactionStore::LockState>();
     const auto path = infrastructure_detail::validated_output_path(
-        change_transaction_lock_path(transaction_path), "changeset 事务锁",
+        change_transaction_lock_path(transaction_path), message(Message::label_changeset_lock),
         infrastructure_detail::HardLinkPolicy::reject);
 #if defined(_WIN32)
     state->handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
@@ -64,16 +71,16 @@ ChangeTransactionStore::acquire_lock(const std::filesystem::path& transaction_pa
                                   FILE_ATTRIBUTE_NORMAL, nullptr);
     if (state->handle == INVALID_HANDLE_VALUE) {
         throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(),
-                                "无法打开 changeset 事务锁");
+                                message(Message::persistence_transaction_open_lock_failed));
     }
     if (!::LockFileEx(state->handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0,
                       MAXDWORD, MAXDWORD, &state->overlapped)) {
         const auto error = ::GetLastError();
         if (error == ERROR_LOCK_VIOLATION) {
-            throw std::runtime_error("另一个 mint 进程正在修改该任务的工作区");
+            throw std::runtime_error(message(Message::persistence_transaction_locked));
         }
         throw std::system_error(static_cast<int>(error), std::system_category(),
-                                "无法锁定 changeset 事务日志");
+                                message(Message::persistence_transaction_lock_failed));
     }
 #else
     int flags = O_CREAT | O_RDWR;
@@ -85,13 +92,15 @@ ChangeTransactionStore::acquire_lock(const std::filesystem::path& transaction_pa
 #endif
     state->descriptor = ::open(path.c_str(), flags, S_IRUSR | S_IWUSR);
     if (state->descriptor < 0) {
-        throw std::system_error(errno, std::generic_category(), "无法打开 changeset 事务锁");
+        throw std::system_error(errno, std::generic_category(),
+                                message(Message::persistence_transaction_open_lock_failed));
     }
     if (::flock(state->descriptor, LOCK_EX | LOCK_NB) != 0) {
         if (errno == EWOULDBLOCK || errno == EAGAIN) {
-            throw std::runtime_error("另一个 mint 进程正在修改该任务的工作区");
+            throw std::runtime_error(message(Message::persistence_transaction_locked));
         }
-        throw std::system_error(errno, std::generic_category(), "无法锁定 changeset 事务日志");
+        throw std::system_error(errno, std::generic_category(),
+                                message(Message::persistence_transaction_lock_failed));
     }
 #endif
     return state;
@@ -123,14 +132,15 @@ void ChangeTransactionStore::clear() const {
     std::error_code error;
     const bool removed = std::filesystem::remove(checked, error);
     if (error || (!removed && std::filesystem::exists(checked))) {
-        throw std::runtime_error("无法删除 changeset 事务日志: " + error.message());
+        throw std::runtime_error(message(Message::persistence_transaction_remove_failed,
+                                         {arg(Placeholder::error, error.message())}));
     }
 }
 
 std::filesystem::path
 change_transaction_path_for_session(const std::filesystem::path& session_path) {
     if (session_path.empty() || session_path.filename().empty()) {
-        throw std::invalid_argument("会话路径不能为空");
+        throw std::invalid_argument(message(Message::persistence_transaction_session_path_empty));
     }
     const auto filename = session_path.filename();
     if (filename == "session.json") {
@@ -141,7 +151,7 @@ change_transaction_path_for_session(const std::filesystem::path& session_path) {
 
 std::filesystem::path change_transaction_lock_path(const std::filesystem::path& transaction_path) {
     if (transaction_path.empty() || transaction_path.filename().empty()) {
-        throw std::invalid_argument("changeset 事务日志路径不能为空");
+        throw std::invalid_argument(message(Message::persistence_transaction_path_empty));
     }
     return transaction_path.parent_path() / (transaction_path.filename().string() + ".lock");
 }

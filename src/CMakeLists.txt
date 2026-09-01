@@ -1,3 +1,4 @@
+add_subdirectory(localization)
 add_subdirectory(domain)
 add_subdirectory(ports)
 add_subdirectory(runtime)
@@ -8,6 +9,7 @@ add_subdirectory(application)
 add_library(mint_core INTERFACE)
 add_library(mint::core ALIAS mint_core)
 target_link_libraries(mint_core INTERFACE
+    mint::localization
     mint::agent
     mint::command
     mint::filesystem

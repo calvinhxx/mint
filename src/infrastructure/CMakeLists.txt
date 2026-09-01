@@ -4,6 +4,7 @@ add_library(mint_filesystem STATIC
 )
 add_library(mint::filesystem ALIAS mint_filesystem)
 mint_configure_target(mint_filesystem)
+target_link_libraries(mint_filesystem PRIVATE mint::localization)
 
 if(WIN32)
     target_link_libraries(mint_filesystem PRIVATE advapi32)
@@ -22,6 +23,7 @@ target_link_libraries(mint_logging
         mint::domain
     PRIVATE
         mint::filesystem
+        mint::localization
         mint::runtime
         spdlog::spdlog
 )
@@ -51,6 +53,7 @@ target_link_libraries(mint_command
         mint::domain
         mint::runtime
     PRIVATE
+        mint::localization
         mint::logging
 )
 
@@ -79,6 +82,7 @@ target_link_libraries(mint_model
         mint::ports
     PRIVATE
         CURL::libcurl
+        mint::localization
         mint::logging
         mint::runtime
 )
@@ -98,5 +102,6 @@ target_link_libraries(mint_persistence
         mint::ports
     PRIVATE
         mint::filesystem
+        mint::localization
         mint::runtime
 )

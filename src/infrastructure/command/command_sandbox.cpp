@@ -1,5 +1,6 @@
 #include "command_sandbox.hpp"
 
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/path.hpp"
 
 #include <algorithm>
@@ -21,6 +22,11 @@
 
 namespace mint::command_detail {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 bool contains_nul(std::string_view value) {
     return value.find('\0') != std::string_view::npos;
@@ -64,19 +70,21 @@ normalize_read_only_paths(const std::filesystem::path& workspace,
         path = std::filesystem::weakly_canonical(std::move(path), error);
         if (error || path.empty() || !path.is_absolute() || !std::filesystem::exists(path, error) ||
             error) {
-            throw std::invalid_argument("命令外部只读路径不存在或不是绝对路径");
+            throw std::invalid_argument(message(Message::command_sandbox_read_path_invalid));
         }
         if (is_path_within(workspace, path) || is_path_within(path, workspace)) {
-            throw std::invalid_argument("命令外部只读路径不能位于工作区内或包含工作区: " +
-                                        path.generic_string());
+            throw std::invalid_argument(
+                message(Message::command_sandbox_read_path_workspace_overlap,
+                        {arg(Placeholder::path, path.generic_string())}));
         }
         for (const auto& denied_input : denied_paths) {
             error.clear();
             const auto denied = std::filesystem::weakly_canonical(denied_input, error);
             if (!error && !denied.empty() &&
                 (is_path_within(path, denied) || is_path_within(denied, path))) {
-                throw std::invalid_argument("命令外部只读路径不能与保护路径重叠: " +
-                                            path.generic_string());
+                throw std::invalid_argument(
+                    message(Message::command_sandbox_read_path_protected_overlap,
+                            {arg(Placeholder::path, path.generic_string())}));
             }
         }
         normalized.push_back(std::move(path));
@@ -94,18 +102,20 @@ bool is_executable_file(const std::filesystem::path& path) {
 
 std::filesystem::path find_executable(const std::string& requested) {
     if (requested.empty() || contains_nul(requested)) {
-        throw std::invalid_argument("程序名称不能为空或包含 NUL");
+        throw std::invalid_argument(message(Message::command_program_empty));
     }
 
     const std::filesystem::path input(requested);
     if (input.has_parent_path()) {
         if (!input.is_absolute()) {
-            throw std::invalid_argument("带路径的程序必须使用绝对路径: " + requested);
+            throw std::invalid_argument(
+                message(Message::command_program_absolute, {arg(Placeholder::program, requested)}));
         }
         std::error_code error;
         const auto resolved = std::filesystem::weakly_canonical(input, error);
         if (error || !is_executable_file(resolved)) {
-            throw std::invalid_argument("程序不存在或不可执行: " + requested);
+            throw std::invalid_argument(message(Message::command_program_not_executable,
+                                                {arg(Placeholder::program, requested)}));
         }
         return resolved;
     }
@@ -114,7 +124,8 @@ std::filesystem::path find_executable(const std::string& requested) {
         const auto value = static_cast<unsigned char>(character);
         if (!std::isalnum(value) && character != '_' && character != '-' && character != '+' &&
             character != '.') {
-            throw std::invalid_argument("程序名称包含不支持的字符: " + requested);
+            throw std::invalid_argument(message(Message::command_program_invalid_characters,
+                                                {arg(Placeholder::program, requested)}));
         }
     }
 
@@ -142,7 +153,8 @@ std::filesystem::path find_executable(const std::string& requested) {
         }
         begin = end + 1;
     }
-    throw std::invalid_argument("在 PATH 中找不到程序: " + requested);
+    throw std::invalid_argument(
+        message(Message::command_program_not_found, {arg(Placeholder::program, requested)}));
 }
 
 #if defined(__APPLE__)
@@ -196,20 +208,22 @@ std::filesystem::path canonical_executable(const std::filesystem::path& candidat
     std::error_code error;
     const auto resolved = std::filesystem::weakly_canonical(candidate, error);
     if (error || !is_windows_executable_file(resolved)) {
-        throw std::invalid_argument("程序不存在或不可执行: " + requested);
+        throw std::invalid_argument(message(Message::command_program_not_executable,
+                                            {arg(Placeholder::program, requested)}));
     }
     return resolved;
 }
 
 std::filesystem::path find_executable(const std::string& requested) {
     if (requested.empty() || contains_nul(requested)) {
-        throw std::invalid_argument("程序名称不能为空或包含 NUL");
+        throw std::invalid_argument(message(Message::command_program_empty));
     }
 
     const std::filesystem::path input(requested);
     if (input.has_parent_path()) {
         if (!input.is_absolute()) {
-            throw std::invalid_argument("带路径的程序必须使用绝对路径: " + requested);
+            throw std::invalid_argument(
+                message(Message::command_program_absolute, {arg(Placeholder::program, requested)}));
         }
         return canonical_executable(input, requested);
     }
@@ -218,7 +232,8 @@ std::filesystem::path find_executable(const std::string& requested) {
         const auto value = static_cast<unsigned char>(character);
         if (!std::isalnum(value) && character != '_' && character != '-' && character != '+' &&
             character != '.') {
-            throw std::invalid_argument("程序名称包含不支持的字符: " + requested);
+            throw std::invalid_argument(message(Message::command_program_invalid_characters,
+                                                {arg(Placeholder::program, requested)}));
         }
     }
 
@@ -249,7 +264,8 @@ std::filesystem::path find_executable(const std::string& requested) {
         }
         begin = end + 1;
     }
-    throw std::invalid_argument("在 PATH 中找不到程序: " + requested);
+    throw std::invalid_argument(
+        message(Message::command_program_not_found, {arg(Placeholder::program, requested)}));
 }
 
 #endif
@@ -339,8 +355,7 @@ std::filesystem::path bubblewrap_executable() {
     try {
         return find_executable("bwrap");
     } catch (const std::invalid_argument&) {
-        throw std::invalid_argument(
-            "Linux 安全命令执行需要 bubblewrap；请安装 bwrap，或显式设置 MINT_BWRAP_PATH");
+        throw std::invalid_argument(message(Message::command_sandbox_bubblewrap_required));
     }
 }
 
@@ -426,8 +441,9 @@ SandboxConfig linux_sandbox_config(
             continue;
         }
         if (is_path_within(denied, root)) {
-            throw std::invalid_argument("命令保护路径不能包含整个工作区: " +
-                                        denied.generic_string());
+            throw std::invalid_argument(
+                message(Message::command_sandbox_protected_contains_workspace,
+                        {arg(Placeholder::path, denied.generic_string())}));
         }
         const bool exists = std::filesystem::exists(denied, error);
         if (error) {
@@ -465,7 +481,7 @@ bool same_scratch_identity(const struct stat& status, dev_t device, ino_t inode)
 }
 
 [[noreturn]] void throw_scratch_identity_changed() {
-    throw std::runtime_error("命令私有临时目录身份已变化，拒绝清理替换对象");
+    throw std::runtime_error(message(Message::command_scratch_identity_changed));
 }
 
 } // namespace
@@ -481,14 +497,14 @@ CommandScratchDirectory::CommandScratchDirectory(const std::filesystem::path& wo
     auto pattern = (workspace / ".mint-command-tmp-XXXXXX").string();
     const auto* created = ::mkdtemp(pattern.data());
     if (created == nullptr) {
-        throw std::runtime_error("无法在工作区创建命令私有临时目录: " +
-                                 std::string(std::strerror(errno)));
+        throw std::runtime_error(message(Message::command_scratch_create_failed,
+                                         {arg(Placeholder::error, std::strerror(errno))}));
     }
 
     state->path = std::move(pattern);
     struct stat created_status = {};
     if (::lstat(state->path.c_str(), &created_status) != 0 || !S_ISDIR(created_status.st_mode)) {
-        throw std::runtime_error("无法确认新建命令私有临时目录身份");
+        throw std::runtime_error(message(Message::command_scratch_identity_failed));
     }
     state->device = created_status.st_dev;
     state->inode = created_status.st_ino;
@@ -501,7 +517,7 @@ CommandScratchDirectory::CommandScratchDirectory(const std::filesystem::path& wo
         setup_error = std::strerror(errno);
     } else if (!same_scratch_identity(status, state->device, state->inode) ||
                status.st_uid != ::geteuid() || (status.st_mode & 07777) != S_IRWXU) {
-        setup_error = "目录身份或权限校验未通过";
+        setup_error = message(Message::command_scratch_permission_check_failed);
     } else {
         state_ = std::move(state);
         return;
@@ -509,14 +525,16 @@ CommandScratchDirectory::CommandScratchDirectory(const std::filesystem::path& wo
 
     if (::lstat(state->path.c_str(), &status) != 0 ||
         !same_scratch_identity(status, state->device, state->inode)) {
-        throw std::runtime_error("命令私有临时目录初始化失败: " + setup_error +
-                                 "；目录身份已变化，拒绝回收替换对象");
+        throw std::runtime_error(message(Message::command_scratch_init_identity_changed,
+                                         {arg(Placeholder::error, setup_error)}));
     }
     if (::rmdir(state->path.c_str()) != 0) {
-        throw std::runtime_error("命令私有临时目录初始化失败: " + setup_error +
-                                 "；回收空目录失败: " + std::strerror(errno));
+        throw std::runtime_error(message(Message::command_scratch_init_cleanup_failed,
+                                         {arg(Placeholder::setup_error, setup_error),
+                                          arg(Placeholder::cleanup_error, std::strerror(errno))}));
     }
-    throw std::runtime_error("命令私有临时目录初始化失败: " + setup_error);
+    throw std::runtime_error(
+        message(Message::command_scratch_init_failed, {arg(Placeholder::error, setup_error)}));
 }
 
 CommandScratchDirectory::~CommandScratchDirectory() = default;
@@ -539,11 +557,11 @@ void CommandScratchDirectory::confirm_cleanup() {
     }
     struct stat status = {};
     if (::lstat(state_->path.c_str(), &status) == 0) {
-        throw std::runtime_error("命令私有临时目录清理后仍然存在");
+        throw std::runtime_error(message(Message::command_scratch_still_exists));
     }
     if (errno != ENOENT) {
-        throw std::runtime_error("无法确认命令私有临时目录已清理: " +
-                                 std::string(std::strerror(errno)));
+        throw std::runtime_error(message(Message::command_scratch_cleanup_confirmation_failed,
+                                         {arg(Placeholder::error, std::strerror(errno))}));
     }
     state_.reset();
 }
@@ -553,28 +571,29 @@ void CommandScratchDirectory::confirm_cleanup() {
 std::filesystem::path resolve_program(const std::string& requested) {
 #if defined(_WIN32)
     if (requested.empty() || contains_nul(requested)) {
-        throw std::invalid_argument("授权程序名称不能为空或包含 NUL");
+        throw std::invalid_argument(message(Message::command_program_authorization_empty));
     }
     const std::filesystem::path input(requested);
     const auto extension = lowercase_ascii(input.extension().string());
     if (extension == ".bat" || extension == ".cmd" || extension == ".ps1" || extension == ".vbs" ||
         extension == ".js" || extension == ".wsf" || extension == ".hta" || extension == ".lnk") {
-        throw std::invalid_argument("当前版本不允许授权脚本或快捷方式启动器: " + requested);
+        throw std::invalid_argument(message(Message::command_program_script_forbidden,
+                                            {arg(Placeholder::program, requested)}));
     }
     if (is_blocked_launcher(input.filename().string())) {
-        throw std::invalid_argument("当前版本不允许授权 shell、解释器、git 或通用命令启动器: " +
-                                    requested);
+        throw std::invalid_argument(message(Message::command_program_launcher_forbidden,
+                                            {arg(Placeholder::program, requested)}));
     }
     return find_executable(requested);
 #else
     if (requested.empty() || contains_nul(requested)) {
-        throw std::invalid_argument("授权程序名称不能为空或包含 NUL");
+        throw std::invalid_argument(message(Message::command_program_authorization_empty));
     }
 
     const std::filesystem::path input(requested);
     if (is_blocked_launcher(input.filename().string())) {
-        throw std::invalid_argument("当前版本不允许授权 shell、解释器、git 或通用命令启动器: " +
-                                    requested);
+        throw std::invalid_argument(message(Message::command_program_launcher_forbidden,
+                                            {arg(Placeholder::program, requested)}));
     }
     return find_executable(requested);
 #endif
@@ -587,7 +606,8 @@ SandboxConfig build_sandbox_config(
     std::vector<std::filesystem::path> denied_read_paths) {
     if (!required) {
         if (!read_only_paths.empty()) {
-            throw std::invalid_argument("命令外部只读路径需要启用操作系统沙箱");
+            throw std::invalid_argument(
+                message(Message::command_sandbox_read_path_requires_sandbox));
         }
         return {};
     }
@@ -597,7 +617,7 @@ SandboxConfig build_sandbox_config(
         normalize_read_only_paths(root, std::move(read_only_paths), denied_read_paths);
     SandboxConfig config{.executable = "/usr/bin/sandbox-exec", .backend = "macos-seatbelt"};
     if (!is_executable_file(config.executable)) {
-        throw std::invalid_argument("当前主机缺少 /usr/bin/sandbox-exec，拒绝无 OS 沙箱执行命令");
+        throw std::invalid_argument(message(Message::command_sandbox_seatbelt_missing));
     }
 
     const auto escaped_root = sandbox_string(root.generic_string());
@@ -666,8 +686,7 @@ SandboxConfig build_sandbox_config(
     (void)resolved_programs;
     (void)read_only_paths;
     (void)denied_read_paths;
-    throw std::invalid_argument(
-        "当前主机没有已实现的命令 OS 沙箱后端；若确实接受风险，显式关闭该策略");
+    throw std::invalid_argument(message(Message::command_sandbox_backend_unavailable));
 #endif
 }
 

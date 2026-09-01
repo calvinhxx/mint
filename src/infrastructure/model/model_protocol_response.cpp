@@ -1,5 +1,7 @@
 #include "model_protocol_internal.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 #include <string>
@@ -7,6 +9,10 @@
 
 namespace mint::detail::protocol {
 namespace {
+
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 std::size_t token_count(const Json& object, const char* field) {
     if (!object.contains(field) || !object.at(field).is_number_integer()) {
@@ -92,7 +98,7 @@ std::size_t argument_bytes(const Json& arguments) {
 ToolCall parse_tool_call(std::string id, std::string name, const Json& arguments,
                          OutputBudget& budget) {
     if (id.empty() || name.empty()) {
-        throw std::runtime_error("工具调用缺少 id 或 function.name");
+        throw std::runtime_error(message(Message::model_protocol_tool_call_identity));
     }
     budget.add_tool(id.size(), name.size(), argument_bytes(arguments));
     return ToolCall{std::move(id), std::move(name), parse_arguments(arguments)};
@@ -103,12 +109,12 @@ ToolCall parse_tool_call(std::string id, std::string name, const Json& arguments
 ModelReply parse_chat_response(const Json& response, const ModelResponseLimits& limits) {
     if (!response.contains("choices") || !response.at("choices").is_array() ||
         response.at("choices").empty()) {
-        throw std::runtime_error("模型响应缺少 choices[0]");
+        throw std::runtime_error(message(Message::model_protocol_chat_choice_missing));
     }
 
     const auto& choice = response.at("choices").at(0);
     if (!choice.contains("message") || !choice.at("message").is_object()) {
-        throw std::runtime_error("模型响应缺少 assistant message");
+        throw std::runtime_error(message(Message::model_protocol_assistant_message_missing));
     }
 
     ModelReply reply;
@@ -132,17 +138,17 @@ ModelReply parse_chat_response(const Json& response, const ModelResponseLimits& 
     }
     const auto& raw_calls = reply.assistant_message.at("tool_calls");
     if (!raw_calls.is_array()) {
-        throw std::runtime_error("模型响应中的 tool_calls 不是数组");
+        throw std::runtime_error(message(Message::model_protocol_response_tool_calls_array));
     }
     for (const auto& raw_call : raw_calls) {
         if (!raw_call.is_object() || raw_call.value("type", "function") != "function" ||
             !raw_call.contains("function") || !raw_call.at("function").is_object()) {
-            throw std::runtime_error("只支持 function 类型的工具调用");
+            throw std::runtime_error(message(Message::model_protocol_function_tool_calls_only));
         }
         const auto& function = raw_call.at("function");
         if (!raw_call.contains("id") || !raw_call.at("id").is_string() ||
             !function.contains("name") || !function.at("name").is_string()) {
-            throw std::runtime_error("工具调用缺少 id 或 function.name");
+            throw std::runtime_error(message(Message::model_protocol_tool_call_identity));
         }
         const auto arguments =
             function.contains("arguments") ? function.at("arguments") : Json(nullptr);
@@ -159,7 +165,7 @@ ModelReply parse_responses_response(const Json& response, const ModelResponseLim
         throw std::runtime_error(response_status_error(response));
     }
     if (!response.contains("output") || !response.at("output").is_array()) {
-        throw std::runtime_error("Responses API 响应缺少 output 数组");
+        throw std::runtime_error(message(Message::model_protocol_responses_output_missing));
     }
 
     ModelReply reply;
@@ -195,7 +201,7 @@ ModelReply parse_responses_response(const Json& response, const ModelResponseLim
         } else if (type == "function_call") {
             if (!item.contains("call_id") || !item.at("call_id").is_string() ||
                 !item.contains("name") || !item.at("name").is_string()) {
-                throw std::runtime_error("Responses API function_call 缺少 call_id 或 name");
+                throw std::runtime_error(message(Message::model_protocol_responses_call_identity));
             }
             const auto arguments =
                 item.contains("arguments") ? item.at("arguments") : Json(nullptr);
@@ -226,7 +232,7 @@ ModelReply parse_anthropic_response(const Json& response, const ModelResponseLim
         throw std::runtime_error(stream_error_message(error));
     }
     if (!response.contains("content") || !response.at("content").is_array()) {
-        throw std::runtime_error("Anthropic Messages 响应缺少 content 数组");
+        throw std::runtime_error(message(Message::model_protocol_anthropic_content_missing));
     }
 
     ModelReply reply;
@@ -249,7 +255,7 @@ ModelReply parse_anthropic_response(const Json& response, const ModelResponseLim
         } else if (type == "tool_use") {
             if (!block.contains("id") || !block.at("id").is_string() || !block.contains("name") ||
                 !block.at("name").is_string()) {
-                throw std::runtime_error("Anthropic tool_use 缺少 id 或 name");
+                throw std::runtime_error(message(Message::model_protocol_anthropic_tool_identity));
             }
             const auto input = block.contains("input") ? block.at("input") : Json::object();
             auto call = parse_tool_call(block.at("id").get<std::string>(),

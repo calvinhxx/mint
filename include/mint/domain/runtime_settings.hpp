@@ -77,7 +77,8 @@ inline constexpr std::size_t max_workspace_snapshot_text_bytes = std::size_t{512
 } // namespace runtime_bounds
 
 struct CommandResourceLimits {
-    // Zero keeps the corresponding operating-system limit disabled.
+    // EN: Zero keeps the corresponding operating-system limit disabled.
+    // ZH-CN: 值为零时，不启用对应的操作系统限制。
     std::size_t cpu_seconds = runtime_defaults::command_cpu_seconds;
     std::size_t memory_bytes = runtime_defaults::command_memory_bytes;
     std::size_t max_processes = runtime_defaults::command_max_processes;

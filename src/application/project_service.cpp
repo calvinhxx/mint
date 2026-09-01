@@ -1,6 +1,7 @@
 #include "mint/application/project_service.hpp"
 
 #include "mint/domain/runtime_settings.hpp"
+#include "mint/localization/localization.hpp"
 #include "mint/version.hpp"
 
 #include <algorithm>
@@ -16,6 +17,11 @@
 namespace mint {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 constexpr std::uintmax_t max_package_json_bytes = 1024 * 1024;
 
 bool is_plain_regular_file(const std::filesystem::path& path) {
@@ -29,7 +35,7 @@ std::filesystem::path canonical_directory(const std::filesystem::path& root) {
     std::error_code error;
     const auto resolved = std::filesystem::weakly_canonical(root, error);
     if (error || !std::filesystem::is_directory(resolved)) {
-        throw std::invalid_argument("项目根目录不存在或不是目录");
+        throw std::invalid_argument(message(Message::project_root_invalid));
     }
     return resolved;
 }
@@ -59,18 +65,18 @@ Json read_package_json(const std::filesystem::path& path) {
     std::error_code error;
     const auto size = std::filesystem::file_size(path, error);
     if (error || size > max_package_json_bytes) {
-        throw std::invalid_argument("package.json 无法读取或超过 1 MiB");
+        throw std::invalid_argument(message(Message::project_package_json_read_failed));
     }
     std::ifstream input(path, std::ios::binary);
     const std::string text{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
     if ((!input.eof() && input.fail()) || text.find('\0') != std::string::npos) {
-        throw std::invalid_argument("package.json 读取失败或包含 NUL");
+        throw std::invalid_argument(message(Message::project_package_json_invalid_contents));
     }
     try {
         return Json::parse(text);
     } catch (const Json::exception& error_message) {
-        throw std::invalid_argument("package.json 不是有效 JSON: " +
-                                    std::string(error_message.what()));
+        throw std::invalid_argument(message(Message::project_package_json_invalid_json,
+                                            {arg(Placeholder::error, error_message.what())}));
     }
 }
 
@@ -98,8 +104,8 @@ ProjectSuggestion suggest_project_policy(const std::filesystem::path& root) {
     if (is_plain_regular_file(resolved / "CMakeLists.txt")) {
         suggestion.project_kind = "cmake";
         suggestion.evidence.push_back("CMakeLists.txt");
-        for (const auto& path :
-             {"src", "include", "tests", "cmake", "docs", "CMakeLists.txt", "README.md"}) {
+        for (const auto& path : {"src", "include", "tests", "cmake", "docs", "locales",
+                                 "CMakeLists.txt", "README.md"}) {
             add_existing_path(resolved, path, write_paths, seen_paths);
         }
         recipes.push_back(recipe("configure", "Configure the managed CMake build", "cmake",

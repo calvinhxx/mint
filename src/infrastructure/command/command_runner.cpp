@@ -1,5 +1,6 @@
 #include "mint/infrastructure/command_runner.hpp"
 #include "mint/infrastructure/diagnostic_log.hpp"
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/path.hpp"
 #include "mint/runtime/task_control.hpp"
 
@@ -20,10 +21,15 @@
 namespace mint {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::Placeholder;
+
 std::string require_string(const Json& arguments, std::string_view name) {
     const std::string key(name);
     if (!arguments.contains(key) || !arguments.at(key).is_string()) {
-        throw std::invalid_argument("参数 " + key + " 必须是字符串");
+        throw std::invalid_argument(
+            localization::message(Message::command_argument_string, {arg(Placeholder::name, key)}));
     }
     return arguments.at(key).get<std::string>();
 }
@@ -53,24 +59,26 @@ std::vector<std::string> command_arguments(const Json& arguments) {
         return result;
     }
     if (!arguments.at("args").is_array()) {
-        throw std::invalid_argument("参数 args 必须是字符串数组");
+        throw std::invalid_argument(localization::message(Message::command_argument_args_array));
     }
     if (arguments.at("args").size() > runtime_bounds::max_command_arguments) {
-        throw std::invalid_argument("命令参数数量超过允许上限");
+        throw std::invalid_argument(localization::message(Message::command_argument_count_limit));
     }
 
     std::size_t total_bytes = 0;
     for (const auto& argument : arguments.at("args")) {
         if (!argument.is_string()) {
-            throw std::invalid_argument("参数 args 的每一项都必须是字符串");
+            throw std::invalid_argument(
+                localization::message(Message::command_argument_args_strings));
         }
         auto value = argument.get<std::string>();
         if (contains_nul(value)) {
-            throw std::invalid_argument("命令参数不能包含 NUL");
+            throw std::invalid_argument(localization::message(Message::command_argument_nul));
         }
         total_bytes += value.size();
         if (total_bytes > runtime_bounds::max_command_argument_bytes) {
-            throw std::invalid_argument("命令参数总长度超过允许上限");
+            throw std::invalid_argument(
+                localization::message(Message::command_argument_byte_limit));
         }
         result.push_back(std::move(value));
     }
@@ -81,13 +89,14 @@ std::filesystem::path command_cwd(const Json& arguments, const std::filesystem::
     const auto requested = arguments.contains("cwd") ? require_string(arguments, "cwd") : ".";
     const std::filesystem::path relative(requested.empty() ? "." : requested);
     if (relative.is_absolute()) {
-        throw std::invalid_argument("run_command 的 cwd 必须是工作区内的相对路径");
+        throw std::invalid_argument(localization::message(Message::command_cwd_relative));
     }
 
     std::error_code error;
     const auto resolved = std::filesystem::weakly_canonical(root / relative, error);
     if (error || !is_path_within(root, resolved) || !std::filesystem::is_directory(resolved)) {
-        throw std::invalid_argument("命令 cwd 不存在、不是目录或超出工作区: " + requested);
+        throw std::invalid_argument(localization::message(Message::command_cwd_invalid,
+                                                          {arg(Placeholder::path, requested)}));
     }
     return resolved;
 }
@@ -97,12 +106,12 @@ long command_timeout(const Json& arguments, long default_timeout, long max_timeo
         return default_timeout;
     }
     if (!arguments.at("timeout_seconds").is_number_integer()) {
-        throw std::invalid_argument("timeout_seconds 必须是整数");
+        throw std::invalid_argument(localization::message(Message::command_timeout_integer));
     }
     const auto timeout = arguments.at("timeout_seconds").get<long>();
     if (timeout <= 0 || timeout > max_timeout) {
-        throw std::invalid_argument("timeout_seconds 必须在 1 到 " + std::to_string(max_timeout) +
-                                    " 之间");
+        throw std::invalid_argument(localization::message(
+            Message::command_timeout_range, {arg(Placeholder::maximum, max_timeout)}));
     }
     return timeout;
 }
@@ -113,14 +122,16 @@ parse_invocation(const Json& arguments, const std::filesystem::path& root,
                  long default_timeout, long max_timeout,
                  const CommandResourceLimits& resource_limits) {
     if (!arguments.is_object()) {
-        throw std::invalid_argument("run_command 参数必须是 JSON 对象");
+        throw std::invalid_argument(localization::message(Message::command_arguments_object));
     }
 
     CommandInvocation invocation;
     invocation.program = require_string(arguments, "program");
     const auto executable = resolved_programs.find(invocation.program);
     if (executable == resolved_programs.end()) {
-        throw std::invalid_argument("程序未获用户授权: " + invocation.program);
+        throw std::invalid_argument(
+            localization::message(Message::command_program_unauthorized,
+                                  {arg(Placeholder::program, invocation.program)}));
     }
     invocation.executable = executable->second;
     invocation.arguments = command_arguments(arguments);
@@ -159,7 +170,7 @@ Json unstarted_result(const CommandInvocation& invocation, UnstartedOutcome outc
                    {"output_truncated", false},
                    {"output", ""}});
     if (denied) {
-        result["error"] = "命令被用户逐次审批拒绝";
+        result["error"] = localization::message(Message::command_approval_denied);
     }
     return result;
 }
@@ -189,11 +200,11 @@ Json approval_result(const CommandInvocation& invocation, const ApprovalDecision
     } else if (decision.cancels_run()) {
         result =
             unstarted_result(invocation, UnstartedOutcome::cancelled, sandboxed, sandbox_backend);
-        result["error"] = "运行已取消，命令未执行";
+        result["error"] = localization::message(Message::command_approval_cancelled);
     } else {
         result = denied_result(invocation, sandboxed, sandbox_backend);
         result["status"] = "failed";
-        result["error"] = "审批未完成，命令未执行";
+        result["error"] = localization::message(Message::command_approval_failed);
     }
     result["approval_decision_source"] = std::string(decision.source());
     return result;
@@ -256,7 +267,7 @@ std::string command_exception_message(const std::exception_ptr& error) {
     } catch (const std::exception& exception) {
         return exception.what();
     } catch (...) {
-        return "未知异常";
+        return localization::message(Message::common_unknown_exception);
     }
 }
 
@@ -266,7 +277,8 @@ execute_macos_sandboxed_process(command_detail::ProcessRequest request,
                                 const std::vector<std::string>& sandbox_arguments) {
     if (sandbox_arguments.size() != 3 || sandbox_arguments[0] != "sandbox-exec" ||
         sandbox_arguments[1] != "-p") {
-        throw std::logic_error("内部 macOS 沙箱参数无效");
+        throw std::logic_error(
+            localization::message(Message::command_macos_invalid_sandbox_arguments));
     }
 
     const auto cleanup_executable = request.executable;
@@ -295,17 +307,22 @@ execute_macos_sandboxed_process(command_detail::ProcessRequest request,
         cleanup_request.max_output_bytes = 4 * 1024;
         const auto cleanup = command_detail::execute_process(std::move(cleanup_request));
         if (cleanup.status != "exited" || cleanup.exit_code.value_or(-1) != 0) {
-            auto message = std::string("命令私有临时目录清理进程失败: ") + cleanup.status;
+            auto message = localization::message(Message::command_scratch_cleanup_process_failed,
+                                                 {arg(Placeholder::status, cleanup.status)});
             if (!cleanup.output.empty()) {
-                message += "；" + cleanup.output;
+                message = localization::message(
+                    Message::command_scratch_cleanup_with_output,
+                    {arg(Placeholder::message, message), arg(Placeholder::output, cleanup.output)});
             }
             throw std::runtime_error(std::move(message));
         }
         scratch.confirm_cleanup();
     } catch (const std::exception& cleanup_error) {
         if (execution_error != nullptr) {
-            throw std::runtime_error("命令执行失败: " + command_exception_message(execution_error) +
-                                     "；命令私有临时目录清理失败: " + cleanup_error.what());
+            throw std::runtime_error(localization::message(
+                Message::command_scratch_execution_and_cleanup_failed,
+                {arg(Placeholder::execution_error, command_exception_message(execution_error)),
+                 arg(Placeholder::cleanup_error, cleanup_error.what())}));
         }
         throw;
     }
@@ -330,10 +347,12 @@ CommandCatalog build_command_catalog(CommandRunnerOptions& options, long max_tim
     for (auto& recipe : options.recipes) {
         if (recipe.name.empty() || recipe.program.empty() || recipe.timeout_seconds <= 0 ||
             recipe.timeout_seconds > max_timeout || recipe.cwd.is_absolute()) {
-            throw std::invalid_argument("固定命令 recipe 配置无效: " + recipe.name);
+            throw std::invalid_argument(localization::message(
+                Message::command_recipe_invalid, {arg(Placeholder::name, recipe.name)}));
         }
         if (catalog.recipe_indices.contains(recipe.name)) {
-            throw std::invalid_argument("固定命令 recipe 名称重复: " + recipe.name);
+            throw std::invalid_argument(localization::message(
+                Message::command_recipe_duplicate, {arg(Placeholder::name, recipe.name)}));
         }
         catalog.recipe_indices.emplace(recipe.name, catalog.recipes.size());
         catalog.recipe_names.push_back(recipe.name);
@@ -370,22 +389,22 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
     std::error_code error;
     root_ = std::filesystem::weakly_canonical(std::move(options.root), error);
     if (error || root_.empty() || !std::filesystem::is_directory(root_)) {
-        throw std::invalid_argument("命令工作目录不存在或不是目录");
+        throw std::invalid_argument(localization::message(Message::command_invalid_root));
     }
     if (default_timeout_seconds_ <= 0 || max_timeout_seconds_ <= 0 ||
         default_timeout_seconds_ > max_timeout_seconds_) {
-        throw std::invalid_argument("命令超时配置必须为正数，且默认值不能超过最大值");
+        throw std::invalid_argument(localization::message(Message::command_invalid_timeout_config));
     }
     if (max_output_bytes_ == 0 || max_output_bytes_ > runtime_bounds::max_command_output_bytes) {
-        throw std::invalid_argument("命令输出上限必须在 1 字节到 1 MiB 之间");
+        throw std::invalid_argument(localization::message(Message::command_invalid_output_limit));
     }
     validate_command_resource_limits(resource_limits_, "CommandRunner resource_limits");
     command_detail::validate_process_resource_support(resource_limits_);
     if (!options.allowed_programs.empty() && !options.recipes.empty()) {
-        throw std::invalid_argument("原始程序授权与固定命令 recipe 不能同时启用");
+        throw std::invalid_argument(localization::message(Message::command_authorization_conflict));
     }
     if (options.allowed_programs.empty() && options.recipes.empty()) {
-        throw std::invalid_argument("至少需要显式授权一个命令程序");
+        throw std::invalid_argument(localization::message(Message::command_authorization_empty));
     }
 
     auto catalog = build_command_catalog(options, max_timeout_seconds_);
@@ -410,7 +429,7 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
             root_, std::move(sandbox.allowed_executables), std::move(sandbox.read_only_paths),
             std::move(sandbox.denied_paths));
 #else
-        throw std::logic_error("当前平台未实现声明的原生进程沙箱");
+        throw std::logic_error(localization::message(Message::command_native_sandbox_unavailable));
 #endif
     }
 }
@@ -512,12 +531,13 @@ Json CommandRunner::run(const Json& arguments) const {
         return result;
     }
     if (!arguments.is_object() || arguments.size() != 1) {
-        throw std::invalid_argument("run_recipe 只接受 recipe 字段");
+        throw std::invalid_argument(localization::message(Message::command_recipe_arguments));
     }
     const auto recipe_name = require_string(arguments, "recipe");
     const auto found = recipe_indices_.find(recipe_name);
     if (found == recipe_indices_.end()) {
-        throw std::invalid_argument("recipe 未获用户 policy 授权: " + recipe_name);
+        throw std::invalid_argument(localization::message(Message::command_recipe_unauthorized,
+                                                          {arg(Placeholder::name, recipe_name)}));
     }
     const auto& recipe = recipes_.at(found->second);
     Json expanded = {{"program", recipe.program},

@@ -1,5 +1,6 @@
 #include "command_appcontainer_windows.hpp"
 
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/path.hpp"
 
 #include <aclapi.h>
@@ -19,6 +20,11 @@
 namespace mint::command_detail {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 constexpr DWORD workspace_access =
     FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE | FILE_DELETE_CHILD;
 constexpr DWORD readonly_access = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
@@ -37,7 +43,9 @@ std::filesystem::path canonical_existing_path(const std::filesystem::path& path,
     std::error_code error;
     auto resolved = std::filesystem::weakly_canonical(path, error);
     if (error || resolved.empty() || !std::filesystem::exists(resolved, error) || error) {
-        throw std::invalid_argument(std::string(description) + "不存在: " + path.string());
+        throw std::invalid_argument(message(
+            Message::command_windows_path_missing,
+            {arg(Placeholder::description, description), arg(Placeholder::path, path.string())}));
     }
     return resolved;
 }
@@ -113,11 +121,11 @@ std::wstring unique_profile_name() {
     GUID identifier{};
     const HRESULT create_result = ::CoCreateGuid(&identifier);
     if (FAILED(create_result)) {
-        throw_hresult(create_result, "无法生成 Windows AppContainer 标识");
+        throw_hresult(create_result, message(Message::command_windows_appcontainer_id_failed));
     }
     std::array<wchar_t, 39> text{};
     if (::StringFromGUID2(identifier, text.data(), static_cast<int>(text.size())) == 0) {
-        throw std::runtime_error("无法格式化 Windows AppContainer 标识");
+        throw std::runtime_error(message(Message::command_windows_appcontainer_id_format_failed));
     }
     return L"Mint.CommandSandbox." + std::wstring(text.data() + 1, text.size() - 3);
 }
@@ -136,7 +144,8 @@ void update_acl(const std::filesystem::path& path, PSID sid, ACCESS_MODE mode, D
         ::GetNamedSecurityInfoW(native_path.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
                                 nullptr, nullptr, &existing_acl, nullptr, &security_descriptor);
     if (security_error != ERROR_SUCCESS) {
-        throw_windows_error(security_error, "无法读取 Windows 沙箱路径 ACL");
+        throw_windows_error(security_error,
+                            message(Message::command_windows_sandbox_acl_read_failed));
     }
 
     EXPLICIT_ACCESSW entry{};
@@ -149,7 +158,7 @@ void update_acl(const std::filesystem::path& path, PSID sid, ACCESS_MODE mode, D
     const DWORD acl_error = ::SetEntriesInAclW(1, &entry, existing_acl, &updated_acl);
     if (acl_error != ERROR_SUCCESS) {
         (void)::LocalFree(security_descriptor);
-        throw_windows_error(acl_error, "无法构建 Windows 沙箱路径 ACL");
+        throw_windows_error(acl_error, message(Message::command_windows_sandbox_acl_build_failed));
     }
 
     const DWORD apply_error =
@@ -158,7 +167,8 @@ void update_acl(const std::filesystem::path& path, PSID sid, ACCESS_MODE mode, D
     (void)::LocalFree(updated_acl);
     (void)::LocalFree(security_descriptor);
     if (apply_error != ERROR_SUCCESS) {
-        throw_windows_error(apply_error, "无法应用 Windows 沙箱路径 ACL");
+        throw_windows_error(apply_error,
+                            message(Message::command_windows_sandbox_acl_apply_failed));
     }
 }
 
@@ -181,21 +191,23 @@ std::vector<std::byte> read_security_descriptor(const std::filesystem::path& pat
         ::GetNamedSecurityInfoW(native_path.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
                                 nullptr, nullptr, &dacl, nullptr, &descriptor);
     if (error != ERROR_SUCCESS) {
-        throw_windows_error(error, "无法保存 Windows 保护路径 ACL");
+        throw_windows_error(error, message(Message::command_windows_protected_acl_save_failed));
     }
     SECURITY_DESCRIPTOR_CONTROL control{};
     DWORD revision = 0;
     if (!::GetSecurityDescriptorControl(descriptor, &control, &revision)) {
         const auto control_error = ::GetLastError();
         (void)::LocalFree(descriptor);
-        throw_windows_error(control_error, "无法读取 Windows 保护路径 ACL 状态");
+        throw_windows_error(control_error,
+                            message(Message::command_windows_protected_acl_state_failed));
     }
     BOOL present = FALSE;
     BOOL defaulted = FALSE;
     if (!::GetSecurityDescriptorDacl(descriptor, &present, &dacl, &defaulted) || !present ||
         dacl == nullptr) {
         (void)::LocalFree(descriptor);
-        throw std::invalid_argument("Windows 保护路径必须具有明确 DACL: " + path.string());
+        throw std::invalid_argument(message(Message::command_windows_protected_dacl_required,
+                                            {arg(Placeholder::path, path.string())}));
     }
     std::vector<std::byte> result;
     if ((control & SE_SELF_RELATIVE) != 0) {
@@ -208,13 +220,15 @@ std::vector<std::byte> read_security_descriptor(const std::filesystem::path& pat
         if (bytes == 0 || ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
             const auto relative_error = ::GetLastError();
             (void)::LocalFree(descriptor);
-            throw_windows_error(relative_error, "无法计算 Windows 保护路径 ACL 快照空间");
+            throw_windows_error(relative_error,
+                                message(Message::command_windows_protected_acl_size_failed));
         }
         result.resize(bytes);
         if (!::MakeSelfRelativeSD(descriptor, result.data(), &bytes)) {
             const auto relative_error = ::GetLastError();
             (void)::LocalFree(descriptor);
-            throw_windows_error(relative_error, "无法保存 Windows 保护路径 ACL 快照");
+            throw_windows_error(relative_error,
+                                message(Message::command_windows_protected_acl_snapshot_failed));
         }
         result.resize(bytes);
     }
@@ -231,7 +245,7 @@ PACL saved_dacl(const std::vector<std::byte>& security_descriptor) {
     PACL dacl = nullptr;
     if (!::GetSecurityDescriptorDacl(descriptor, &present, &dacl, &defaulted) || !present ||
         dacl == nullptr) {
-        throw std::logic_error("保存的 Windows DACL 无效");
+        throw std::logic_error(message(Message::command_windows_saved_dacl_invalid));
     }
     return dacl;
 }
@@ -248,7 +262,8 @@ void protect_path(const std::filesystem::path& path,
     const DWORD acl_error =
         ::SetEntriesInAclW(1, &entry, saved_dacl(security_descriptor), &protected_dacl);
     if (acl_error != ERROR_SUCCESS) {
-        throw_windows_error(acl_error, "无法构建 Windows 保护路径 DACL");
+        throw_windows_error(acl_error,
+                            message(Message::command_windows_protected_dacl_build_failed));
     }
     auto native_path = path.wstring();
     const DWORD error =
@@ -257,7 +272,7 @@ void protect_path(const std::filesystem::path& path,
                                 nullptr, nullptr, protected_dacl, nullptr);
     (void)::LocalFree(protected_dacl);
     if (error != ERROR_SUCCESS) {
-        throw_windows_error(error, "无法应用 Windows 保护路径 DACL");
+        throw_windows_error(error, message(Message::command_windows_protected_dacl_apply_failed));
     }
 }
 
@@ -270,7 +285,7 @@ void restore_path(const std::filesystem::path& path,
                                                 DACL_SECURITY_INFORMATION | inheritance, nullptr,
                                                 nullptr, saved_dacl(security_descriptor), nullptr);
     if (error != ERROR_SUCCESS) {
-        throw_windows_error(error, "无法恢复 Windows 保护路径 DACL");
+        throw_windows_error(error, message(Message::command_windows_protected_dacl_restore_failed));
     }
 }
 
@@ -319,9 +334,11 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
                                      std::vector<std::filesystem::path> allowed_executables,
                                      std::vector<std::filesystem::path> read_only_paths,
                                      std::vector<std::filesystem::path> denied_paths) {
-    const auto resolved_workspace = canonical_existing_path(workspace, "命令工作区");
+    const auto resolved_workspace =
+        canonical_existing_path(workspace, message(Message::label_command_workspace));
     if (!path_is_directory(resolved_workspace)) {
-        throw std::invalid_argument("命令工作区不是目录: " + resolved_workspace.string());
+        throw std::invalid_argument(message(Message::command_windows_workspace_not_directory,
+                                            {arg(Placeholder::path, resolved_workspace.string())}));
     }
 
     for (auto& denied : denied_paths) {
@@ -331,7 +348,9 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
             continue;
         }
         if (is_path_within(denied, resolved_workspace)) {
-            throw std::invalid_argument("命令保护路径不能包含整个工作区: " + denied.string());
+            throw std::invalid_argument(
+                message(Message::command_sandbox_protected_contains_workspace,
+                        {arg(Placeholder::path, denied.string())}));
         }
         ProtectedPathState state{.path = std::move(denied)};
         state.security_descriptor = read_security_descriptor(state.path, state.dacl_protected);
@@ -339,15 +358,18 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
     }
 
     for (auto& path : read_only_paths) {
-        path = canonical_existing_path(path, "命令外部只读路径");
+        path = canonical_existing_path(path, message(Message::label_command_read_only_path));
         if (is_path_within(resolved_workspace, path) || is_path_within(path, resolved_workspace)) {
-            throw std::invalid_argument("命令外部只读路径不能位于工作区内或包含工作区: " +
-                                        path.string());
+            throw std::invalid_argument(
+                message(Message::command_sandbox_read_path_workspace_overlap,
+                        {arg(Placeholder::path, path.string())}));
         }
         for (const auto& protected_path : protected_paths_) {
             if (is_path_within(path, protected_path.path) ||
                 is_path_within(protected_path.path, path)) {
-                throw std::invalid_argument("命令外部只读路径不能与保护路径重叠: " + path.string());
+                throw std::invalid_argument(
+                    message(Message::command_sandbox_read_path_protected_overlap,
+                            {arg(Placeholder::path, path.string())}));
             }
         }
     }
@@ -365,18 +387,18 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
         ::CreateAppContainerProfile(profile_name_.c_str(), L"Mint command sandbox",
                                     L"Temporary Mint command sandbox", nullptr, 0, &sid_);
     if (FAILED(create_result)) {
-        throw_hresult(create_result, "无法创建 Windows AppContainer 配置文件");
+        throw_hresult(create_result, message(Message::command_windows_profile_create_failed));
     }
 
     PWSTR sid_string = nullptr;
     if (!::ConvertSidToStringSidW(sid_, &sid_string)) {
-        throw_windows_error(::GetLastError(), "无法格式化 Windows AppContainer SID");
+        throw_windows_error(::GetLastError(), message(Message::command_windows_sid_format_failed));
     }
     PWSTR profile_path = nullptr;
     const HRESULT path_result = ::GetAppContainerFolderPath(sid_string, &profile_path);
     (void)::LocalFree(sid_string);
     if (FAILED(path_result)) {
-        throw_hresult(path_result, "无法定位 Windows AppContainer 数据目录");
+        throw_hresult(path_result, message(Message::command_windows_data_directory_failed));
     }
     profile_directory_ = profile_path;
     ::CoTaskMemFree(profile_path);
@@ -384,7 +406,8 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
     std::error_code directory_error;
     std::filesystem::create_directories(temp_directory_, directory_error);
     if (directory_error) {
-        throw std::system_error(directory_error, "无法创建 Windows AppContainer 临时目录");
+        throw std::system_error(directory_error,
+                                message(Message::command_windows_temp_directory_failed));
     }
 
     acl_paths_.push_back(resolved_workspace);

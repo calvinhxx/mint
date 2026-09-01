@@ -5,6 +5,7 @@
 #include "agent_model_summary.hpp"
 #include "agent_reporting.hpp"
 
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/terminal_text.hpp"
 
 #include <algorithm>
@@ -14,6 +15,11 @@
 namespace mint::agent_detail {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 std::size_t effective_context_limit(std::size_t configured_limit,
                                     const ModelRequestLimits& request_limits) {
     if (!request_limits.bounded()) {
@@ -22,7 +28,7 @@ std::size_t effective_context_limit(std::size_t configured_limit,
 
     const auto provider_limit = request_limits.available_input_bytes();
     if (provider_limit == 0) {
-        throw std::runtime_error("模型请求 Token 预算不足以容纳输出、工具定义和安全余量");
+        throw std::runtime_error(message(Message::agent_request_token_budget_too_small));
     }
     return std::min(configured_limit, provider_limit);
 }
@@ -37,8 +43,10 @@ void AgentRun::execute_next_tool() {
                           {"tool_call_id", call.id},
                           {"name", call.name},
                           {"arguments_summary", event_arguments_summary(tools_, call)}});
-    output_ << "[调用工具] " << escape_terminal_field(call.name) << ' '
-            << escape_terminal_field(tools_.describe_call(call)) << '\n';
+    output_ << message(
+        Message::agent_output_tool_started,
+        {arg(Placeholder::name, escape_terminal_field(call.name)),
+         arg(Placeholder::description, escape_terminal_field(tools_.describe_call(call)))});
     const auto tool_result = tools_.execute(call);
     record_execution(result_.execution, call, tool_result);
     conversation_.append_tool_result(call, tool_result);
@@ -48,7 +56,7 @@ void AgentRun::execute_next_tool() {
                             {"tool_call_id", call.id},
                             {"name", call.name},
                             {"result", safe_tool_result(tool_result)}});
-    output_ << "[工具完成] 结果已交回模型\n";
+    output_ << message(Message::agent_output_tool_completed);
     if (pending_calls_.empty()) {
         prompt_verified_completion();
     }
@@ -72,7 +80,7 @@ void AgentRun::prompt_verified_completion() {
     emit("verification_ready", {{"turn", result_.turns},
                                 {"last_file_change_call", execution.last_file_change_call},
                                 {"last_command_call", execution.last_command_call}});
-    output_ << "[继续] 最新修改已通过验证；若任务已完成，请返回最终回答。\n";
+    output_ << message(Message::agent_output_verification_ready);
 }
 
 bool AgentRun::can_request_verified_final_answer() const {
@@ -84,7 +92,7 @@ bool AgentRun::can_request_verified_final_answer() const {
 
 ModelReply AgentRun::request_model(const Json& available_tools) {
     const auto turn = result_.turns + 1;
-    output_ << "\n[第 " << turn << " 轮] 询问模型下一步...\n";
+    output_ << message(Message::agent_output_model_request, {arg(Placeholder::turn, turn)});
     const auto request_limits = model_.request_limits(available_tools);
     const auto context_limit = effective_context_limit(options_.max_context_bytes, request_limits);
     const auto context = compact_context(conversation_.messages(), context_limit);
@@ -143,7 +151,8 @@ bool AgentRun::block_unverified_finish() {
         return false;
     }
 
-    output_ << "\n[继续] 工作区变更尚未通过最新验证（" << status << "），拒绝结束任务。\n";
+    output_ << message(Message::agent_output_verification_blocked,
+                       {arg(Placeholder::status, status)});
     conversation_.append_user(
         "[Harness requirement] The workspace still has unverified changes. "
         "The current verification status is " +

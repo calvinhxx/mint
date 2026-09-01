@@ -3,6 +3,7 @@
 #include "mint/runtime/task_control.hpp"
 
 #include "mint/infrastructure/diagnostic_log.hpp"
+#include "mint/localization/localization.hpp"
 #include "model_http_transport.hpp"
 #include "model_protocol.hpp"
 
@@ -16,6 +17,11 @@
 
 namespace mint::model_detail {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 constexpr std::size_t max_error_body_bytes = 800;
 constexpr long retry_poll_interval_ms = 25;
@@ -112,7 +118,7 @@ void correct_failed_tool_generation_request(std::string& request_body, ModelAdap
     auto request = Json::parse(request_body);
     if (!request.is_object() || !request.contains("messages") ||
         !request.at("messages").is_array()) {
-        throw std::logic_error("工具生成重试缺少 Chat Completions messages");
+        throw std::logic_error(message(Message::model_request_tool_retry_messages_missing));
     }
     request["temperature"] = 0.0;
     request["tool_choice"] = "required";
@@ -128,7 +134,7 @@ void relax_failed_tool_generation_request(std::string& request_body, ModelAdapte
     auto request = Json::parse(request_body);
     if (!request.is_object() || !request.contains("messages") ||
         !request.at("messages").is_array()) {
-        throw std::logic_error("工具生成降级重试缺少 Chat Completions messages");
+        throw std::logic_error(message(Message::model_request_tool_fallback_messages_missing));
     }
     request["temperature"] = 0.0;
     request["tool_choice"] = "auto";
@@ -167,30 +173,36 @@ std::string response_error(const std::string& body, long status) {
         if (parsed.contains("error")) {
             const auto& error = parsed.at("error");
             if (error.is_object() && error.contains("failed_generation")) {
-                return "模型接口返回 HTTP " + std::to_string(status) + ": 模型生成的工具调用无效";
+                return message(Message::model_request_invalid_tool_call,
+                               {arg(Placeholder::status, status)});
             }
             if (error.is_object() && error.contains("message") && error.at("message").is_string()) {
-                return "模型接口返回 HTTP " + std::to_string(status) + ": " +
-                       error.at("message").get<std::string>();
+                return message(Message::model_request_http_error_detail,
+                               {arg(Placeholder::status, status),
+                                arg(Placeholder::detail, error.at("message").get<std::string>())});
             }
             if (error.is_string()) {
-                return "模型接口返回 HTTP " + std::to_string(status) + ": " +
-                       error.get<std::string>();
+                return message(Message::model_request_http_error_detail,
+                               {arg(Placeholder::status, status),
+                                arg(Placeholder::detail, error.get<std::string>())});
             }
         }
     } catch (const Json::exception&) {
-        // A short raw response often contains a useful proxy error.
+        // EN: A short raw response often contains a useful proxy error.
+        // ZH-CN: 较短的原始响应通常包含有用的代理错误信息。
     }
 
     const auto shortened = body.substr(0, max_error_body_bytes);
-    return "模型接口返回 HTTP " + std::to_string(status) +
-           (shortened.empty() ? std::string{} : ": " + shortened);
+    return shortened.empty()
+               ? message(Message::model_request_http_error, {arg(Placeholder::status, status)})
+               : message(Message::model_request_http_error_detail,
+                         {arg(Placeholder::status, status), arg(Placeholder::detail, shortened)});
 }
 
 [[noreturn]] void throw_stopped_request(const ModelProviderConfig& config) {
-    throw std::runtime_error(config.task_control->cancellation_requested()
-                                 ? "模型请求已取消"
-                                 : "模型请求超过任务总时间预算");
+    throw std::runtime_error(message(config.task_control->cancellation_requested()
+                                         ? Message::model_request_cancelled
+                                         : Message::model_request_time_budget_exceeded));
 }
 
 void wait_before_retry(const ModelProviderConfig& config, long delay_ms) {
@@ -330,8 +342,8 @@ ModelReply complete_provider_request(const ModelProviderConfig& config, std::str
                                   {{"attempt", attempt_number},
                                    {"http_status", attempt.http_status},
                                    {"outcome", "invalid_response"}});
-                throw std::runtime_error("模型返回的内容不是有效 JSON: " +
-                                         std::string(error.what()));
+                throw std::runtime_error(message(Message::model_request_invalid_json,
+                                                 {arg(Placeholder::error, error.what())}));
             } catch (...) {
                 progress.emit({.kind = ModelProgressKind::request_failed,
                                .attempt = attempt_number,
@@ -373,7 +385,9 @@ ModelReply complete_provider_request(const ModelProviderConfig& config, std::str
                                {"http_status", attempt.http_status},
                                {"outcome", failed_request_outcome_name(attempt.outcome)}});
             if (attempt.outcome != HttpTransportOutcome::success) {
-                throw std::runtime_error("请求模型失败: " + attempt.transport_error);
+                throw std::runtime_error(
+                    message(Message::model_request_transport_failed,
+                            {arg(Placeholder::error, attempt.transport_error)}));
             }
             throw std::runtime_error(response_error(attempt.body, attempt.http_status));
         }

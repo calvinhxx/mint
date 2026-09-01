@@ -50,6 +50,7 @@ struct CommandLine {
     std::string policy_fingerprint;
     std::string log_level;
     std::string log_file_level;
+    std::string language;
     std::size_t max_turns = runtime_defaults::max_turns;
     std::size_t max_context_bytes = runtime_defaults::max_context_bytes;
     std::size_t max_total_tokens = runtime_defaults::max_total_tokens;
@@ -62,6 +63,7 @@ struct CommandLine {
 [[nodiscard]] std::filesystem::path normalized_path(std::filesystem::path path);
 [[nodiscard]] bool requested_json_output(int argc, char** argv);
 [[nodiscard]] bool requested_interaction_output(int argc, char** argv);
+void configure_language(int argc, char** argv);
 [[nodiscard]] bool is_managed_mode(CommandMode mode) noexcept;
 void print_help(Console& console, const char* program);
 void print_exec_help(Console& console, const char* program);

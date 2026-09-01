@@ -1,5 +1,7 @@
 #include "model_protocol_anthropic.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -13,14 +15,21 @@
 namespace mint::detail {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 [[noreturn]] void throw_byte_limit(std::string_view resource, std::size_t limit) {
-    throw std::runtime_error("模型响应超过资源上限: " + std::string(resource) + " 最多 " +
-                             std::to_string(limit) + " 字节");
+    throw std::runtime_error(
+        message(Message::model_protocol_byte_limit,
+                {arg(Placeholder::resource, resource), arg(Placeholder::limit, limit)}));
 }
 
 [[noreturn]] void throw_count_limit(std::string_view resource, std::size_t limit) {
-    throw std::runtime_error("模型响应超过资源上限: " + std::string(resource) + " 最多 " +
-                             std::to_string(limit));
+    throw std::runtime_error(
+        message(Message::model_protocol_count_limit,
+                {arg(Placeholder::resource, resource), arg(Placeholder::limit, limit)}));
 }
 
 void add_bytes(std::size_t& current, std::size_t added, std::size_t limit,
@@ -38,7 +47,7 @@ std::string stream_error_message(const Json& value) {
     if (value.is_string()) {
         return value.get<std::string>();
     }
-    return "Anthropic 流返回错误事件";
+    return message(Message::model_anthropic_stream_error_event);
 }
 
 std::size_t output_index(const Json& event) {
@@ -52,14 +61,14 @@ std::size_t output_index(const Json& event) {
     } else if (value.is_number_integer()) {
         const auto signed_index = value.get<std::int64_t>();
         if (signed_index < 0) {
-            throw std::runtime_error("Anthropic 流式输出 index 无效");
+            throw std::runtime_error(message(Message::model_anthropic_output_index_invalid));
         }
         index = static_cast<std::uint64_t>(signed_index);
     } else {
-        throw std::runtime_error("Anthropic 流式输出 index 无效");
+        throw std::runtime_error(message(Message::model_anthropic_output_index_invalid));
     }
     if (index > std::numeric_limits<std::size_t>::max()) {
-        throw std::runtime_error("Anthropic 流式输出 index 超出平台范围");
+        throw std::runtime_error(message(Message::model_anthropic_output_index_overflow));
     }
     return static_cast<std::size_t>(index);
 }
@@ -68,11 +77,12 @@ Json parse_arguments(std::string_view arguments) {
     try {
         auto parsed = Json::parse(arguments);
         if (!parsed.is_object()) {
-            throw std::runtime_error("Anthropic 工具参数的 JSON 顶层必须是对象");
+            throw std::runtime_error(message(Message::model_anthropic_arguments_root_object));
         }
         return parsed;
     } catch (const Json::exception& error) {
-        throw std::runtime_error("Anthropic 工具参数不是有效 JSON: " + std::string(error.what()));
+        throw std::runtime_error(message(Message::model_anthropic_arguments_invalid_json,
+                                         {arg(Placeholder::error, error.what())}));
     }
 }
 
@@ -112,10 +122,11 @@ struct AnthropicStreamAccumulator::State {
 
     void emit(ModelStreamEvent event) {
         if (event.kind == ModelStreamEventKind::text_delta) {
-            add_bytes(text_bytes, event.delta.size(), limits.max_text_bytes, "文本");
+            add_bytes(text_bytes, event.delta.size(), limits.max_text_bytes,
+                      message(Message::model_resource_text));
         } else {
             add_bytes(tool_argument_bytes, event.delta.size(), limits.max_tool_arguments_bytes,
-                      "工具参数");
+                      message(Message::model_resource_tool_arguments));
         }
         delta_bytes += event.delta.size();
         if (callback && !event.delta.empty()) {
@@ -131,7 +142,7 @@ struct AnthropicStreamAccumulator::State {
             return *item;
         }
         if (tools.size() >= limits.max_tool_calls) {
-            throw_count_limit("工具调用数量", limits.max_tool_calls);
+            throw_count_limit(message(Message::model_resource_tool_calls), limits.max_tool_calls);
         }
         tools.emplace_back();
         tools.back().output_index = index;
@@ -143,7 +154,7 @@ struct AnthropicStreamAccumulator::State {
             return value.output_index == index;
         });
         if (item == blocks.end()) {
-            throw std::runtime_error("Anthropic content delta 出现在 content block 之前");
+            throw std::runtime_error(message(Message::model_anthropic_delta_before_block));
         }
         return *item;
     }
@@ -153,17 +164,18 @@ struct AnthropicStreamAccumulator::State {
             std::find_if(blocks.begin(), blocks.end(),
                          [index](const auto& value) { return value.output_index == index; });
         if (duplicate != blocks.end()) {
-            throw std::runtime_error("Anthropic content block index 重复");
+            throw std::runtime_error(message(Message::model_anthropic_block_index_duplicate));
         }
         if (blocks.size() >= limits.max_sse_events) {
-            throw_count_limit("Anthropic content block 数量", limits.max_sse_events);
+            throw_count_limit(message(Message::model_resource_anthropic_content_blocks),
+                              limits.max_sse_events);
         }
         blocks.push_back({.output_index = index, .content = std::move(content)});
     }
 
     void dispatch_start(const Json& event) {
         if (!event.contains("content_block") || !event.at("content_block").is_object()) {
-            throw std::runtime_error("Anthropic content_block_start 缺少 content_block");
+            throw std::runtime_error(message(Message::model_anthropic_content_block_missing));
         }
         const auto index = output_index(event);
         const auto& content = event.at("content_block");
@@ -180,21 +192,22 @@ struct AnthropicStreamAccumulator::State {
         if (type == "tool_use") {
             if (!content.contains("id") || !content.at("id").is_string() ||
                 !content.contains("name") || !content.at("name").is_string()) {
-                throw std::runtime_error("Anthropic tool_use 缺少 id 或 name");
+                throw std::runtime_error(message(Message::model_protocol_anthropic_tool_identity));
             }
             auto& current = tool(index);
             current.id = content.at("id").get<std::string>();
             current.name = content.at("name").get<std::string>();
             add_bytes(tool_metadata_bytes, current.id.size() + current.name.size(),
-                      limits.max_tool_metadata_bytes, "工具调用元数据");
+                      limits.max_tool_metadata_bytes,
+                      message(Message::model_resource_tool_metadata));
             return;
         }
         if (type == "thinking" || type == "redacted_thinking") {
             for (const char* field : {"thinking", "data", "signature"}) {
                 if (content.contains(field) && content.at(field).is_string()) {
-                    add_bytes(reasoning_bytes,
-                              content.at(field).get_ref<const std::string&>().size(),
-                              limits.max_reasoning_bytes, "推理内容");
+                    add_bytes(
+                        reasoning_bytes, content.at(field).get_ref<const std::string&>().size(),
+                        limits.max_reasoning_bytes, message(Message::model_resource_reasoning));
                 }
             }
         }
@@ -202,7 +215,7 @@ struct AnthropicStreamAccumulator::State {
 
     void dispatch_delta(const Json& event) {
         if (!event.contains("delta") || !event.at("delta").is_object()) {
-            throw std::runtime_error("Anthropic content_block_delta 缺少 delta");
+            throw std::runtime_error(message(Message::model_anthropic_delta_missing));
         }
         const auto index = output_index(event);
         const auto& delta = event.at("delta");
@@ -230,7 +243,8 @@ struct AnthropicStreamAccumulator::State {
         } else if (type == "thinking_delta" && delta.contains("thinking") &&
                    delta.at("thinking").is_string()) {
             const auto& thinking = delta.at("thinking").get_ref<const std::string&>();
-            add_bytes(reasoning_bytes, thinking.size(), limits.max_reasoning_bytes, "推理内容");
+            add_bytes(reasoning_bytes, thinking.size(), limits.max_reasoning_bytes,
+                      message(Message::model_resource_reasoning));
             if (!content.contains("thinking") || !content.at("thinking").is_string()) {
                 content["thinking"] = "";
             }
@@ -238,7 +252,8 @@ struct AnthropicStreamAccumulator::State {
         } else if (type == "signature_delta" && delta.contains("signature") &&
                    delta.at("signature").is_string()) {
             const auto& signature = delta.at("signature").get_ref<const std::string&>();
-            add_bytes(reasoning_bytes, signature.size(), limits.max_reasoning_bytes, "推理签名");
+            add_bytes(reasoning_bytes, signature.size(), limits.max_reasoning_bytes,
+                      message(Message::model_resource_reasoning_signature));
             if (!content.contains("signature") || !content.at("signature").is_string()) {
                 content["signature"] = "";
             }
@@ -255,7 +270,7 @@ AnthropicStreamAccumulator::~AnthropicStreamAccumulator() = default;
 
 void AnthropicStreamAccumulator::dispatch(const Json& event) {
     if (state_->finished) {
-        throw std::logic_error("不能向已结束的 Anthropic 模型流追加事件");
+        throw std::logic_error(message(Message::model_anthropic_append_after_finish));
     }
     const auto type = event.value("type", "");
     if (type == "error") {
@@ -266,7 +281,7 @@ void AnthropicStreamAccumulator::dispatch(const Json& event) {
         state_->complete_response = event;
     } else if (type == "message_start") {
         if (!event.contains("message") || !event.at("message").is_object()) {
-            throw std::runtime_error("Anthropic message_start 缺少 message 对象");
+            throw std::runtime_error(message(Message::model_anthropic_message_start_missing));
         }
         const auto& message = event.at("message");
         state_->id = message.value("id", state_->id);
@@ -290,14 +305,14 @@ void AnthropicStreamAccumulator::dispatch(const Json& event) {
 
 Json AnthropicStreamAccumulator::finish() {
     if (state_->finished) {
-        throw std::logic_error("Anthropic 模型流已经结束");
+        throw std::logic_error(message(Message::model_anthropic_already_finished));
     }
     state_->finished = true;
     if (state_->complete_response.has_value()) {
         return std::move(*state_->complete_response);
     }
     if (!state_->saw_payload) {
-        throw std::runtime_error("Anthropic Messages 流没有返回消息事件");
+        throw std::runtime_error(message(Message::model_anthropic_message_event_missing));
     }
 
     std::sort(
@@ -312,7 +327,7 @@ Json AnthropicStreamAccumulator::finish() {
                                                return item.output_index == raw_block.output_index;
                                            });
             if (tool == state_->tools.end() || tool->id.empty() || tool->name.empty()) {
-                throw std::runtime_error("Anthropic 流式 tool_use 缺少 id 或 name");
+                throw std::runtime_error(message(Message::model_anthropic_stream_tool_identity));
             }
             if (!tool->arguments.empty()) {
                 block["input"] = parse_arguments(tool->arguments);

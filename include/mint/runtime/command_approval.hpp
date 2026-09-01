@@ -23,8 +23,8 @@ enum class ApprovalDecisionKind {
 };
 
 /**
- * @brief Keeps the approval result and its source intact across tool boundaries.
- * zh_CN: 在工具边界间保留审批结果及其来源，避免把取消或协议失败误记为用户拒绝。
+ * EN: Carries the approval outcome and its source across tool boundaries.
+ * ZH-CN: 在工具边界之间完整传递审批结果及其来源。
  */
 struct ApprovalDecision {
     ApprovalDecisionKind kind = ApprovalDecisionKind::rejected;

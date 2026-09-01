@@ -1,5 +1,7 @@
 #include "mint/infrastructure/config.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include "model_provider_profile.hpp"
 
 #include <algorithm>
@@ -14,12 +16,18 @@
 namespace mint {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 std::string required_string(const Json& document, const char* field,
                             const std::filesystem::path& config_path) {
     if (!document.contains(field) || !document.at(field).is_string() ||
         document.at(field).get_ref<const std::string&>().empty()) {
-        throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
-                                 "\" 必须是非空字符串");
+        throw std::runtime_error(message(
+            Message::model_config_nonempty_string,
+            {arg(Placeholder::path, config_path.string()), arg(Placeholder::field, field)}));
     }
     return document.at(field).get<std::string>();
 }
@@ -30,8 +38,9 @@ std::string optional_string(const Json& document, const char* field,
         return {};
     }
     if (!document.at(field).is_string()) {
-        throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
-                                 "\" 必须是字符串");
+        throw std::runtime_error(
+            message(Message::model_config_string, {arg(Placeholder::path, config_path.string()),
+                                                   arg(Placeholder::field, field)}));
     }
     return document.at(field).get<std::string>();
 }
@@ -43,14 +52,16 @@ long optional_integer(const Json& document, const char* field, long fallback, lo
     }
     const auto& value = document.at(field);
     if (!value.is_number_integer()) {
-        throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
-                                 "\" 必须是整数");
+        throw std::runtime_error(
+            message(Message::model_config_integer, {arg(Placeholder::path, config_path.string()),
+                                                    arg(Placeholder::field, field)}));
     }
     const auto parsed = value.get<long long>();
     if (parsed < minimum || parsed > maximum) {
-        throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
-                                 "\" 必须在 " + std::to_string(minimum) + " 到 " +
-                                 std::to_string(maximum) + " 之间");
+        throw std::runtime_error(
+            message(Message::model_config_range,
+                    {arg(Placeholder::path, config_path.string()), arg(Placeholder::field, field),
+                     arg(Placeholder::minimum, minimum), arg(Placeholder::maximum, maximum)}));
     }
     return static_cast<long>(parsed);
 }
@@ -68,19 +79,22 @@ std::size_t optional_size(const Json& document, const char* field, std::size_t f
     } else if (value.is_number_integer()) {
         const auto signed_value = value.get<std::int64_t>();
         if (signed_value < 0) {
-            throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
-                                     "\" 必须在 " + std::to_string(minimum) + " 到 " +
-                                     std::to_string(maximum) + " 之间");
+            throw std::runtime_error(message(
+                Message::model_config_range,
+                {arg(Placeholder::path, config_path.string()), arg(Placeholder::field, field),
+                 arg(Placeholder::minimum, minimum), arg(Placeholder::maximum, maximum)}));
         }
         parsed = static_cast<std::uint64_t>(signed_value);
     } else {
-        throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
-                                 "\" 必须是整数");
+        throw std::runtime_error(
+            message(Message::model_config_integer, {arg(Placeholder::path, config_path.string()),
+                                                    arg(Placeholder::field, field)}));
     }
     if (parsed < minimum || parsed > maximum) {
-        throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
-                                 "\" 必须在 " + std::to_string(minimum) + " 到 " +
-                                 std::to_string(maximum) + " 之间");
+        throw std::runtime_error(
+            message(Message::model_config_range,
+                    {arg(Placeholder::path, config_path.string()), arg(Placeholder::field, field),
+                     arg(Placeholder::minimum, minimum), arg(Placeholder::maximum, maximum)}));
     }
     return static_cast<std::size_t>(parsed);
 }
@@ -91,8 +105,9 @@ bool optional_boolean(const Json& document, const char* field, bool fallback,
         return fallback;
     }
     if (!document.at(field).is_boolean()) {
-        throw std::runtime_error("配置文件 " + config_path.string() + " 中的 \"" + field +
-                                 "\" 必须是布尔值");
+        throw std::runtime_error(
+            message(Message::model_config_boolean, {arg(Placeholder::path, config_path.string()),
+                                                    arg(Placeholder::field, field)}));
     }
     return document.at(field).get<bool>();
 }
@@ -114,9 +129,8 @@ ModelAdapter optional_adapter(const Json& document, const std::filesystem::path&
     if (const auto parsed = model_detail::parse_model_adapter(adapter)) {
         return *parsed;
     }
-    throw std::runtime_error("配置文件 " + config_path.string() +
-                             " 中的 \"adapter\" 只能是 chat_completions、responses 或 "
-                             "anthropic_messages");
+    throw std::runtime_error(message(Message::model_config_adapter_invalid,
+                                     {arg(Placeholder::path, config_path.string())}));
 }
 
 ModelProvider optional_provider(const Json& document, const std::filesystem::path& config_path) {
@@ -127,15 +141,14 @@ ModelProvider optional_provider(const Json& document, const std::filesystem::pat
     if (const auto parsed = model_detail::parse_model_provider(provider)) {
         return *parsed;
     }
-    throw std::runtime_error("配置文件 " + config_path.string() +
-                             " 中的 \"provider\" 不受支持；可用值为 auto、custom、openai、"
-                             "anthropic、google、xai、moonshot、groq、deepseek");
+    throw std::runtime_error(message(Message::model_config_provider_invalid,
+                                     {arg(Placeholder::path, config_path.string())}));
 }
 
 std::string optional_endpoint(const Json& document, const std::filesystem::path& config_path) {
     if (document.contains("endpoint") && document.contains("api_url")) {
-        throw std::runtime_error("配置文件 " + config_path.string() +
-                                 " 不能同时设置 endpoint 与兼容字段 api_url");
+        throw std::runtime_error(message(Message::model_config_endpoint_exclusive,
+                                         {arg(Placeholder::path, config_path.string())}));
     }
     return document.contains("endpoint") ? optional_string(document, "endpoint", config_path)
                                          : optional_string(document, "api_url", config_path);
@@ -152,8 +165,8 @@ ModelTokenLimitParameter token_limit_parameter(const Json& capabilities, ModelAd
     if (const auto parsed = model_detail::parse_model_token_limit_parameter(parameter)) {
         return *parsed;
     }
-    throw std::runtime_error("配置文件 " + config_path.string() +
-                             " 中 capabilities.token_limit_parameter 无效");
+    throw std::runtime_error(message(Message::model_config_token_limit_parameter_invalid,
+                                     {arg(Placeholder::path, config_path.string())}));
 }
 
 std::optional<ModelProviderCapabilities>
@@ -164,8 +177,9 @@ optional_capabilities(const Json& document, ModelAdapter adapter,
     }
     const auto& capabilities = document.at("capabilities");
     if (!capabilities.is_object()) {
-        throw std::runtime_error("配置文件 " + config_path.string() +
-                                 " 中的 \"capabilities\" 必须是对象");
+        throw std::runtime_error(
+            message(Message::model_config_object, {arg(Placeholder::path, config_path.string()),
+                                                   arg(Placeholder::field, "capabilities")}));
     }
     constexpr std::string_view allowed[] = {"function_tools",        "streaming",
                                             "stream_usage",          "stateless_reasoning_replay",
@@ -173,8 +187,9 @@ optional_capabilities(const Json& document, ModelAdapter adapter,
                                             "chat_reasoning_replay", "requires_tool_call_content"};
     for (auto item = capabilities.begin(); item != capabilities.end(); ++item) {
         if (std::find(allowed, std::end(allowed), item.key()) == std::end(allowed)) {
-            throw std::runtime_error("配置文件 " + config_path.string() +
-                                     " 包含未知 capability: " + item.key());
+            throw std::runtime_error(message(Message::model_config_unknown_capability,
+                                             {arg(Placeholder::path, config_path.string()),
+                                              arg(Placeholder::field, item.key())}));
         }
     }
 
@@ -211,8 +226,9 @@ ModelResponseLimits optional_response_limits(const Json& document,
     }
     const auto& limits = document.at("response_limits");
     if (!limits.is_object()) {
-        throw std::runtime_error("配置文件 " + config_path.string() +
-                                 " 中的 \"response_limits\" 必须是对象");
+        throw std::runtime_error(
+            message(Message::model_config_object, {arg(Placeholder::path, config_path.string()),
+                                                   arg(Placeholder::field, "response_limits")}));
     }
     constexpr std::string_view allowed[] = {
         "max_http_body_bytes",      "max_sse_line_bytes",      "max_sse_event_bytes",
@@ -220,8 +236,9 @@ ModelResponseLimits optional_response_limits(const Json& document,
         "max_tool_arguments_bytes", "max_tool_metadata_bytes", "max_tool_calls"};
     for (auto item = limits.begin(); item != limits.end(); ++item) {
         if (std::find(allowed, std::end(allowed), item.key()) == std::end(allowed)) {
-            throw std::runtime_error("配置文件 " + config_path.string() +
-                                     " 包含未知 response_limits 字段: " + item.key());
+            throw std::runtime_error(message(Message::model_config_unknown_response_limit,
+                                             {arg(Placeholder::path, config_path.string()),
+                                              arg(Placeholder::field, item.key())}));
         }
     }
 
@@ -250,21 +267,22 @@ ModelResponseLimits optional_response_limits(const Json& document,
 ModelProviderConfig load_model_provider_config(const std::filesystem::path& config_path) {
     std::ifstream input(config_path, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("找不到配置文件 " + config_path.string() +
-                                 "。请复制一份 provider 配置为 config.json，并设置对应的 API Key "
-                                 "环境变量。");
+        throw std::runtime_error(message(Message::model_config_not_found,
+                                         {arg(Placeholder::path, config_path.string())}));
     }
 
     Json document;
     try {
         input >> document;
     } catch (const Json::exception& error) {
-        throw std::runtime_error("配置文件 " + config_path.string() +
-                                 " 不是有效 JSON: " + error.what());
+        throw std::runtime_error(message(
+            Message::model_config_invalid_json,
+            {arg(Placeholder::path, config_path.string()), arg(Placeholder::error, error.what())}));
     }
 
     if (!document.is_object()) {
-        throw std::runtime_error("配置文件 " + config_path.string() + " 的最外层必须是 JSON 对象");
+        throw std::runtime_error(message(Message::model_config_root_object,
+                                         {arg(Placeholder::path, config_path.string())}));
     }
 
     ModelProviderConfig config;
@@ -301,15 +319,13 @@ ModelProviderConfig load_model_provider_config(const std::filesystem::path& conf
         model_provider_bounds::max_request_token_estimate_bytes_per_token, config_path);
     if (config.max_request_tokens != 0) {
         if (config.request_token_safety_margin >= config.max_request_tokens) {
-            throw std::runtime_error(
-                "配置文件 " + config_path.string() +
-                " 中的 request_token_safety_margin 必须小于 max_request_tokens");
+            throw std::runtime_error(message(Message::model_config_request_margin_invalid,
+                                             {arg(Placeholder::path, config_path.string())}));
         }
         if (config.max_completion_tokens >=
             config.max_request_tokens - config.request_token_safety_margin) {
-            throw std::runtime_error("配置文件 " + config_path.string() +
-                                     " 中的 max_request_tokens 必须大于 max_completion_tokens 与 "
-                                     "request_token_safety_margin 之和");
+            throw std::runtime_error(message(Message::model_config_request_budget_invalid,
+                                             {arg(Placeholder::path, config_path.string())}));
         }
     }
     config.stream = optional_boolean(document, "stream", config.stream, config_path);
@@ -320,7 +336,9 @@ ModelProviderConfig load_model_provider_config(const std::filesystem::path& conf
         model_detail::validate_model_provider_credentials(config);
         (void)resolve_model_provider_profile(config);
     } catch (const std::invalid_argument& error) {
-        throw std::runtime_error("配置文件 " + config_path.string() + ": " + error.what());
+        throw std::runtime_error(
+            message(Message::model_config_invalid, {arg(Placeholder::path, config_path.string()),
+                                                    arg(Placeholder::error, error.what())}));
     }
     return config;
 }

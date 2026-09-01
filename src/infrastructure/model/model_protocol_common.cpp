@@ -1,18 +1,27 @@
 #include "model_protocol_internal.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <stdexcept>
 #include <string>
 
 namespace mint::detail::protocol {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 [[noreturn]] void throw_byte_limit(std::string_view resource, std::size_t limit) {
-    throw std::runtime_error("模型响应超过资源上限: " + std::string(resource) + " 最多 " +
-                             std::to_string(limit) + " 字节");
+    throw std::runtime_error(
+        message(Message::model_protocol_byte_limit,
+                {arg(Placeholder::resource, resource), arg(Placeholder::limit, limit)}));
 }
 
 [[noreturn]] void throw_count_limit(std::string_view resource, std::size_t limit) {
-    throw std::runtime_error("模型响应超过资源上限: " + std::string(resource) + " 最多 " +
-                             std::to_string(limit));
+    throw std::runtime_error(
+        message(Message::model_protocol_count_limit,
+                {arg(Placeholder::resource, resource), arg(Placeholder::limit, limit)}));
 }
 
 void add_bytes(std::size_t& current, std::size_t added, std::size_t limit,
@@ -33,7 +42,7 @@ void append_bounded(std::string& target, std::string_view value, std::size_t lim
 
 void validate_limits(const ModelResponseLimits& limits) {
     if (!valid_model_response_limits(limits)) {
-        throw std::invalid_argument("模型响应资源上限超出允许范围");
+        throw std::invalid_argument(message(Message::model_protocol_limits_invalid));
     }
 }
 
@@ -41,22 +50,26 @@ OutputBudget::OutputBudget(const ModelResponseLimits& configured_limits)
     : limits(configured_limits) {}
 
 void OutputBudget::add_text(std::size_t bytes) {
-    add_bytes(text_bytes, bytes, limits.max_text_bytes, "文本");
+    add_bytes(text_bytes, bytes, limits.max_text_bytes, message(Message::model_resource_text));
 }
 
 void OutputBudget::add_reasoning(std::size_t bytes) {
-    add_bytes(reasoning_bytes, bytes, limits.max_reasoning_bytes, "推理内容");
+    add_bytes(reasoning_bytes, bytes, limits.max_reasoning_bytes,
+              message(Message::model_resource_reasoning));
 }
 
 void OutputBudget::add_tool(std::size_t id_bytes, std::size_t name_bytes,
                             std::size_t argument_bytes) {
     if (tool_calls >= limits.max_tool_calls) {
-        throw_count_limit("工具调用数量", limits.max_tool_calls);
+        throw_count_limit(message(Message::model_resource_tool_calls), limits.max_tool_calls);
     }
     ++tool_calls;
-    add_bytes(tool_metadata_bytes, id_bytes, limits.max_tool_metadata_bytes, "工具调用元数据");
-    add_bytes(tool_metadata_bytes, name_bytes, limits.max_tool_metadata_bytes, "工具调用元数据");
-    add_bytes(tool_argument_bytes, argument_bytes, limits.max_tool_arguments_bytes, "工具参数");
+    add_bytes(tool_metadata_bytes, id_bytes, limits.max_tool_metadata_bytes,
+              message(Message::model_resource_tool_metadata));
+    add_bytes(tool_metadata_bytes, name_bytes, limits.max_tool_metadata_bytes,
+              message(Message::model_resource_tool_metadata));
+    add_bytes(tool_argument_bytes, argument_bytes, limits.max_tool_arguments_bytes,
+              message(Message::model_resource_tool_arguments));
 }
 
 const Json* provider_state(const Json& message) {
@@ -76,17 +89,18 @@ Json parse_arguments(const Json& value) {
         return value;
     }
     if (!value.is_string()) {
-        throw std::runtime_error("工具参数必须是 JSON 对象或 JSON 字符串");
+        throw std::runtime_error(message(Message::model_protocol_arguments_object_or_string));
     }
 
     try {
         auto parsed = Json::parse(value.get<std::string>());
         if (!parsed.is_object()) {
-            throw std::runtime_error("工具参数的 JSON 顶层必须是对象");
+            throw std::runtime_error(message(Message::model_protocol_arguments_root_object));
         }
         return parsed;
     } catch (const Json::exception& error) {
-        throw std::runtime_error("工具参数不是有效 JSON: " + std::string(error.what()));
+        throw std::runtime_error(message(Message::model_protocol_arguments_invalid_json,
+                                         {arg(Placeholder::error, error.what())}));
     }
 }
 
@@ -149,7 +163,7 @@ std::string stream_error_message(const Json& value) {
     if (value.is_string()) {
         return value.get<std::string>();
     }
-    return "模型流返回错误事件";
+    return message(Message::model_protocol_stream_error_event);
 }
 
 std::string response_status_error(const Json& response) {
@@ -158,7 +172,8 @@ std::string response_status_error(const Json& response) {
         response.at("error").at("message").is_string()) {
         return response.at("error").at("message").get<std::string>();
     }
-    return "Responses API 返回非完成状态: " + response.value("status", "unknown");
+    return message(Message::model_protocol_responses_incomplete,
+                   {arg(Placeholder::status, response.value("status", "unknown"))});
 }
 
 } // namespace mint::detail::protocol

@@ -1,0 +1,15 @@
+#pragma once
+
+#include <array>
+#include <string_view>
+
+namespace mint::localization::detail {
+
+inline constexpr std::array<std::string_view, @MINT_ENGLISH_CATALOG_PART_COUNT@>
+    english_catalog = {
+@MINT_ENGLISH_CATALOG_PARTS@};
+inline constexpr std::array<std::string_view, @MINT_SIMPLIFIED_CHINESE_CATALOG_PART_COUNT@>
+    simplified_chinese_catalog = {
+@MINT_SIMPLIFIED_CHINESE_CATALOG_PARTS@};
+
+} // namespace mint::localization::detail

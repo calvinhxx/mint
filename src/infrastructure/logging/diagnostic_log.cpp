@@ -1,5 +1,6 @@
 #include "mint/infrastructure/diagnostic_log.hpp"
 #include "diagnostic_log_internal.hpp"
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/terminal_text.hpp"
 
 #include <atomic>
@@ -13,6 +14,9 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 namespace mint::diagnostics {
+
+using localization::Message;
+using localization::Placeholder;
 namespace {
 
 struct Backend {
@@ -54,8 +58,7 @@ spdlog::level::level_enum parse_level(std::string_view level) {
     if (parsed != spdlog::level::off || name == "off") {
         return parsed;
     }
-    throw std::invalid_argument(
-        "日志级别只支持 trace、debug、info、warn、warning、error、critical 或 off");
+    throw std::invalid_argument(localization::message(Message::logging_invalid_level));
 }
 
 spdlog::level::level_enum backend_level(Level level) noexcept {
@@ -204,7 +207,7 @@ void emit(Level level, std::string_view event, const Json& fields) noexcept {
                 state.file.reset();
                 state.file_failed.reset();
                 state.status.file_enabled = false;
-                state.status.error = "本地日志写入失败，文件日志已停用";
+                state.status.error = localization::message(Message::logging_file_disabled);
                 if (state.console != nullptr) {
                     state.console->warn("event=diagnostics.file_disabled");
                 }

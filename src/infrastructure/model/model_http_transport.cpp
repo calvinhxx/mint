@@ -1,5 +1,6 @@
 #include "model_http_transport.hpp"
 
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/task_control.hpp"
 #include "mint/version.hpp"
 
@@ -21,11 +22,16 @@
 namespace mint::model_detail {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 class CurlGlobal final {
   public:
     CurlGlobal() {
         if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-            throw std::runtime_error("初始化 HTTP 运行时失败");
+            throw std::runtime_error(message(Message::model_http_runtime_init_failed));
         }
     }
 
@@ -151,13 +157,13 @@ std::size_t append_response(char* data, std::size_t size, std::size_t count, voi
     auto& attempt = *static_cast<HttpAttempt*>(user_data);
     try {
         if (size != 0 && count > std::numeric_limits<std::size_t>::max() / size) {
-            throw std::runtime_error("模型 HTTP 响应正文超过资源上限");
+            throw std::runtime_error(message(Message::model_http_body_limit));
         }
         const auto bytes = size * count;
         const auto limit = attempt.response_limits.max_http_body_bytes;
         if (attempt.received_body_bytes > limit || bytes > limit - attempt.received_body_bytes) {
-            throw std::runtime_error("模型 HTTP 响应正文超过资源上限: 最多 " +
-                                     std::to_string(limit) + " 字节");
+            throw std::runtime_error(
+                message(Message::model_http_body_limit_bytes, {arg(Placeholder::limit, limit)}));
         }
         attempt.received_body_bytes += bytes;
         const bool successful_stream =
@@ -180,7 +186,7 @@ std::size_t capture_response_header(char* data, std::size_t size, std::size_t co
     auto& attempt = *static_cast<HttpAttempt*>(user_data);
     try {
         if (size != 0 && count > std::numeric_limits<std::size_t>::max() / size) {
-            throw std::runtime_error("模型 HTTP 响应头超过资源上限");
+            throw std::runtime_error(message(Message::model_http_header_limit));
         }
         const auto bytes = size * count;
         const std::string_view line(data, bytes);
@@ -226,7 +232,7 @@ int abort_stopped_request(void* user_data, curl_off_t, curl_off_t, curl_off_t, c
 void append_header(HeaderList& headers, const std::string& value) {
     auto* updated = curl_slist_append(headers.get(), value.c_str());
     if (updated == nullptr) {
-        throw std::runtime_error("无法创建 HTTP 请求头");
+        throw std::runtime_error(message(Message::model_http_header_create_failed));
     }
     (void)headers.release();
     headers.reset(updated);
@@ -267,7 +273,7 @@ HttpAttempt perform_http_attempt(const ModelProviderConfig& config, std::string_
     std::array<char, CURL_ERROR_SIZE> error_buffer{};
     CurlHandle handle(curl_easy_init());
     if (!handle) {
-        throw std::runtime_error("无法创建 HTTP 请求");
+        throw std::runtime_error(message(Message::model_http_request_create_failed));
     }
 
     HeaderList headers;
@@ -289,7 +295,7 @@ HttpAttempt perform_http_attempt(const ModelProviderConfig& config, std::string_
     curl_easy_setopt(handle.get(), CURLOPT_URL, config.api_url.c_str());
     if (is_plaintext_loopback_model_endpoint(config.api_url) &&
         curl_easy_setopt(handle.get(), CURLOPT_NOPROXY, "*") != CURLE_OK) {
-        throw std::runtime_error("无法禁用本地模型接口的环境代理");
+        throw std::runtime_error(message(Message::model_http_proxy_disable_failed));
     }
     curl_easy_setopt(handle.get(), CURLOPT_HTTPHEADER, headers.get());
     curl_easy_setopt(handle.get(), CURLOPT_POST, 1L);

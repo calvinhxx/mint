@@ -1,5 +1,7 @@
 #include "mint/domain/change_journal.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 #include <string_view>
@@ -8,6 +10,11 @@
 
 namespace mint {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 constexpr std::size_t context_lines = 3;
 
@@ -139,7 +146,7 @@ void ChangeJournal::record_deleted(std::string path, std::string contents) {
 void ChangeJournal::record_transition(std::string path, bool before_exists, std::string before,
                                       bool after_exists, std::string after) {
     if (path.empty()) {
-        throw std::invalid_argument("变更日志路径不能为空");
+        throw std::invalid_argument(message(Message::journal_path_empty));
     }
     std::scoped_lock lock(mutex_);
     auto existing = entries_.find(path);
@@ -155,7 +162,8 @@ void ChangeJournal::record_transition(std::string path, bool before_exists, std:
     }
 
     if (existing->second.after_exists != before_exists || existing->second.after != before) {
-        throw std::invalid_argument("变更日志记录与当前事务前状态不一致: " + path);
+        throw std::invalid_argument(
+            message(Message::journal_state_mismatch, {arg(Placeholder::path, path)}));
     }
     existing->second.after_exists = after_exists;
     existing->second.after = std::move(after);
@@ -216,7 +224,7 @@ void ChangeJournal::restore(const Json& state) {
     const auto schema_version = state.is_object() ? state.value("schema_version", 0) : 0;
     if (!state.is_object() || (schema_version != 1 && schema_version != 2) ||
         !state.contains("entries") || !state.at("entries").is_array()) {
-        throw std::invalid_argument("变更日志快照格式无效");
+        throw std::invalid_argument(message(Message::journal_invalid_snapshot));
     }
 
     std::map<std::string, Entry> restored;
@@ -224,20 +232,20 @@ void ChangeJournal::restore(const Json& state) {
         if (!item.is_object() || !item.contains("path") || !item.at("path").is_string() ||
             !item.contains("before") || !item.at("before").is_string() || !item.contains("after") ||
             !item.at("after").is_string()) {
-            throw std::invalid_argument("变更日志条目格式无效");
+            throw std::invalid_argument(message(Message::journal_invalid_entry));
         }
         const auto path = item.at("path").get<std::string>();
         bool before_exists = true;
         bool after_exists = true;
         if (schema_version == 1) {
             if (!item.contains("created") || !item.at("created").is_boolean()) {
-                throw std::invalid_argument("变更日志 v1 条目缺少 created");
+                throw std::invalid_argument(message(Message::journal_v1_missing_created));
             }
             before_exists = !item.at("created").get<bool>();
         } else {
             if (!item.contains("before_exists") || !item.at("before_exists").is_boolean() ||
                 !item.contains("after_exists") || !item.at("after_exists").is_boolean()) {
-                throw std::invalid_argument("变更日志 v2 条目缺少存在状态");
+                throw std::invalid_argument(message(Message::journal_v2_missing_state));
             }
             before_exists = item.at("before_exists").get<bool>();
             after_exists = item.at("after_exists").get<bool>();
@@ -247,7 +255,7 @@ void ChangeJournal::restore(const Json& state) {
         if (path.empty() || (!before_exists && !before.empty()) ||
             (!after_exists && !after.empty()) ||
             (before_exists == after_exists && before == after)) {
-            throw std::invalid_argument("变更日志条目状态无效");
+            throw std::invalid_argument(message(Message::journal_invalid_entry_state));
         }
         if (!restored
                  .emplace(path, Entry{.before_exists = before_exists,
@@ -255,7 +263,8 @@ void ChangeJournal::restore(const Json& state) {
                                       .after_exists = after_exists,
                                       .after = std::move(after)})
                  .second) {
-            throw std::invalid_argument("变更日志包含重复路径: " + path);
+            throw std::invalid_argument(
+                message(Message::journal_duplicate_path, {arg(Placeholder::path, path)}));
         }
     }
 

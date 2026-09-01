@@ -18,6 +18,8 @@ target_link_libraries(mint_agent
         mint::domain
         mint::ports
         mint::runtime
+    PRIVATE
+        mint::localization
 )
 
 add_library(mint_project STATIC
@@ -30,5 +32,6 @@ target_link_libraries(mint_project
     PUBLIC
         mint::domain
     PRIVATE
+        mint::localization
         mint::runtime
 )

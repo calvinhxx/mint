@@ -1,20 +1,30 @@
 #include "model_protocol_internal.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace mint::detail::protocol {
+
+using localization::Message;
+using localization::Placeholder;
 namespace {
+
+std::string localized(localization::Message message) {
+    return localization::message(message);
+}
 
 Json sanitized_chat_messages(const Json& messages, const ModelProviderCapabilities& capabilities) {
     if (!messages.is_array()) {
-        throw std::invalid_argument("模型消息必须是数组");
+        throw std::invalid_argument(localized(Message::model_protocol_messages_array));
     }
     Json result = Json::array();
     for (const auto& message : messages) {
         if (!message.is_object() || !message.contains("role") || !message.at("role").is_string()) {
-            throw std::invalid_argument("模型消息缺少 role");
+            throw std::invalid_argument(localized(Message::model_protocol_message_role));
         }
         Json clean = {{"role", message.at("role")}};
         for (const char* field : {"content", "name", "tool_call_id", "tool_calls"}) {
@@ -27,7 +37,7 @@ Json sanitized_chat_messages(const Json& messages, const ModelProviderCapabiliti
             message.contains("reasoning_content")) {
             const auto& reasoning = message.at("reasoning_content");
             if (!reasoning.is_string() && !reasoning.is_null()) {
-                throw std::invalid_argument("assistant reasoning_content 必须是字符串或 null");
+                throw std::invalid_argument(localized(Message::model_protocol_reasoning_content));
             }
             clean["reasoning_content"] = reasoning;
         }
@@ -44,12 +54,12 @@ Json sanitized_chat_messages(const Json& messages, const ModelProviderCapabiliti
 
 Json responses_input(const Json& messages) {
     if (!messages.is_array()) {
-        throw std::invalid_argument("模型消息必须是数组");
+        throw std::invalid_argument(localized(Message::model_protocol_messages_array));
     }
     Json input = Json::array();
     for (const auto& message : messages) {
         if (!message.is_object() || !message.contains("role") || !message.at("role").is_string()) {
-            throw std::invalid_argument("模型消息缺少 role");
+            throw std::invalid_argument(localized(Message::model_protocol_message_role));
         }
         const auto role = message.at("role").get<std::string>();
         if (const auto* state = provider_state(message);
@@ -63,7 +73,7 @@ Json responses_input(const Json& messages) {
         if (role == "tool") {
             if (!message.contains("tool_call_id") || !message.at("tool_call_id").is_string() ||
                 !message.contains("content")) {
-                throw std::invalid_argument("tool 消息缺少 tool_call_id 或 content");
+                throw std::invalid_argument(localized(Message::model_protocol_tool_message_fields));
             }
             input.push_back({{"type", "function_call_output"},
                              {"call_id", message.at("tool_call_id")},
@@ -77,14 +87,16 @@ Json responses_input(const Json& messages) {
         }
         if (role == "assistant" && message.contains("tool_calls")) {
             if (!message.at("tool_calls").is_array()) {
-                throw std::invalid_argument("assistant tool_calls 必须是数组");
+                throw std::invalid_argument(
+                    localized(Message::model_protocol_assistant_tool_calls_array));
             }
             for (const auto& call : message.at("tool_calls")) {
                 if (!call.is_object() || !call.contains("id") || !call.at("id").is_string() ||
                     !call.contains("function") || !call.at("function").is_object() ||
                     !call.at("function").contains("name") ||
                     !call.at("function").at("name").is_string()) {
-                    throw std::invalid_argument("assistant tool_call 格式无效");
+                    throw std::invalid_argument(
+                        localized(Message::model_protocol_assistant_tool_call_invalid));
                 }
                 const auto& function = call.at("function");
                 const auto arguments = function.contains("arguments")
@@ -102,13 +114,14 @@ Json responses_input(const Json& messages) {
 
 Json responses_tools(const Json& tools) {
     if (!tools.is_array()) {
-        throw std::invalid_argument("工具定义必须是数组");
+        throw std::invalid_argument(localized(Message::model_protocol_tools_array));
     }
     Json result = Json::array();
     for (const auto& tool : tools) {
         if (!tool.is_object() || tool.value("type", "") != "function" ||
             !tool.contains("function") || !tool.at("function").is_object()) {
-            throw std::invalid_argument("Responses adapter 只支持 function 工具定义");
+            throw std::invalid_argument(
+                localized(Message::model_protocol_responses_function_tools));
         }
         Json flattened = tool.at("function");
         flattened["type"] = "function";
@@ -138,13 +151,13 @@ struct AnthropicConversation {
 
 AnthropicConversation anthropic_conversation(const Json& messages) {
     if (!messages.is_array()) {
-        throw std::invalid_argument("模型消息必须是数组");
+        throw std::invalid_argument(localized(Message::model_protocol_messages_array));
     }
 
     AnthropicConversation result;
     for (const auto& message : messages) {
         if (!message.is_object() || !message.contains("role") || !message.at("role").is_string()) {
-            throw std::invalid_argument("模型消息缺少 role");
+            throw std::invalid_argument(localized(Message::model_protocol_message_role));
         }
         const auto role = message.at("role").get<std::string>();
         if (role == "system") {
@@ -165,7 +178,7 @@ AnthropicConversation anthropic_conversation(const Json& messages) {
         if (role == "tool") {
             if (!message.contains("tool_call_id") || !message.at("tool_call_id").is_string() ||
                 !message.contains("content")) {
-                throw std::invalid_argument("tool 消息缺少 tool_call_id 或 content");
+                throw std::invalid_argument(localized(Message::model_protocol_tool_message_fields));
             }
             blocks.push_back({{"type", "tool_result"},
                               {"tool_use_id", message.at("tool_call_id")},
@@ -174,7 +187,7 @@ AnthropicConversation anthropic_conversation(const Json& messages) {
             continue;
         }
         if (role != "user" && role != "assistant") {
-            throw std::invalid_argument("Anthropic Messages 只接受 system、user、assistant、tool");
+            throw std::invalid_argument(localized(Message::model_protocol_anthropic_roles));
         }
 
         if (role == "assistant") {
@@ -194,14 +207,16 @@ AnthropicConversation anthropic_conversation(const Json& messages) {
         }
         if (role == "assistant" && message.contains("tool_calls")) {
             if (!message.at("tool_calls").is_array()) {
-                throw std::invalid_argument("assistant tool_calls 必须是数组");
+                throw std::invalid_argument(
+                    localized(Message::model_protocol_assistant_tool_calls_array));
             }
             for (const auto& call : message.at("tool_calls")) {
                 if (!call.is_object() || !call.contains("id") || !call.at("id").is_string() ||
                     !call.contains("function") || !call.at("function").is_object() ||
                     !call.at("function").contains("name") ||
                     !call.at("function").at("name").is_string()) {
-                    throw std::invalid_argument("assistant tool_call 格式无效");
+                    throw std::invalid_argument(
+                        localized(Message::model_protocol_assistant_tool_call_invalid));
                 }
                 const auto& function = call.at("function");
                 const auto input = function.contains("arguments")
@@ -220,17 +235,18 @@ AnthropicConversation anthropic_conversation(const Json& messages) {
 
 Json anthropic_tools(const Json& tools) {
     if (!tools.is_array()) {
-        throw std::invalid_argument("工具定义必须是数组");
+        throw std::invalid_argument(localized(Message::model_protocol_tools_array));
     }
     Json result = Json::array();
     for (const auto& tool : tools) {
         if (!tool.is_object() || tool.value("type", "") != "function" ||
             !tool.contains("function") || !tool.at("function").is_object()) {
-            throw std::invalid_argument("Anthropic Messages adapter 只支持 function 工具定义");
+            throw std::invalid_argument(
+                localized(Message::model_protocol_anthropic_function_tools));
         }
         const auto& function = tool.at("function");
         if (!function.contains("name") || !function.at("name").is_string()) {
-            throw std::invalid_argument("Anthropic 工具定义缺少 function.name");
+            throw std::invalid_argument(localized(Message::model_protocol_anthropic_tool_name));
         }
         Json converted = {
             {"name", function.at("name")},

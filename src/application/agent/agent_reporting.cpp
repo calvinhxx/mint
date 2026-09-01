@@ -3,6 +3,7 @@
 #include "agent_execution.hpp"
 #include "agent_model_summary.hpp"
 
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/terminal_text.hpp"
 
 #include <string_view>
@@ -13,12 +14,17 @@ namespace mint::agent_detail {
 namespace {
 
 constexpr std::size_t persisted_error_limit = 512;
-constexpr std::string_view persisted_error_suffix = "…[已截断]";
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 void truncate_persisted_error(std::string& value) {
     if (value.size() <= persisted_error_limit) {
         return;
     }
+    const auto persisted_error_suffix = message(Message::agent_output_truncated_suffix);
     auto boundary = persisted_error_limit - persisted_error_suffix.size();
     while (boundary > 0 && (static_cast<unsigned char>(value[boundary]) & 0xC0U) == 0x80U) {
         --boundary;
@@ -31,12 +37,17 @@ void print_execution_summary(std::ostream& output, const ExecutionSummary& summa
     if (summary.tool_calls == 0) {
         return;
     }
-    output << "\n[执行摘要] 工具 " << summary.tool_calls << " 次，成功 "
-           << summary.successful_tool_calls << "，错误 " << summary.tool_errors << "；文件修改 "
-           << summary.file_changes << " 次；命令 " << summary.command_calls << " 次（通过 "
-           << summary.commands_passed << "，失败 " << summary.commands_failed << "，超时 "
-           << summary.commands_timed_out << "，取消 " << summary.commands_cancelled << "，拒绝 "
-           << summary.commands_denied << "）\n";
+    output << message(Message::agent_output_execution_summary,
+                      {arg(Placeholder::tool_calls, summary.tool_calls),
+                       arg(Placeholder::successful_tools, summary.successful_tool_calls),
+                       arg(Placeholder::tool_errors, summary.tool_errors),
+                       arg(Placeholder::file_changes, summary.file_changes),
+                       arg(Placeholder::command_calls, summary.command_calls),
+                       arg(Placeholder::commands_passed, summary.commands_passed),
+                       arg(Placeholder::commands_failed, summary.commands_failed),
+                       arg(Placeholder::commands_timed_out, summary.commands_timed_out),
+                       arg(Placeholder::commands_cancelled, summary.commands_cancelled),
+                       arg(Placeholder::commands_denied, summary.commands_denied)});
 }
 
 } // namespace
@@ -64,49 +75,58 @@ void capture_final_state(AgentResult& result, const AgentTools& tools) {
 void print_final_state(std::ostream& output, const AgentResult& result) {
     print_execution_summary(output, result.execution);
     if (result.model.calls != 0) {
-        output << "[模型摘要] 调用 " << result.model.calls << " 次，HTTP 尝试 "
-               << result.model.attempts << "，重试 " << result.model.retries << "，耗时 "
-               << result.model.duration_ms << "ms";
+        output << message(Message::agent_output_model_summary,
+                          {arg(Placeholder::calls, result.model.calls),
+                           arg(Placeholder::attempts, result.model.attempts),
+                           arg(Placeholder::retries, result.model.retries),
+                           arg(Placeholder::duration_ms, result.model.duration_ms)});
         if (result.model.usage_reports != 0) {
-            output << "，tokens " << result.model.total_tokens << "，缓存 "
-                   << result.model.cached_tokens;
             const auto hit_rate =
                 model_usage::cache_hit_rate(result.model.cached_tokens, result.model.prompt_tokens);
-            output << "，命中 ";
-            if (hit_rate.has_value()) {
-                output << static_cast<std::size_t>(*hit_rate * 100.0) << '%';
-            } else {
-                output << "n/a";
-            }
+            const auto hit_rate_text =
+                hit_rate.has_value()
+                    ? std::to_string(static_cast<std::size_t>(*hit_rate * 100.0)) + "%"
+                    : std::string("n/a");
+            output << message(Message::agent_output_model_usage_summary,
+                              {arg(Placeholder::tokens, result.model.total_tokens),
+                               arg(Placeholder::cached, result.model.cached_tokens),
+                               arg(Placeholder::hit_rate, hit_rate_text)});
         }
         output << '\n';
     }
     if (result.model.max_total_tokens != 0) {
         const auto budget = token_budget_to_json(result.model);
-        output << "[Token预算] 已报告 " << result.model.total_tokens << " / "
-               << result.model.max_total_tokens << " tokens";
+        output << message(Message::agent_output_token_budget,
+                          {arg(Placeholder::reported, result.model.total_tokens),
+                           arg(Placeholder::maximum, result.model.max_total_tokens)});
         const auto coverage = budget.at("usage_coverage").get<std::string>();
         if (coverage == "unavailable") {
-            output << "（provider 未返回 usage，无法按累计 Token 停止）";
+            output << message(Message::agent_output_token_budget_unavailable);
         } else if (coverage == "partial") {
-            output << "（部分模型调用未返回 usage，只能按已报告值停止）";
+            output << message(Message::agent_output_token_budget_partial);
         }
         output << '\n';
     }
-    output << "[任务状态] " << result.status << '\n'
-           << "[验证状态] " << result.verification_status << '\n';
+    output << message(Message::agent_output_status,
+                      {arg(Placeholder::task, result.status),
+                       arg(Placeholder::verification, result.verification_status)});
     if (result.changes.files.empty()) {
         return;
     }
-    output << "[工作区变更] " << result.changes.files.size() << " 个文件";
+    output << message(Message::agent_output_workspace_changes,
+                      {arg(Placeholder::count, result.changes.files.size())});
     if (result.changes.diff_truncated) {
-        output << "（diff 已截断）";
+        output << message(Message::agent_output_diff_truncated);
     }
     output << '\n';
     for (const auto& file : result.changes.details) {
         if (file.status == "policy_violation" || file.status == "unauditable") {
-            output << "[工作区风险] " << escape_terminal_field(file.path) << "："
-                   << (file.status == "policy_violation" ? "超出写入策略" : "无法安全审计") << '\n';
+            output << message(
+                Message::agent_output_workspace_risk,
+                {arg(Placeholder::path, escape_terminal_field(file.path)),
+                 arg(Placeholder::risk, message(file.status == "policy_violation"
+                                                    ? Message::agent_output_risk_policy
+                                                    : Message::agent_output_risk_unauditable))});
         }
     }
     output << escape_terminal_text(result.changes.unified_diff);

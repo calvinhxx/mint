@@ -18,7 +18,8 @@ namespace mint {
 struct AgentOptions {
     std::size_t max_turns = runtime_defaults::max_turns;
     std::size_t max_context_bytes = runtime_defaults::max_context_bytes;
-    // Zero disables the task-level cumulative token budget.
+    // EN: Zero disables the task-level cumulative token budget.
+    // ZH-CN: 值为零时，不启用任务级累计 token 预算。
     std::size_t max_total_tokens = runtime_defaults::max_total_tokens;
     bool require_verification_after_write = false;
     bool resume_session = false;

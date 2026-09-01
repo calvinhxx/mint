@@ -1,5 +1,7 @@
 #include "mint/infrastructure/model_provider_client.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include "model_http_transport.hpp"
 #include "model_protocol.hpp"
 #include "model_provider_profile.hpp"
@@ -10,6 +12,10 @@
 #include <utility>
 
 namespace mint {
+
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 namespace {
 
 std::size_t estimated_tokens(std::size_t serialized_bytes, std::size_t bytes_per_token) {
@@ -54,7 +60,7 @@ Json model_progress_to_json(const ModelProgress& progress) {
 ModelProviderClient::ModelProviderClient(ModelProviderConfig config) : config_(std::move(config)) {
     model_detail::normalize_model_provider_endpoint(config_);
     if (config_.model.empty()) {
-        throw std::invalid_argument("模型名称不能为空");
+        throw std::invalid_argument(message(Message::model_client_model_empty));
     }
     if (config_.connect_timeout_seconds <= 0 || config_.request_timeout_seconds <= 0 ||
         config_.max_retries < 0 || config_.max_retries > model_provider_bounds::max_retries ||
@@ -67,16 +73,16 @@ ModelProviderClient::ModelProviderClient(ModelProviderConfig config) : config_(s
             model_provider_bounds::min_request_token_estimate_bytes_per_token ||
         config_.request_token_estimate_bytes_per_token >
             model_provider_bounds::max_request_token_estimate_bytes_per_token) {
-        throw std::invalid_argument("模型超时或重试配置超出允许范围");
+        throw std::invalid_argument(message(Message::model_client_transport_config_invalid));
     }
     if (config_.max_request_tokens != 0 &&
         (config_.request_token_safety_margin >= config_.max_request_tokens ||
          config_.max_completion_tokens >=
              config_.max_request_tokens - config_.request_token_safety_margin)) {
-        throw std::invalid_argument("max_request_tokens 必须大于输出 Token 与请求安全余量之和");
+        throw std::invalid_argument(message(Message::model_client_request_token_budget_invalid));
     }
     if (!valid_model_response_limits(config_.response_limits)) {
-        throw std::invalid_argument("模型响应资源上限超出允许范围");
+        throw std::invalid_argument(message(Message::model_protocol_limits_invalid));
     }
     (void)resolve_model_provider_profile(config_);
     model_detail::resolve_model_provider_credentials(config_);
@@ -115,8 +121,7 @@ ModelReply ModelProviderClient::complete(const Json& messages, const Json& tools
     const auto input_tokens = limits.estimated_tokens(request_body.size());
     const auto available_request = limits.available_request_tokens();
     if (available_request == 0 || input_tokens > available_request) {
-        throw std::runtime_error("模型请求超过 Token 预算；请缩短上下文，或按模型/账户限额设置 "
-                                 "max_request_tokens");
+        throw std::runtime_error(message(Message::model_client_request_token_budget_exceeded));
     }
 
     auto reply = model_detail::complete_provider_request(config_, std::move(request_body),

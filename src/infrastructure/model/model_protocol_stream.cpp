@@ -2,6 +2,8 @@
 #include "model_protocol_anthropic.hpp"
 #include "model_protocol_internal.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -13,6 +15,11 @@
 
 namespace mint::detail {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 struct StreamToolCall {
     std::string id;
@@ -33,14 +40,14 @@ std::size_t stream_output_index(const Json& event) {
     } else if (value.is_number_integer()) {
         const auto signed_index = value.get<std::int64_t>();
         if (signed_index < 0) {
-            throw std::runtime_error("流式输出 index 无效");
+            throw std::runtime_error(message(Message::model_stream_output_index_invalid));
         }
         index = static_cast<std::uint64_t>(signed_index);
     } else {
-        throw std::runtime_error("流式输出 index 无效");
+        throw std::runtime_error(message(Message::model_stream_output_index_invalid));
     }
     if (index > std::numeric_limits<std::size_t>::max()) {
-        throw std::runtime_error("流式输出 index 超出平台范围");
+        throw std::runtime_error(message(Message::model_stream_output_index_overflow));
     }
     return static_cast<std::size_t>(index);
 }
@@ -48,7 +55,8 @@ std::size_t stream_output_index(const Json& event) {
 std::size_t stream_tool_index(const Json& raw_call, const ModelResponseLimits& limits) {
     const auto index = stream_output_index(raw_call);
     if (index >= limits.max_tool_calls) {
-        protocol::throw_count_limit("工具调用 index", limits.max_tool_calls - 1);
+        protocol::throw_count_limit(message(Message::model_resource_tool_call_index),
+                                    limits.max_tool_calls - 1);
     }
     return index;
 }
@@ -90,10 +98,12 @@ struct ModelStreamDecoder::State {
 
     void emit(ModelStreamEvent event) {
         if (event.kind == ModelStreamEventKind::text_delta) {
-            protocol::add_bytes(text_bytes, event.delta.size(), limits.max_text_bytes, "文本");
+            protocol::add_bytes(text_bytes, event.delta.size(), limits.max_text_bytes,
+                                message(Message::model_resource_text));
         } else {
             protocol::add_bytes(tool_argument_bytes, event.delta.size(),
-                                limits.max_tool_arguments_bytes, "工具参数");
+                                limits.max_tool_arguments_bytes,
+                                message(Message::model_resource_tool_arguments));
         }
         delta_bytes += event.delta.size();
         if (callback && !event.delta.empty()) {
@@ -114,7 +124,8 @@ struct ModelStreamDecoder::State {
             }
         }
         if (fallback >= limits.max_tool_calls) {
-            protocol::throw_count_limit("工具调用 index", limits.max_tool_calls - 1);
+            protocol::throw_count_limit(message(Message::model_resource_tool_call_index),
+                                        limits.max_tool_calls - 1);
         }
         return fallback;
     }
@@ -125,7 +136,7 @@ struct ModelStreamDecoder::State {
         const auto after = target.dump().size();
         if (after > before) {
             protocol::add_bytes(tool_metadata_bytes, after - before, limits.max_tool_metadata_bytes,
-                                "工具调用扩展元数据");
+                                message(Message::model_resource_tool_extension_metadata));
         }
     }
 
@@ -158,7 +169,7 @@ struct ModelStreamDecoder::State {
                 protocol::append_bounded(
                     chat_reasoning_content,
                     delta.at("reasoning_content").get_ref<const std::string&>(),
-                    limits.max_reasoning_bytes, "推理内容");
+                    limits.max_reasoning_bytes, message(Message::model_resource_reasoning));
             }
             if (delta.contains("content") && !delta.at("content").is_null()) {
                 protocol::OutputBudget event_budget(limits);
@@ -170,12 +181,12 @@ struct ModelStreamDecoder::State {
                 continue;
             }
             if (!delta.at("tool_calls").is_array()) {
-                throw std::runtime_error("流式 tool_calls 不是数组");
+                throw std::runtime_error(message(Message::model_stream_tool_calls_array));
             }
             std::size_t fallback_index = 0;
             for (const auto& raw_call : delta.at("tool_calls")) {
                 if (!raw_call.is_object()) {
-                    throw std::runtime_error("流式 tool_call 格式无效");
+                    throw std::runtime_error(message(Message::model_stream_tool_call_invalid));
                 }
                 const auto index = resolve_chat_tool_index(raw_call, fallback_index++);
                 if (chat_tools.size() <= index) {
@@ -191,7 +202,8 @@ struct ModelStreamDecoder::State {
                     const auto& id = raw_call.at("id").get_ref<const std::string&>();
                     if (id.size() > tool.id.size()) {
                         protocol::add_bytes(tool_metadata_bytes, id.size() - tool.id.size(),
-                                            limits.max_tool_metadata_bytes, "工具调用元数据");
+                                            limits.max_tool_metadata_bytes,
+                                            message(Message::model_resource_tool_metadata));
                     }
                     tool.id = id;
                 }
@@ -206,7 +218,8 @@ struct ModelStreamDecoder::State {
                     if (function.contains("name") && function.at("name").is_string()) {
                         const auto& name = function.at("name").get_ref<const std::string&>();
                         protocol::add_bytes(tool_metadata_bytes, name.size(),
-                                            limits.max_tool_metadata_bytes, "工具调用元数据");
+                                            limits.max_tool_metadata_bytes,
+                                            message(Message::model_resource_tool_metadata));
                         tool.name += name;
                     }
                     if (function.contains("arguments") && function.at("arguments").is_string()) {
@@ -238,13 +251,13 @@ struct ModelStreamDecoder::State {
                   .delta = event.value("delta", "")});
         } else if (type == "response.completed") {
             if (!event.contains("response") || !event.at("response").is_object()) {
-                throw std::runtime_error("response.completed 缺少 response 对象");
+                throw std::runtime_error(message(Message::model_stream_completed_response_missing));
             }
             complete_response = event.at("response");
         } else if (type == "response.failed" || type == "response.incomplete") {
             throw std::runtime_error(event.contains("response")
                                          ? protocol::response_status_error(event.at("response"))
-                                         : "Responses API 流式响应未完成");
+                                         : message(Message::model_stream_responses_incomplete));
         } else if (type == "error") {
             throw std::runtime_error(protocol::stream_error_message(event));
         } else if (type.empty() && event.value("object", "") == "response") {
@@ -259,7 +272,8 @@ struct ModelStreamDecoder::State {
         auto data = std::move(event_data);
         event_data.clear();
         if (sse_frames >= limits.max_sse_events) {
-            protocol::throw_count_limit("SSE 事件数量", limits.max_sse_events);
+            protocol::throw_count_limit(message(Message::model_resource_sse_events),
+                                        limits.max_sse_events);
         }
         ++sse_frames;
         if (data == "[DONE]") {
@@ -269,7 +283,8 @@ struct ModelStreamDecoder::State {
         try {
             event = Json::parse(data);
         } catch (const Json::exception& error) {
-            throw std::runtime_error("模型 SSE data 不是有效 JSON: " + std::string(error.what()));
+            throw std::runtime_error(message(Message::model_stream_invalid_json,
+                                             {arg(Placeholder::error, error.what())}));
         }
         ++events;
         if (adapter == ModelAdapter::chat_completions) {
@@ -297,9 +312,11 @@ struct ModelStreamDecoder::State {
             value.remove_prefix(1);
         }
         if (!event_data.empty()) {
-            protocol::append_bounded(event_data, "\n", limits.max_sse_event_bytes, "SSE 事件");
+            protocol::append_bounded(event_data, "\n", limits.max_sse_event_bytes,
+                                     message(Message::model_resource_sse_event));
         }
-        protocol::append_bounded(event_data, value, limits.max_sse_event_bytes, "SSE 事件");
+        protocol::append_bounded(event_data, value, limits.max_sse_event_bytes,
+                                 message(Message::model_resource_sse_event));
     }
 };
 
@@ -313,13 +330,13 @@ ModelStreamDecoder::~ModelStreamDecoder() = default;
 
 void ModelStreamDecoder::feed(std::string_view chunk) {
     if (state_->finished) {
-        throw std::logic_error("不能向已结束的模型流追加数据");
+        throw std::logic_error(message(Message::model_stream_append_after_finish));
     }
     while (!chunk.empty()) {
         const auto newline = chunk.find('\n');
         const auto fragment = chunk.substr(0, newline);
         protocol::append_bounded(state_->line_buffer, fragment, state_->limits.max_sse_line_bytes,
-                                 "SSE 行");
+                                 message(Message::model_resource_sse_line));
         if (newline == std::string_view::npos) {
             break;
         }
@@ -331,7 +348,7 @@ void ModelStreamDecoder::feed(std::string_view chunk) {
 
 Json ModelStreamDecoder::finish() {
     if (state_->finished) {
-        throw std::logic_error("模型流已经结束");
+        throw std::logic_error(message(Message::model_stream_already_finished));
     }
     state_->finished = true;
     if (!state_->line_buffer.empty()) {
@@ -343,13 +360,13 @@ Json ModelStreamDecoder::finish() {
         return std::move(*state_->complete_response);
     }
     if (state_->adapter == ModelAdapter::responses) {
-        throw std::runtime_error("Responses API 流在结束前没有 response.completed 事件");
+        throw std::runtime_error(message(Message::model_stream_responses_completed_missing));
     }
     if (state_->adapter == ModelAdapter::anthropic_messages) {
         return state_->anthropic_stream->finish();
     }
     if (!state_->saw_chat_payload && state_->chat_tools.empty()) {
-        throw std::runtime_error("Chat Completions 流没有返回 choices delta");
+        throw std::runtime_error(message(Message::model_stream_chat_delta_missing));
     }
 
     Json message = {{"role", "assistant"},

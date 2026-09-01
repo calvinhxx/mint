@@ -1,14 +1,14 @@
 add_library(mint_cli STATIC
-    agent_command.cpp
-    agent_command_config.cpp
-    agent_event_router.cpp
-    agent_command_io.cpp
+    agent/agent_command.cpp
+    agent/agent_command_config.cpp
+    agent/agent_command_io.cpp
+    agent/agent_event_router.cpp
     command_line.cpp
-    console.cpp
-    diagnostic_logging.cpp
-    project_commands.cpp
-    provider_acceptance.cpp
-    provider_command.cpp
+    project/project_commands.cpp
+    provider/provider_acceptance.cpp
+    provider/provider_command.cpp
+    support/console.cpp
+    support/diagnostic_logging.cpp
 )
 
 mint_configure_target(mint_cli)
@@ -20,6 +20,7 @@ target_link_libraries(mint_cli
         mint::agent
         mint::domain
         mint::logging
+        mint::localization
         mint::model
         mint::persistence
         mint::project
@@ -29,6 +30,9 @@ target_link_libraries(mint_cli
 
 add_executable(mint main.cpp)
 mint_configure_target(mint)
+target_include_directories(mint PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+)
 target_link_libraries(mint PRIVATE mint_cli)
 set_target_properties(mint PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"

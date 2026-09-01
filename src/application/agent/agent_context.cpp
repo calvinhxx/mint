@@ -1,5 +1,7 @@
 #include "agent_context.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <algorithm>
 #include <array>
 #include <stdexcept>
@@ -9,6 +11,10 @@
 
 namespace mint::agent_detail {
 namespace {
+
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 constexpr std::array<std::size_t, 3> payload_limits = {2048, 512, 128};
 constexpr std::size_t summary_reserve = 512;
@@ -106,9 +112,12 @@ void compact_message_payload(Json& message, std::size_t string_limit) {
     if (requires_exact_chat_continuation(message)) {
         return;
     }
-    // Only the newest assistant/tool group reaches payload compaction. Provider state in this
-    // group may contain signed thinking or encrypted reasoning required for the next tool turn,
-    // so canonical fields may shrink but provider state must remain byte-for-byte intact.
+    // EN: Only the newest assistant/tool group reaches payload compaction. Provider state in this
+    //     group may contain signed thinking or encrypted reasoning required for the next tool
+    //     turn, so canonical fields may shrink but provider state must remain byte-for-byte intact.
+    // ZH-CN: 只有最新的 assistant/tool 分组会进入载荷压缩。该分组的供应商状态可能包含下一轮
+    //        工具调用所需的签名思考或加密推理，因此可压缩规范字段，但供应商状态必须逐字节
+    //        保持不变。
     if (message.contains("content") && message.at("content").is_string()) {
         auto content = message.at("content").get<std::string>();
         bool structured_tool_result = false;
@@ -119,7 +128,8 @@ void compact_message_payload(Json& message, std::size_t string_limit) {
                 content = parsed.dump();
                 structured_tool_result = true;
             } catch (const Json::exception&) {
-                // A bounded raw fallback is still valid context.
+                // EN: A bounded raw fallback is still valid context.
+                // ZH-CN: 受长度限制的原始回退内容仍然是有效上下文。
             }
         }
         if (structured_tool_result && content.size() > string_limit * 4) {
@@ -278,13 +288,13 @@ CompactedContext compact_context(const Json& messages, std::size_t byte_limit) {
         return result;
     }
     if (!messages.is_array() || messages.size() < 2) {
-        throw std::runtime_error("模型上下文格式无效");
+        throw std::runtime_error(message(Message::agent_context_invalid));
     }
 
     Json prefix = Json::array({messages.at(0), messages.at(1)});
     const auto prefix_bytes = serialized_size(prefix);
     if (prefix_bytes + summary_reserve >= byte_limit) {
-        throw std::runtime_error("系统提示与用户任务超过 --max-context-bytes 限制");
+        throw std::runtime_error(message(Message::agent_context_prefix_too_large));
     }
 
     const auto groups = message_groups(messages);
@@ -300,7 +310,8 @@ CompactedContext compact_context(const Json& messages, std::size_t byte_limit) {
             bytes = serialized_size(group);
             result.payloads_compacted = true;
             if (bytes > remaining) {
-                throw std::runtime_error("无法在保留最新模型续传状态的情况下压缩模型上下文");
+                throw std::runtime_error(
+                    message(Message::agent_context_continuation_compaction_failed));
             }
         }
         if (bytes <= remaining) {
@@ -321,7 +332,7 @@ CompactedContext compact_context(const Json& messages, std::size_t byte_limit) {
     }
     result.sent_bytes = serialized_size(result.messages);
     if (result.sent_bytes > byte_limit) {
-        throw std::runtime_error("无法在不破坏最新工具调用配对的情况下压缩模型上下文");
+        throw std::runtime_error(message(Message::agent_context_tool_pair_compaction_failed));
     }
     return result;
 }

@@ -1,15 +1,20 @@
 #include "model_protocol.hpp"
+#include "mint/localization/localization.hpp"
 #include "model_protocol_internal.hpp"
 
 #include <stdexcept>
 
 namespace mint::detail {
 
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
+
 Json build_provider_request(const ModelProviderConfig& config, const Json& messages,
                             const Json& tools) {
     const auto profile = resolve_model_provider_profile(config);
     if (!tools.empty() && !profile.capabilities.function_tools) {
-        throw std::invalid_argument("当前 provider profile 不支持 function tools");
+        throw std::invalid_argument(message(Message::model_protocol_function_tools_unsupported));
     }
 
     switch (profile.adapter) {
@@ -20,7 +25,7 @@ Json build_provider_request(const ModelProviderConfig& config, const Json& messa
     case ModelAdapter::anthropic_messages:
         return protocol::build_anthropic_request(config, messages, tools, profile.capabilities);
     }
-    throw std::invalid_argument("未知模型 adapter");
+    throw std::invalid_argument(message(Message::model_protocol_adapter_unknown));
 }
 
 ModelReply parse_provider_response(ModelAdapter adapter, const Json& response,
@@ -34,7 +39,7 @@ ModelReply parse_provider_response(ModelAdapter adapter, const Json& response,
     case ModelAdapter::anthropic_messages:
         return protocol::parse_anthropic_response(response, limits);
     }
-    throw std::invalid_argument("未知模型 adapter");
+    throw std::invalid_argument(message(Message::model_protocol_adapter_unknown));
 }
 
 } // namespace mint::detail

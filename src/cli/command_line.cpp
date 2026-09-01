@@ -1,5 +1,7 @@
 #include "command_line.hpp"
-#include "console.hpp"
+#include "support/console.hpp"
+
+#include "mint/localization/localization.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -12,16 +14,33 @@
 namespace mint::cli {
 namespace {
 
+using localization::arg;
+using localization::Message;
+using localization::Placeholder;
+
+std::string text(localization::Message message,
+                 std::initializer_list<localization::Argument> arguments = {}) {
+    return localization::message(message, arguments);
+}
+
+[[noreturn]] void missing_value(std::string_view option, std::string_view value) {
+    throw std::invalid_argument(
+        text(Message::cli_error_option_requires,
+             {arg(Placeholder::option, option), arg(Placeholder::value, value)}));
+}
+
 unsigned long parse_unsigned(const std::string& text, const std::string& option) {
     std::size_t consumed = 0;
     unsigned long value = 0;
     try {
         value = std::stoul(text, &consumed);
     } catch (const std::exception&) {
-        throw std::invalid_argument(option + " 后面需要一个正整数");
+        throw std::invalid_argument(localization::message(
+            Message::cli_error_positive_integer_required, {arg(Placeholder::option, option)}));
     }
     if (consumed != text.size()) {
-        throw std::invalid_argument(option + " 后面需要一个正整数");
+        throw std::invalid_argument(localization::message(
+            Message::cli_error_positive_integer_required, {arg(Placeholder::option, option)}));
     }
     return value;
 }
@@ -69,71 +88,26 @@ bool is_managed_mode(CommandMode mode) noexcept {
 }
 
 void print_help(Console& console, const char* program) {
-    console.output_stream()
-        << "mint - Lightweight General AI Agent\n\n"
-        << "用法:\n"
-        << "  " << program << " init [--root 路径] [--state-dir 路径] [--force] [--json]\n"
-        << "  " << program
-        << " run [--root 路径] [--state-dir 路径] [--config 路径] [--demo] [任务]\n"
-        << "  " << program
-        << " resume [--root 路径] [--state-dir 路径] [--task ID] [--config 路径]\n"
-        << "  " << program << " status [--root 路径] [--state-dir 路径] [--task ID] [--json]\n\n"
-        << "模型配置:\n"
-        << "  " << program << " provider [--config 路径] [--json]  离线检查 provider 能力\n"
-        << "  " << program << " provider test [--config 路径] [--json]  发送两轮真实兼容性测试\n\n"
-        << "高级执行:\n"
-        << "  " << program << " exec --help  显式配置能力、策略与事件文件\n\n"
-        << "常用选项:\n"
-        << "  --root 路径       项目目录，默认当前目录\n"
-        << "  --state-dir 路径  覆盖工作区外的本地状态目录\n"
-        << "  --config 路径     模型配置，默认 ./config.json\n"
-        << "  --task ID         恢复或查看指定任务\n"
-        << "  --demo            离线运行，不请求真实模型\n"
-        << "  --json            输出机器可读 JSON\n"
-        << "  --log-level 级别  终端日志级别，默认 warn\n"
-        << "  --log-file-level 级别  文件日志级别；off 关闭落盘\n"
-        << "  --version         显示版本\n"
-        << "  -h, --help        显示帮助\n";
+    console.output_stream() << text(Message::cli_help_general,
+                                    {arg(Placeholder::program, program)});
 }
 
 void print_exec_help(Console& console, const char* program) {
-    console.output_stream()
-        << "mint exec - 显式策略执行\n\n"
-        << "面向自动化与高级调试。日常任务建议使用 init / run / resume / status。\n\n"
-        << "用法:\n"
-        << "  " << program << " exec [选项] 任务\n"
-        << "  " << program << " exec --resume --session 路径 [选项]\n\n"
-        << "输入与状态:\n"
-        << "  --root 路径              项目根目录\n"
-        << "  --config 路径            模型配置\n"
-        << "  --policy 路径            显式 task policy\n"
-        << "  --session 路径           checkpoint 文件\n"
-        << "  --events-jsonl 路径      事件记录文件\n"
-        << "  --resume                 恢复 checkpoint\n"
-        << "  --retry-inflight         重试未确认完成的副作用工具\n"
-        << "  --json                   输出机器可读 JSON\n\n"
-        << "能力:\n"
-        << "  --allow-write             允许文本写入\n"
-        << "  --allow-write-path 路径   限制写入范围，可重复\n"
-        << "  --allow-command 程序      授权可执行程序，可重复且不经过 shell\n"
-        << "  --require-verification    修改后必须运行验证命令\n"
-        << "  --approve-each-command    每次启动命令前确认\n"
-        << "  --approve-each-changeset  每次多文件提交前确认\n"
-        << "  --unsafe-no-command-sandbox  关闭命令 OS 沙箱\n\n"
-        << "预算:\n"
-        << "  --max-turns 数量          " << runtime_bounds::min_turns << " 到 "
-        << runtime_bounds::max_turns << "\n"
-        << "  --max-seconds 秒          1 到 " << runtime_bounds::max_seconds << "\n"
-        << "  --max-context-bytes 字节  " << runtime_bounds::min_context_bytes << " 到 "
-        << runtime_bounds::max_context_bytes << "\n"
-        << "  --max-total-tokens 数量   0（关闭）到 " << runtime_bounds::max_total_tokens << "\n";
+    console.output_stream() << text(
+        Message::cli_help_exec,
+        {arg(Placeholder::program, program), arg(Placeholder::min_turns, runtime_bounds::min_turns),
+         arg(Placeholder::max_turns, runtime_bounds::max_turns),
+         arg(Placeholder::max_seconds, runtime_bounds::max_seconds),
+         arg(Placeholder::min_context_bytes, runtime_bounds::min_context_bytes),
+         arg(Placeholder::max_context_bytes, runtime_bounds::max_context_bytes),
+         arg(Placeholder::max_total_tokens, runtime_bounds::max_total_tokens)});
 }
 
 std::filesystem::path normalized_path(std::filesystem::path path) {
     std::error_code error;
     auto absolute = std::filesystem::absolute(std::move(path), error);
     if (error) {
-        throw std::invalid_argument("无法解析运行时文件路径");
+        throw std::invalid_argument(text(Message::cli_error_runtime_path));
     }
     auto resolved = std::filesystem::weakly_canonical(absolute, error);
     if (!error) {
@@ -145,34 +119,45 @@ std::filesystem::path normalized_path(std::filesystem::path path) {
 CommandLine parse_arguments(int argc, char** argv) {
     CommandLine result;
     std::vector<std::string> question_parts;
-    int begin = 1;
-    if (argc <= 1) {
+    int command_index = 1;
+    while (command_index < argc && std::string_view(argv[command_index]) == "--lang") {
+        if (++command_index >= argc) {
+            missing_value("--lang", text(Message::cli_value_language));
+        }
+        result.language = argv[command_index++];
+    }
+
+    int begin = command_index;
+    if (command_index >= argc) {
         result.help = true;
         return result;
     } else {
-        const std::string first = argv[1];
+        const std::string first = argv[command_index];
         if (const auto mode = parse_mode(first)) {
             result.mode = *mode;
-            begin = 2;
+            begin = command_index + 1;
         } else if (first == "-h" || first == "--help" || first == "--version") {
-            if (argc != 2) {
-                throw std::invalid_argument("全局入口只接受一个 --help 或 --version");
+            if (argc != command_index + 1) {
+                throw std::invalid_argument(text(Message::cli_error_global_option_count));
             }
             result.help = first != "--version";
             result.version = first == "--version";
             return result;
         } else if (!first.starts_with('-')) {
-            throw std::invalid_argument("未知子命令: " + first + "；使用 mint --help 查看用法");
+            throw std::invalid_argument(
+                text(Message::cli_error_unknown_command, {arg(Placeholder::value, first)}));
         } else {
-            throw std::invalid_argument("未知全局选项: " + first + "；使用 mint --help 查看用法");
+            throw std::invalid_argument(
+                text(Message::cli_error_unknown_global_option, {arg(Placeholder::value, first)}));
         }
     }
     if (result.mode == CommandMode::resume) {
         result.resume_session = true;
     }
-    if (result.mode == CommandMode::provider && argc > 2 && std::string(argv[2]) == "test") {
+    if (result.mode == CommandMode::provider && begin < argc &&
+        std::string(argv[begin]) == "test") {
         result.provider_action = ProviderCommandAction::test;
-        begin = 3;
+        ++begin;
     }
 
     for (int index = begin; index < argc; ++index) {
@@ -186,13 +171,13 @@ CommandLine parse_arguments(int argc, char** argv) {
             result.policy_conflict = true;
         } else if (argument == "--allow-write-path") {
             if (++index >= argc) {
-                throw std::invalid_argument("--allow-write-path 后面需要一个相对路径");
+                missing_value("--allow-write-path", text(Message::cli_value_relative_path));
             }
             result.allowed_write_paths.emplace_back(utf8_path(argv[index]));
             result.policy_conflict = true;
         } else if (argument == "--allow-command") {
             if (++index >= argc) {
-                throw std::invalid_argument("--allow-command 后面需要程序名称或绝对路径");
+                missing_value("--allow-command", text(Message::cli_value_program_or_absolute_path));
             }
             result.allowed_programs.emplace_back(argv[index]);
             result.policy_conflict = true;
@@ -212,7 +197,7 @@ CommandLine parse_arguments(int argc, char** argv) {
             result.interaction_jsonl = true;
         } else if (argument == "--cancel-file") {
             if (++index >= argc) {
-                throw std::invalid_argument("--cancel-file 后面需要一个文件路径");
+                missing_value("--cancel-file", text(Message::cli_value_file_path));
             }
             result.cancel_file = utf8_path(argv[index]);
         } else if (argument == "--resume") {
@@ -223,101 +208,112 @@ CommandLine parse_arguments(int argc, char** argv) {
             result.help = true;
         } else if (argument == "--version") {
             result.version = true;
+        } else if (argument == "--lang") {
+            if (++index >= argc) {
+                missing_value("--lang", text(Message::cli_value_language));
+            }
+            result.language = argv[index];
         } else if (argument == "--config") {
             if (++index >= argc) {
-                throw std::invalid_argument("--config 后面需要一个 JSON 文件路径");
+                missing_value("--config", text(Message::cli_value_json_path));
             }
             result.config = utf8_path(argv[index]);
             result.config_specified = true;
         } else if (argument == "--log-level") {
             if (++index >= argc) {
-                throw std::invalid_argument("--log-level 后面需要日志级别");
+                missing_value("--log-level", text(Message::cli_value_log_level));
             }
             result.log_level = argv[index];
         } else if (argument == "--log-file-level") {
             if (++index >= argc) {
-                throw std::invalid_argument("--log-file-level 后面需要日志级别");
+                missing_value("--log-file-level", text(Message::cli_value_log_level));
             }
             result.log_file_level = argv[index];
         } else if (argument == "--log-dir") {
             if (++index >= argc) {
-                throw std::invalid_argument("--log-dir 后面需要目录路径");
+                missing_value("--log-dir", text(Message::cli_value_directory_path));
             }
             result.log_dir = utf8_path(argv[index]);
         } else if (argument == "--policy") {
             if (++index >= argc) {
-                throw std::invalid_argument("--policy 后面需要一个 JSON 文件路径");
+                missing_value("--policy", text(Message::cli_value_json_path));
             }
             result.policy = utf8_path(argv[index]);
         } else if (argument == "--root") {
             if (++index >= argc) {
-                throw std::invalid_argument("--root 后面需要一个路径");
+                missing_value("--root", text(Message::cli_value_path));
             }
             result.root = utf8_path(argv[index]);
             result.root_specified = true;
         } else if (argument == "--state-dir") {
             if (++index >= argc) {
-                throw std::invalid_argument("--state-dir 后面需要一个路径");
+                missing_value("--state-dir", text(Message::cli_value_path));
             }
             result.state_dir = utf8_path(argv[index]);
         } else if (argument == "--task") {
             if (++index >= argc) {
-                throw std::invalid_argument("--task 后面需要任务 ID");
+                missing_value("--task", text(Message::cli_value_task_id));
             }
             result.task_id = argv[index];
         } else if (argument == "--events-jsonl") {
             if (++index >= argc) {
-                throw std::invalid_argument("--events-jsonl 后面需要一个文件路径");
+                missing_value("--events-jsonl", text(Message::cli_value_file_path));
             }
             result.events_jsonl = utf8_path(argv[index]);
         } else if (argument == "--session") {
             if (++index >= argc) {
-                throw std::invalid_argument("--session 后面需要一个文件路径");
+                missing_value("--session", text(Message::cli_value_file_path));
             }
             result.session = utf8_path(argv[index]);
         } else if (argument == "--max-turns") {
             if (++index >= argc) {
-                throw std::invalid_argument("--max-turns 后面需要一个数字");
+                missing_value("--max-turns", text(Message::cli_value_number));
             }
             const auto parsed = parse_unsigned(argv[index], "--max-turns");
             if (parsed < runtime_bounds::min_turns || parsed > runtime_bounds::max_turns) {
-                throw std::invalid_argument("--max-turns 超出允许范围");
+                throw std::invalid_argument(text(Message::cli_error_option_out_of_range,
+                                                 {arg(Placeholder::option, "--max-turns")}));
             }
             result.max_turns = parsed;
             result.policy_conflict = true;
         } else if (argument == "--max-seconds") {
             if (++index >= argc) {
-                throw std::invalid_argument("--max-seconds 后面需要一个数字");
+                missing_value("--max-seconds", text(Message::cli_value_number));
             }
             const auto parsed = parse_unsigned(argv[index], "--max-seconds");
             if (parsed == 0 || parsed > static_cast<unsigned long>(runtime_bounds::max_seconds)) {
-                throw std::invalid_argument("--max-seconds 超出允许范围");
+                throw std::invalid_argument(text(Message::cli_error_option_out_of_range,
+                                                 {arg(Placeholder::option, "--max-seconds")}));
             }
             result.max_seconds = static_cast<long>(parsed);
             result.policy_conflict = true;
         } else if (argument == "--max-context-bytes") {
             if (++index >= argc) {
-                throw std::invalid_argument("--max-context-bytes 后面需要一个数字");
+                missing_value("--max-context-bytes", text(Message::cli_value_number));
             }
             const auto parsed = parse_unsigned(argv[index], "--max-context-bytes");
             if (parsed < runtime_bounds::min_context_bytes ||
                 parsed > runtime_bounds::max_context_bytes) {
-                throw std::invalid_argument("--max-context-bytes 超出允许范围");
+                throw std::invalid_argument(
+                    text(Message::cli_error_option_out_of_range,
+                         {arg(Placeholder::option, "--max-context-bytes")}));
             }
             result.max_context_bytes = parsed;
             result.policy_conflict = true;
         } else if (argument == "--max-total-tokens") {
             if (++index >= argc) {
-                throw std::invalid_argument("--max-total-tokens 后面需要一个数字");
+                missing_value("--max-total-tokens", text(Message::cli_value_number));
             }
             const auto parsed = parse_unsigned(argv[index], "--max-total-tokens");
             if (parsed > runtime_bounds::max_total_tokens) {
-                throw std::invalid_argument("--max-total-tokens 超出允许范围");
+                throw std::invalid_argument(text(Message::cli_error_option_out_of_range,
+                                                 {arg(Placeholder::option, "--max-total-tokens")}));
             }
             result.max_total_tokens = parsed;
             result.policy_conflict = true;
         } else if (argument.starts_with('-')) {
-            throw std::invalid_argument("未知选项: " + argument);
+            throw std::invalid_argument(
+                text(Message::cli_error_unknown_option, {arg(Placeholder::value, argument)}));
         } else {
             question_parts.push_back(argument);
         }
@@ -333,8 +329,7 @@ CommandLine parse_arguments(int argc, char** argv) {
     if (result.mode == CommandMode::exec) {
         if (!result.state_dir.empty() || !result.task_id.empty() || !result.cancel_file.empty() ||
             result.force || result.interaction_jsonl) {
-            throw std::invalid_argument(
-                "--state-dir、--task、--force 和 --interaction-jsonl 只用于日常子命令");
+            throw std::invalid_argument(text(Message::cli_error_exec_managed_options));
         }
     } else if (result.mode == CommandMode::provider) {
         if (!result.question.empty() || result.demo || result.force || result.resume_session ||
@@ -342,51 +337,47 @@ CommandLine parse_arguments(int argc, char** argv) {
             result.policy_conflict || !result.policy.empty() || !result.session.empty() ||
             !result.events_jsonl.empty() || !result.state_dir.empty() || !result.task_id.empty() ||
             result.root_specified || result.interaction_jsonl || !result.cancel_file.empty()) {
-            throw std::invalid_argument(
-                "provider 和 provider test 只接受 --config、--json 和日志选项");
+            throw std::invalid_argument(text(Message::cli_error_provider_options));
         }
     } else {
         if (!result.policy.empty() || !result.session.empty() || !result.events_jsonl.empty() ||
             (result.mode != CommandMode::resume && result.resume_session)) {
-            throw std::invalid_argument(
-                "日常子命令自动管理 policy/session/events；不要混用兼容工作流参数");
+            throw std::invalid_argument(text(Message::cli_error_managed_artifacts));
         }
         if (result.policy_conflict) {
-            throw std::invalid_argument(
-                "日常子命令从项目 profile 获取能力；不能追加原始能力或预算参数");
+            throw std::invalid_argument(text(Message::cli_error_managed_capabilities));
         }
         if (result.force && result.mode != CommandMode::init) {
-            throw std::invalid_argument("--force 只用于 init");
+            throw std::invalid_argument(text(Message::cli_error_force_mode));
         }
         if (!result.task_id.empty() && result.mode != CommandMode::resume &&
             result.mode != CommandMode::status) {
-            throw std::invalid_argument("--task 只用于 resume 或 status");
+            throw std::invalid_argument(text(Message::cli_error_task_mode));
         }
         if ((result.mode == CommandMode::init || result.mode == CommandMode::status ||
              result.mode == CommandMode::resume) &&
             !result.question.empty()) {
-            throw std::invalid_argument("该子命令不接受任务正文");
+            throw std::invalid_argument(text(Message::cli_error_command_rejects_task));
         }
         if ((result.mode == CommandMode::init || result.mode == CommandMode::status) &&
             (result.demo || result.retry_inflight || result.approve_each_command ||
              result.approve_each_changeset || result.config_specified || result.interaction_jsonl ||
              !result.cancel_file.empty())) {
-            throw std::invalid_argument("init/status 不接受模型、执行或恢复选项");
+            throw std::invalid_argument(text(Message::cli_error_init_status_options));
         }
     }
     if (result.interaction_jsonl && !result.json_output) {
-        throw std::invalid_argument("--interaction-jsonl 必须与 --json 一起使用");
+        throw std::invalid_argument(text(Message::cli_error_interaction_requires_json));
     }
     if (!result.cancel_file.empty() && !result.interaction_jsonl) {
-        throw std::invalid_argument("--cancel-file 必须与 --interaction-jsonl 一起使用");
+        throw std::invalid_argument(text(Message::cli_error_cancel_requires_interaction));
     }
     if (!result.cancel_file.empty()) {
         std::error_code status_error;
         const auto status = std::filesystem::symlink_status(result.cancel_file, status_error);
         if ((!status_error && status.type() != std::filesystem::file_type::not_found) ||
             (status_error && status_error != std::errc::no_such_file_or_directory)) {
-            throw std::invalid_argument(
-                "--cancel-file 启动时必须不存在；Mint 不会覆盖或删除已有路径");
+            throw std::invalid_argument(text(Message::cli_error_cancel_file_exists));
         }
     }
     return result;
@@ -408,6 +399,22 @@ bool requested_interaction_output(int argc, char** argv) {
         }
     }
     return false;
+}
+
+void configure_language(int argc, char** argv) {
+    localization::use_environment_language();
+    for (int index = 1; index < argc; ++index) {
+        if (std::string_view(argv[index]) != "--lang") {
+            continue;
+        }
+        if (++index >= argc) {
+            missing_value("--lang", text(Message::cli_value_language));
+        }
+        if (!localization::set_language(argv[index])) {
+            throw std::invalid_argument(text(Message::localization_unsupported_language,
+                                             {arg(Placeholder::language, argv[index])}));
+        }
+    }
 }
 
 } // namespace mint::cli

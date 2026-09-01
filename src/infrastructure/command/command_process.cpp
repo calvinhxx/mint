@@ -1,5 +1,7 @@
 #include "command_process.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include "command_process_tree.hpp"
 #include "command_resource_monitor.hpp"
 
@@ -33,6 +35,11 @@ extern char** environ;
 
 namespace mint::command_detail {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 std::vector<std::string>
 filtered_environment(const std::vector<std::pair<std::string, std::string>>& overrides) {
@@ -70,7 +77,7 @@ filtered_environment(const std::vector<std::pair<std::string, std::string>>& ove
         if (name.empty() || name.find('=') != std::string::npos ||
             name.find('\0') != std::string::npos || value.find('\0') != std::string::npos ||
             !allowed_names.contains(name) || !overridden_names.insert(name).second) {
-            throw std::logic_error("内部命令环境变量覆盖无效");
+            throw std::logic_error(message(Message::command_process_invalid_environment));
         }
     }
 
@@ -181,8 +188,10 @@ ResourceLimitError apply_resource_limits(const CommandResourceLimits& limits) no
         return ResourceLimitError::memory;
     }
 #elif defined(__APPLE__)
-    // macOS rejects finite RLIMIT_AS values. The parent process enforces
-    // resident memory with proc_pid_rusage instead.
+    // EN: macOS rejects finite RLIMIT_AS values. The parent process enforces resident memory with
+    //     proc_pid_rusage instead.
+    // ZH-CN: macOS 会拒绝有限的 RLIMIT_AS 值，因此改由父进程通过 proc_pid_rusage 限制
+    //        常驻内存。
     (void)limits.memory_bytes;
 #else
     if (limits.memory_bytes != 0) {
@@ -236,7 +245,7 @@ void validate_process_resource_support(const CommandResourceLimits& limits) {
 
 ProcessResult execute_process(ProcessRequest request) {
     if (request.argv.empty()) {
-        throw std::logic_error("内部命令请求缺少 argv");
+        throw std::logic_error(message(Message::command_process_missing_argv));
     }
 
     auto argv = mutable_pointers(request.argv);
@@ -258,13 +267,15 @@ ProcessResult execute_process(ProcessRequest request) {
 
     const auto input_descriptor = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
     if (input_descriptor < 0) {
-        throw std::runtime_error("无法打开命令空输入设备: " + std::string(std::strerror(errno)));
+        throw std::runtime_error(message(Message::command_process_stdin_failed,
+                                         {arg(Placeholder::error, std::strerror(errno))}));
     }
 
     std::array<int, 2> output_pipe{};
     if (::pipe(output_pipe.data()) != 0) {
         ::close(input_descriptor);
-        throw std::runtime_error("无法创建命令输出管道: " + std::string(std::strerror(errno)));
+        throw std::runtime_error(message(Message::command_process_pipe_create_failed,
+                                         {arg(Placeholder::error, std::strerror(errno))}));
     }
 
     const auto read_flags = ::fcntl(output_pipe[0], F_GETFL, 0);
@@ -273,7 +284,8 @@ ProcessResult execute_process(ProcessRequest request) {
         ::close(input_descriptor);
         ::close(output_pipe[0]);
         ::close(output_pipe[1]);
-        throw std::runtime_error("无法配置命令输出管道: " + message);
+        throw std::runtime_error(localization::message(
+            Message::command_process_pipe_configure_failed, {arg(Placeholder::error, message)}));
     }
 
     const auto process = ::fork();
@@ -282,7 +294,8 @@ ProcessResult execute_process(ProcessRequest request) {
         ::close(input_descriptor);
         ::close(output_pipe[0]);
         ::close(output_pipe[1]);
-        throw std::runtime_error("无法启动命令进程: " + message);
+        throw std::runtime_error(localization::message(Message::command_process_start_failed,
+                                                       {arg(Placeholder::error, message)}));
     }
 
     if (process == 0) {
@@ -383,7 +396,8 @@ ProcessResult execute_process(ProcessRequest request) {
                 process_tree.signal_all(SIGKILL);
                 (void)::waitpid(process, &wait_status, 0);
                 ::close(output_pipe[0]);
-                throw std::runtime_error("等待命令进程失败: " + message);
+                throw std::runtime_error(localization::message(Message::command_process_wait_failed,
+                                                               {arg(Placeholder::error, message)}));
             }
         }
 

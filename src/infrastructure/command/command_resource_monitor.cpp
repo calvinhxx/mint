@@ -1,9 +1,14 @@
 #include "command_resource_monitor.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <stdexcept>
 #include <system_error>
 
 namespace mint::command_detail {
+
+using localization::Message;
+using localization::Placeholder;
 namespace {
 
 bool disappeared(const std::error_code& error) {
@@ -20,14 +25,17 @@ bool workspace_disk_limit_exceeded(const std::filesystem::path& workspace,
 
     std::error_code error;
     if (!std::filesystem::is_directory(workspace, error) || error) {
-        throw std::runtime_error("无法统计命令工作区磁盘用量");
+        throw std::runtime_error(
+            localization::message(Message::command_resources_disk_usage_failed));
     }
 
     std::size_t total = 0;
     std::filesystem::recursive_directory_iterator iterator(
         workspace, std::filesystem::directory_options::skip_permission_denied, error);
     if (error) {
-        throw std::runtime_error("无法遍历命令工作区磁盘用量: " + error.message());
+        throw std::runtime_error(
+            localization::message(Message::command_resources_iterate_failed,
+                                  {localization::arg(Placeholder::error, error.message())}));
     }
     const std::filesystem::recursive_directory_iterator end;
     while (iterator != end) {
@@ -43,13 +51,17 @@ bool workspace_disk_limit_exceeded(const std::filesystem::path& workspace,
             }
         }
         if (error && !disappeared(error)) {
-            throw std::runtime_error("无法读取命令工作区磁盘用量: " + error.message());
+            throw std::runtime_error(
+                localization::message(Message::command_resources_read_failed,
+                                      {localization::arg(Placeholder::error, error.message())}));
         }
 
         error.clear();
         iterator.increment(error);
         if (error && !disappeared(error)) {
-            throw std::runtime_error("无法遍历命令工作区磁盘用量: " + error.message());
+            throw std::runtime_error(
+                localization::message(Message::command_resources_iterate_failed,
+                                      {localization::arg(Placeholder::error, error.message())}));
         }
         if (error) {
             error.clear();

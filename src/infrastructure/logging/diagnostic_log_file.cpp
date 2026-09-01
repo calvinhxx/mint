@@ -1,6 +1,8 @@
 #include "diagnostic_log_internal.hpp"
 #include "filesystem/private_path.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -15,6 +17,10 @@
 
 namespace mint::diagnostics::detail {
 namespace {
+
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 bool mint_log_filename(std::string_view filename) {
     constexpr std::string_view prefix = "mint-";
@@ -120,19 +126,20 @@ std::filesystem::path prepare_log_file(const LocalLogOptions& options) {
         throw std::runtime_error(options.initialization_error);
     }
     if (options.directory.empty()) {
-        throw std::invalid_argument("本地日志目录不能为空");
+        throw std::invalid_argument(message(Message::logging_directory_empty));
     }
     if (options.max_file_bytes == 0 || options.rotated_files == 0 ||
         options.max_directory_bytes == 0) {
-        throw std::invalid_argument("本地日志轮转参数必须大于零");
+        throw std::invalid_argument(message(Message::logging_rotation_invalid));
     }
 
     std::error_code error;
     if (!options.managed_root.empty()) {
-        private_path::ensure_directory(options.managed_root, "mint 状态目录");
+        private_path::ensure_directory(options.managed_root,
+                                       message(Message::label_mint_state_directory));
     }
 
-    private_path::ensure_directory(options.directory, "本地日志目录");
+    private_path::ensure_directory(options.directory, message(Message::label_local_log_directory));
     cleanup_logs(options);
 
     static std::atomic_uint64_t sequence{0};
@@ -141,7 +148,7 @@ std::filesystem::path prepare_log_file(const LocalLogOptions& options) {
     const auto path = options.directory / filename;
     const auto existing = std::filesystem::symlink_status(path, error);
     if (!error && existing.type() != std::filesystem::file_type::not_found) {
-        throw std::runtime_error("本地日志文件名发生冲突");
+        throw std::runtime_error(message(Message::logging_filename_conflict));
     }
     return path;
 }

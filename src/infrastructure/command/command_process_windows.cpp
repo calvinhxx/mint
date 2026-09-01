@@ -11,6 +11,7 @@
 
 #include "command_resource_monitor.hpp"
 
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/task_control.hpp"
 
 #include <algorithm>
@@ -29,6 +30,10 @@
 
 namespace mint::command_detail {
 namespace {
+
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 class UniqueHandle final {
   public:
@@ -84,13 +89,13 @@ class AttributeList final {
         (void)::InitializeProcThreadAttributeList(nullptr, attribute_count, 0, &bytes);
         if (bytes == 0) {
             throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(),
-                                    "无法计算 Windows 进程属性空间");
+                                    message(Message::command_windows_attribute_size_failed));
         }
         storage_.resize(bytes);
         list_ = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage_.data());
         if (!::InitializeProcThreadAttributeList(list_, attribute_count, 0, &bytes)) {
             throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(),
-                                    "无法初始化 Windows 进程属性");
+                                    message(Message::command_windows_attribute_init_failed));
         }
         if (!::UpdateProcThreadAttribute(list_, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
                                          const_cast<HANDLE*>(inherited_handles.data()),
@@ -99,7 +104,7 @@ class AttributeList final {
             ::DeleteProcThreadAttributeList(list_);
             list_ = nullptr;
             throw std::system_error(static_cast<int>(error), std::system_category(),
-                                    "无法限制 Windows 子进程继承句柄");
+                                    message(Message::command_windows_handle_inheritance_failed));
         }
         if (appcontainer_sid != nullptr) {
             security_capabilities_.AppContainerSid = appcontainer_sid;
@@ -109,8 +114,9 @@ class AttributeList final {
                 const auto error = ::GetLastError();
                 ::DeleteProcThreadAttributeList(list_);
                 list_ = nullptr;
-                throw std::system_error(static_cast<int>(error), std::system_category(),
-                                        "无法配置 Windows AppContainer 进程属性");
+                throw std::system_error(
+                    static_cast<int>(error), std::system_category(),
+                    message(Message::command_windows_appcontainer_attribute_failed));
             }
         }
     }
@@ -139,7 +145,7 @@ class EnvironmentStrings final {
     EnvironmentStrings() : data_(::GetEnvironmentStringsW()) {
         if (data_ == nullptr) {
             throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(),
-                                    "无法读取 Windows 环境变量");
+                                    message(Message::command_windows_environment_failed));
         }
     }
 
@@ -168,18 +174,18 @@ std::wstring utf8_to_wide(std::string_view value) {
         return {};
     }
     if (value.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-        throw std::invalid_argument("Windows 命令参数过长");
+        throw std::invalid_argument(message(Message::command_windows_argument_too_long));
     }
     const auto input_size = static_cast<int>(value.size());
     const auto output_size =
         ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), input_size, nullptr, 0);
     if (output_size <= 0) {
-        throw_last_error("Windows 命令参数不是有效 UTF-8");
+        throw_last_error(message(Message::command_windows_argument_invalid_utf8));
     }
     std::wstring result(static_cast<std::size_t>(output_size), L'\0');
     if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), input_size,
                               result.data(), output_size) != output_size) {
-        throw_last_error("无法转换 Windows 命令参数");
+        throw_last_error(message(Message::command_windows_argument_conversion_failed));
     }
     return result;
 }
@@ -340,7 +346,7 @@ void drain_output(HANDLE pipe, ProcessResult& result, std::size_t limit) {
             if (::GetLastError() == ERROR_BROKEN_PIPE) {
                 return;
             }
-            throw_last_error("无法读取 Windows 命令输出状态");
+            throw_last_error(message(Message::command_windows_output_status_failed));
         }
         if (available == 0) {
             return;
@@ -352,7 +358,7 @@ void drain_output(HANDLE pipe, ProcessResult& result, std::size_t limit) {
             if (::GetLastError() == ERROR_BROKEN_PIPE) {
                 return;
             }
-            throw_last_error("无法读取 Windows 命令输出");
+            throw_last_error(message(Message::command_windows_output_read_failed));
         }
         append_output(result.output, buffer.data(), bytes_read, limit, result.output_truncated);
     }
@@ -367,10 +373,10 @@ JobHandles create_job(const CommandResourceLimits& limits) {
     JobHandles handles{UniqueHandle(::CreateJobObjectW(nullptr, nullptr)),
                        UniqueHandle(::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1))};
     if (!handles.job) {
-        throw_last_error("无法创建 Windows Job Object");
+        throw_last_error(message(Message::command_windows_job_create_failed));
     }
     if (!handles.completion_port) {
-        throw_last_error("无法创建 Windows Job Object 通知端口");
+        throw_last_error(message(Message::command_windows_job_port_failed));
     }
 
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION information{};
@@ -392,7 +398,7 @@ JobHandles create_job(const CommandResourceLimits& limits) {
     }
     if (!::SetInformationJobObject(handles.job.get(), JobObjectExtendedLimitInformation,
                                    &information, sizeof(information))) {
-        throw_last_error("无法配置 Windows Job Object 资源限制");
+        throw_last_error(message(Message::command_windows_job_limits_failed));
     }
 
     JOBOBJECT_ASSOCIATE_COMPLETION_PORT association{};
@@ -400,7 +406,7 @@ JobHandles create_job(const CommandResourceLimits& limits) {
     association.CompletionPort = handles.completion_port.get();
     if (!::SetInformationJobObject(handles.job.get(), JobObjectAssociateCompletionPortInformation,
                                    &association, sizeof(association))) {
-        throw_last_error("无法订阅 Windows Job Object 资源事件");
+        throw_last_error(message(Message::command_windows_job_events_subscribe_failed));
     }
     return handles;
 }
@@ -417,7 +423,7 @@ std::string poll_resource_limit(HANDLE completion_port) {
                 return detected;
             }
             throw std::system_error(static_cast<int>(error), std::system_category(),
-                                    "无法读取 Windows Job Object 资源事件");
+                                    message(Message::command_windows_job_event_read_failed));
         }
         (void)completion_key;
         (void)context;
@@ -442,7 +448,7 @@ DWORD active_processes(HANDLE job) {
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION information{};
     if (!::QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &information,
                                      sizeof(information), nullptr)) {
-        throw_last_error("无法查询 Windows Job Object 状态");
+        throw_last_error(message(Message::command_windows_job_query_failed));
     }
     return information.ActiveProcesses;
 }
@@ -451,15 +457,13 @@ DWORD active_processes(HANDLE job) {
 
 void validate_process_resource_support(const CommandResourceLimits& limits) {
     if (limits.file_size_bytes != 0) {
-        throw std::invalid_argument(
-            "Windows Job Object 不支持单文件大小限制；请将 command_resources.file_size_bytes "
-            "设为 0");
+        throw std::invalid_argument(message(Message::command_windows_file_size_limit_unsupported));
     }
 }
 
 ProcessResult execute_process(ProcessRequest request) {
     if (request.argv.empty()) {
-        throw std::logic_error("内部命令请求缺少 argv");
+        throw std::logic_error(message(Message::command_process_missing_argv));
     }
     validate_process_resource_support(request.resource_limits);
 
@@ -483,19 +487,19 @@ ProcessResult execute_process(ProcessRequest request) {
     HANDLE read_handle = nullptr;
     HANDLE write_handle = nullptr;
     if (!::CreatePipe(&read_handle, &write_handle, &inherited_attributes, 0)) {
-        throw_last_error("无法创建 Windows 命令输出管道");
+        throw_last_error(message(Message::command_windows_pipe_create_failed));
     }
     UniqueHandle output_read(read_handle);
     UniqueHandle output_write(write_handle);
     if (!::SetHandleInformation(output_read.get(), HANDLE_FLAG_INHERIT, 0)) {
-        throw_last_error("无法保护 Windows 命令输出管道");
+        throw_last_error(message(Message::command_windows_pipe_protect_failed));
     }
 
     UniqueHandle input(::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                      &inherited_attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
                                      nullptr));
     if (!input) {
-        throw_last_error("无法打开 Windows 空输入设备");
+        throw_last_error(message(Message::command_windows_stdin_failed));
     }
 
     const std::array inherited_handles = {input.get(), output_write.get()};
@@ -522,18 +526,18 @@ ProcessResult execute_process(ProcessRequest request) {
     if (!::CreateProcessW(executable.c_str(), arguments.data(), nullptr, nullptr, TRUE,
                           creation_flags, environment.data(), working_directory.c_str(),
                           &startup.StartupInfo, &process_information)) {
-        throw_last_error("无法启动 Windows 命令进程");
+        throw_last_error(message(Message::command_windows_process_start_failed));
     }
 
     UniqueHandle process(process_information.hProcess);
     UniqueHandle thread(process_information.hThread);
     if (!::AssignProcessToJobObject(job.job.get(), process.get())) {
         (void)::TerminateProcess(process.get(), 126);
-        throw_last_error("无法将 Windows 命令加入 Job Object");
+        throw_last_error(message(Message::command_windows_job_assign_failed));
     }
     if (::ResumeThread(thread.get()) == static_cast<DWORD>(-1)) {
         (void)::TerminateJobObject(job.job.get(), 126);
-        throw_last_error("无法恢复 Windows 命令线程");
+        throw_last_error(message(Message::command_windows_thread_resume_failed));
     }
     thread.reset();
     input.reset();
@@ -549,7 +553,7 @@ ProcessResult execute_process(ProcessRequest request) {
         if (!terminated) {
             if (!::TerminateJobObject(job.job.get(), 1) &&
                 ::GetLastError() != ERROR_ACCESS_DENIED) {
-                throw_last_error("无法终止 Windows 命令进程树");
+                throw_last_error(message(Message::command_windows_process_tree_terminate_failed));
             }
             terminated = true;
         }
@@ -596,7 +600,7 @@ ProcessResult execute_process(ProcessRequest request) {
             root_exited = true;
         } else if (wait_result != WAIT_TIMEOUT) {
             terminate_job();
-            throw_last_error("等待 Windows 命令进程失败");
+            throw_last_error(message(Message::command_windows_process_wait_failed));
         }
 
         if (root_exited && active_processes(job.job.get()) == 0) {
@@ -629,7 +633,7 @@ ProcessResult execute_process(ProcessRequest request) {
 
     DWORD exit_code = 0;
     if (!::GetExitCodeProcess(process.get(), &exit_code)) {
-        throw_last_error("无法读取 Windows 命令退出码");
+        throw_last_error(message(Message::command_windows_exit_code_failed));
     }
 
     if (result.cancelled) {

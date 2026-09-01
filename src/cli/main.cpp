@@ -1,11 +1,12 @@
-#include "agent_command.hpp"
+#include "agent/agent_command.hpp"
 #include "command_line.hpp"
-#include "console.hpp"
-#include "diagnostic_logging.hpp"
-#include "provider_command.hpp"
+#include "provider/provider_command.hpp"
+#include "support/console.hpp"
+#include "support/diagnostic_logging.hpp"
 
 #include "mint/domain/model.hpp"
 #include "mint/infrastructure/diagnostic_log.hpp"
+#include "mint/localization/localization.hpp"
 #include "mint/runtime/terminal_text.hpp"
 #include "mint/version.hpp"
 
@@ -24,6 +25,10 @@
 
 namespace {
 
+namespace localization = mint::localization;
+using localization::Message;
+using localization::Placeholder;
+
 int run(int argc, char** argv) {
     const bool error_as_json = mint::cli::requested_json_output(argc, argv);
     const bool interaction_requested = mint::cli::requested_interaction_output(argc, argv);
@@ -37,6 +42,7 @@ int run(int argc, char** argv) {
         return exit_code;
     };
     try {
+        mint::cli::configure_language(argc, argv);
         auto command_line = mint::cli::parse_arguments(argc, argv);
         mint::diagnostics::configure(interaction_requested ? "off" : command_line.log_level);
         mint::diagnostics::validate_level(command_line.log_file_level);
@@ -84,14 +90,22 @@ int run(int argc, char** argv) {
             }
             console.write_line(result.dump());
         } else {
-            console.write_error_line("错误: ", mint::escape_terminal_field(error.what()));
+            console.write_error_line(mint::localization::message(
+                Message::cli_output_error,
+                {mint::localization::arg(Placeholder::message,
+                                         mint::escape_terminal_field(error.what()))}));
             if (managed_task.has_value()) {
-                console.write_error_line("任务 ID: ",
-                                         mint::escape_terminal_field(managed_task->id));
+                console.write_error_line(mint::localization::message(
+                    Message::cli_output_task_id,
+                    {mint::localization::arg(Placeholder::id,
+                                             mint::escape_terminal_field(managed_task->id))}));
             }
             if (log_status.file_enabled) {
-                console.write_error_line("诊断日志: ", mint::escape_terminal_field(
-                                                           log_status.file_path.generic_string()));
+                console.write_error_line(mint::localization::message(
+                    Message::cli_output_diagnostic_log,
+                    {mint::localization::arg(
+                        Placeholder::path,
+                        mint::escape_terminal_field(log_status.file_path.generic_string()))}));
             }
         }
         return finish(1);
@@ -104,20 +118,23 @@ std::string to_utf8(std::wstring_view argument) {
         return {};
     }
     if (argument.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-        throw std::runtime_error("Windows 命令行参数过长");
+        throw std::runtime_error(
+            mint::localization::message(Message::cli_windows_argument_too_long));
     }
 
     const auto input_size = static_cast<int>(argument.size());
     const auto output_size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argument.data(),
                                                  input_size, nullptr, 0, nullptr, nullptr);
     if (output_size <= 0) {
-        throw std::runtime_error("无法将 Windows 命令行转换为 UTF-8");
+        throw std::runtime_error(
+            mint::localization::message(Message::cli_windows_utf8_conversion_failed));
     }
 
     std::string result(static_cast<std::size_t>(output_size), '\0');
     if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argument.data(), input_size,
                             result.data(), output_size, nullptr, nullptr) != output_size) {
-        throw std::runtime_error("无法将 Windows 命令行转换为 UTF-8");
+        throw std::runtime_error(
+            mint::localization::message(Message::cli_windows_utf8_conversion_failed));
     }
     return result;
 }
@@ -142,7 +159,10 @@ int wmain(int argc, wchar_t** argv) {
         return run(argc, arguments.data());
     } catch (const std::exception& error) {
         auto console = mint::cli::system_console();
-        console.write_error_line("错误: ", mint::escape_terminal_field(error.what()));
+        console.write_error_line(mint::localization::message(
+            Message::cli_output_error,
+            {mint::localization::arg(Placeholder::message,
+                                     mint::escape_terminal_field(error.what()))}));
         return 1;
     }
 }

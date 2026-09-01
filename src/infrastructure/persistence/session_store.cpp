@@ -1,5 +1,7 @@
 #include "mint/infrastructure/session_store.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include "filesystem/output_path.hpp"
 
 #include <atomic>
@@ -11,6 +13,11 @@
 
 namespace mint {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 constexpr std::uintmax_t max_snapshot_bytes = 16 * 1024 * 1024;
 std::atomic_uint64_t snapshot_sequence{0};
@@ -26,7 +33,8 @@ std::filesystem::path temporary_path(const std::filesystem::path& target) {
 
 SessionStore::SessionStore(std::filesystem::path path)
     : path_(infrastructure_detail::validated_output_path(
-          std::move(path), "会话快照", infrastructure_detail::HardLinkPolicy::allow)) {}
+          std::move(path), message(Message::label_session_snapshot),
+          infrastructure_detail::HardLinkPolicy::allow)) {}
 
 const std::filesystem::path& SessionStore::path() const noexcept {
     return path_;
@@ -41,45 +49,48 @@ Json SessionStore::load() const {
     std::error_code error;
     const auto size = std::filesystem::file_size(path_, error);
     if (error) {
-        throw std::runtime_error("无法读取会话快照: " + path_.string());
+        throw std::runtime_error(message(Message::persistence_session_size_failed,
+                                         {arg(Placeholder::path, path_.string())}));
     }
     if (size > max_snapshot_bytes) {
-        throw std::runtime_error("会话快照超过 16 MiB 上限");
+        throw std::runtime_error(message(Message::persistence_session_too_large));
     }
     std::ifstream input(path_, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("无法打开会话快照: " + path_.string());
+        throw std::runtime_error(message(Message::persistence_session_open_failed,
+                                         {arg(Placeholder::path, path_.string())}));
     }
     try {
         Json snapshot;
         input >> snapshot;
         return snapshot;
     } catch (const Json::exception& error_message) {
-        throw std::runtime_error("会话快照不是有效 JSON: " + std::string(error_message.what()));
+        throw std::runtime_error(message(Message::persistence_session_invalid_json,
+                                         {arg(Placeholder::error, error_message.what())}));
     }
 }
 
 void SessionStore::save(const Json& snapshot) const {
     if (!snapshot.is_object()) {
-        throw std::invalid_argument("会话快照必须是 JSON 对象");
+        throw std::invalid_argument(message(Message::persistence_session_object));
     }
     const auto encoded = snapshot.dump(2);
     if (encoded.size() > max_snapshot_bytes) {
-        throw std::runtime_error("会话快照超过 16 MiB 上限");
+        throw std::runtime_error(message(Message::persistence_session_too_large));
     }
 
     const auto temporary = temporary_path(path_);
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         if (!output) {
-            throw std::runtime_error("无法创建会话临时文件");
+            throw std::runtime_error(message(Message::persistence_session_temp_create_failed));
         }
         output << encoded << '\n';
         output.close();
         if (!output) {
             std::error_code ignored;
             std::filesystem::remove(temporary, ignored);
-            throw std::runtime_error("写入会话临时文件失败");
+            throw std::runtime_error(message(Message::persistence_session_temp_write_failed));
         }
     }
 
@@ -90,7 +101,8 @@ void SessionStore::save(const Json& snapshot) const {
     if (permission_error) {
         std::error_code ignored;
         std::filesystem::remove(temporary, ignored);
-        throw std::runtime_error("无法把会话快照权限限制为当前用户: " + permission_error.message());
+        throw std::runtime_error(message(Message::persistence_session_permission_failed,
+                                         {arg(Placeholder::error, permission_error.message())}));
     }
 
     std::error_code rename_error;
@@ -98,7 +110,8 @@ void SessionStore::save(const Json& snapshot) const {
     if (rename_error) {
         std::error_code ignored;
         std::filesystem::remove(temporary, ignored);
-        throw std::runtime_error("安装会话快照失败: " + rename_error.message());
+        throw std::runtime_error(message(Message::persistence_session_install_failed,
+                                         {arg(Placeholder::error, rename_error.message())}));
     }
 }
 

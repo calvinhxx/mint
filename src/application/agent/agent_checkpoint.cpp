@@ -3,6 +3,7 @@
 #include "agent_execution.hpp"
 #include "agent_model_summary.hpp"
 
+#include "mint/localization/localization.hpp"
 #include "mint/version.hpp"
 
 #include <algorithm>
@@ -13,6 +14,11 @@
 
 namespace mint::agent_detail {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 constexpr int in_flight_session_schema_version = 3;
 constexpr int durable_changeset_session_schema_version = 4;
@@ -186,28 +192,28 @@ RestoredSession restore_session(const Json& snapshot, AgentTools& tools, bool re
     const auto capabilities = tools.capabilities();
     const auto schema_version = snapshot.is_object() ? snapshot.value("schema_version", 0) : 0;
     if (!snapshot.is_object() || !supported_session_schema(schema_version)) {
-        throw std::invalid_argument("会话快照 schema_version 不受支持");
+        throw std::invalid_argument(message(Message::agent_checkpoint_schema_unsupported));
     }
 
     const auto status = snapshot.value("status", "");
     if (status == "completed" || status == "failed" || status == "budget_exhausted") {
-        throw std::invalid_argument("该会话已经结束，不能再次恢复");
+        throw std::invalid_argument(message(Message::agent_checkpoint_already_finished));
     }
     if (!valid_session_status(status)) {
-        throw std::invalid_argument("会话快照终态无效");
+        throw std::invalid_argument(message(Message::agent_checkpoint_status_invalid));
     }
     if (snapshot.value("workspace_root", "") != capabilities.workspace_root.generic_string()) {
-        throw std::invalid_argument("会话工作区与当前 --root 不一致");
+        throw std::invalid_argument(message(Message::agent_checkpoint_workspace_mismatch));
     }
     if (!snapshot.contains("capabilities") || !snapshot.at("capabilities").is_object()) {
-        throw std::invalid_argument("会话快照缺少能力策略");
+        throw std::invalid_argument(message(Message::agent_checkpoint_capabilities_missing));
     }
     if (!capabilities_match(snapshot.at("capabilities"), capabilities, require_verification,
                             max_context_bytes, max_total_tokens, schema_version)) {
-        throw std::invalid_argument("恢复会话时必须使用与原任务相同的能力授权");
+        throw std::invalid_argument(message(Message::agent_checkpoint_capabilities_mismatch));
     }
     if (!has_required_session_state(snapshot, schema_version)) {
-        throw std::invalid_argument("会话快照缺少必需状态");
+        throw std::invalid_argument(message(Message::agent_checkpoint_state_missing));
     }
 
     RestoredSession restored;
@@ -216,7 +222,7 @@ RestoredSession restore_session(const Json& snapshot, AgentTools& tools, bool re
     restored.result.turns = snapshot.at("turns").get<std::size_t>();
     restored.result.duration_ms = snapshot.at("duration_ms").get<long long>();
     if (restored.result.duration_ms < 0 || restored.messages.size() < 2) {
-        throw std::invalid_argument("会话快照状态无效");
+        throw std::invalid_argument(message(Message::agent_checkpoint_state_invalid));
     }
     restored.result.execution = execution_from_json(snapshot.at("execution"));
     if (snapshot.contains("model")) {
@@ -233,7 +239,7 @@ RestoredSession restore_session(const Json& snapshot, AgentTools& tools, bool re
         if (restored.pending_calls.empty() || restored.pending_calls.front().id != in_flight->id ||
             restored.pending_calls.front().name != in_flight->name ||
             restored.pending_calls.front().arguments != in_flight->arguments) {
-            throw std::invalid_argument("会话中的 in-flight 工具与待执行队列不一致");
+            throw std::invalid_argument(message(Message::agent_checkpoint_inflight_mismatch));
         }
     }
 
@@ -242,7 +248,7 @@ RestoredSession restore_session(const Json& snapshot, AgentTools& tools, bool re
         !snapshot.at("change_transaction_id").is_null()) {
         const auto id = snapshot.at("change_transaction_id").get<std::string>();
         if (!valid_change_transaction_id(id)) {
-            throw std::invalid_argument("会话中的 changeset 事务 ID 无效");
+            throw std::invalid_argument(message(Message::agent_checkpoint_transaction_id_invalid));
         }
         checkpoint_transaction_id = id;
     }
@@ -251,16 +257,15 @@ RestoredSession restore_session(const Json& snapshot, AgentTools& tools, bool re
     if (in_flight.has_value()) {
         if (in_flight->name == "apply_changeset" &&
             restored.transaction_recovery == ChangeTransactionRecovery::committed) {
-            throw std::runtime_error("changeset 事务已经提交，但会话仍将同一工具标记为 in-flight");
+            throw std::runtime_error(message(Message::agent_checkpoint_committed_inflight));
         }
         const bool durable_changeset_retry =
             schema_version >= durable_changeset_session_schema_version &&
             in_flight->name == "apply_changeset" && capabilities.durable_change_transactions;
         if (!safe_to_retry(*in_flight) && !durable_changeset_retry && !retry_in_flight_tool) {
-            throw std::runtime_error("检查点记录到未确认完成的 in-flight 工具 " + in_flight->name +
-                                     " (" + in_flight->id +
-                                     ")；默认拒绝重复副作用。"
-                                     "检查工作区后，只有明确接受重试风险时才使用 --retry-inflight");
+            throw std::runtime_error(message(
+                Message::agent_checkpoint_retry_required,
+                {arg(Placeholder::name, in_flight->name), arg(Placeholder::id, in_flight->id)}));
         }
         restored.recovered_in_flight = true;
     }

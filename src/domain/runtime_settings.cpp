@@ -1,5 +1,7 @@
 #include "mint/domain/runtime_settings.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <algorithm>
 #include <array>
 #include <stdexcept>
@@ -7,6 +9,11 @@
 
 namespace mint {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 constexpr std::array<std::string_view, 10> setting_names = {"read_file_bytes",
                                                             "list_max_entries",
@@ -30,13 +37,16 @@ std::size_t bounded_size(const Json& document, std::string_view field, std::size
     }
     const auto& value = document.at(key);
     if (!value.is_number_integer() || (!value.is_number_unsigned() && value.get<long long>() < 0)) {
-        throw std::invalid_argument(std::string(context) + " 字段 " + key + " 必须是非负整数");
+        throw std::invalid_argument(
+            message(Message::validation_nonnegative_integer,
+                    {arg(Placeholder::context, context), arg(Placeholder::field, key)}));
     }
     const auto parsed = value.get<std::size_t>();
     if (parsed < minimum || parsed > maximum) {
-        throw std::invalid_argument(std::string(context) + " 字段 " + key + " 必须在 " +
-                                    std::to_string(minimum) + " 到 " + std::to_string(maximum) +
-                                    " 之间");
+        throw std::invalid_argument(
+            message(Message::validation_range,
+                    {arg(Placeholder::context, context), arg(Placeholder::field, key),
+                     arg(Placeholder::minimum, minimum), arg(Placeholder::maximum, maximum)}));
     }
     return parsed;
 }
@@ -45,9 +55,10 @@ std::size_t optional_limit(const Json& document, std::string_view field, std::si
                            std::size_t minimum, std::size_t maximum, std::string_view context) {
     const auto value = bounded_size(document, field, fallback, 0, maximum, context);
     if (value != 0 && value < minimum) {
-        throw std::invalid_argument(std::string(context) + " 字段 " + std::string(field) +
-                                    " 必须为 0，或在 " + std::to_string(minimum) + " 到 " +
-                                    std::to_string(maximum) + " 之间");
+        throw std::invalid_argument(
+            message(Message::validation_optional_range,
+                    {arg(Placeholder::context, context), arg(Placeholder::field, field),
+                     arg(Placeholder::minimum, minimum), arg(Placeholder::maximum, maximum)}));
     }
     return value;
 }
@@ -55,9 +66,10 @@ std::size_t optional_limit(const Json& document, std::string_view field, std::si
 void require_range(std::size_t value, std::size_t minimum, std::size_t maximum,
                    std::string_view field, std::string_view context) {
     if (value < minimum || value > maximum) {
-        throw std::invalid_argument(std::string(context) + " 字段 " + std::string(field) +
-                                    " 必须在 " + std::to_string(minimum) + " 到 " +
-                                    std::to_string(maximum) + " 之间");
+        throw std::invalid_argument(
+            message(Message::validation_range,
+                    {arg(Placeholder::context, context), arg(Placeholder::field, field),
+                     arg(Placeholder::minimum, minimum), arg(Placeholder::maximum, maximum)}));
     }
 }
 
@@ -72,12 +84,15 @@ void require_optional_range(std::size_t value, std::size_t minimum, std::size_t 
 CommandResourceLimits parse_command_resource_limits(const Json& document,
                                                     std::string_view context) {
     if (!document.is_object()) {
-        throw std::invalid_argument(std::string(context) + " 必须是对象");
+        throw std::invalid_argument(
+            message(Message::validation_object, {arg(Placeholder::context, context)}));
     }
     for (const auto& [key, value] : document.items()) {
         (void)value;
         if (std::find(resource_names.begin(), resource_names.end(), key) == resource_names.end()) {
-            throw std::invalid_argument(std::string(context) + " 包含未知字段: " + key);
+            throw std::invalid_argument(
+                message(Message::validation_unknown_field,
+                        {arg(Placeholder::context, context), arg(Placeholder::field, key)}));
         }
     }
 
@@ -139,9 +154,8 @@ void validate_tool_runtime_settings(const ToolRuntimeSettings& settings, std::st
                   runtime_bounds::max_workspace_snapshot_text_bytes,
                   "workspace_snapshot_text_bytes", context);
     if (settings.workspace_snapshot_text_bytes > settings.workspace_snapshot_bytes) {
-        throw std::invalid_argument(std::string(context) +
-                                    " 字段 workspace_snapshot_text_bytes 不能超过 "
-                                    "workspace_snapshot_bytes");
+        throw std::invalid_argument(
+            message(Message::runtime_snapshot_text_limit, {arg(Placeholder::context, context)}));
     }
     validate_command_resource_limits(settings.command_resources,
                                      std::string(context) + " command_resources");
@@ -149,12 +163,15 @@ void validate_tool_runtime_settings(const ToolRuntimeSettings& settings, std::st
 
 ToolRuntimeSettings parse_tool_runtime_settings(const Json& document, std::string_view context) {
     if (!document.is_object()) {
-        throw std::invalid_argument(std::string(context) + " 必须是对象");
+        throw std::invalid_argument(
+            message(Message::validation_object, {arg(Placeholder::context, context)}));
     }
     for (const auto& [key, value] : document.items()) {
         (void)value;
         if (std::find(setting_names.begin(), setting_names.end(), key) == setting_names.end()) {
-            throw std::invalid_argument(std::string(context) + " 包含未知字段: " + key);
+            throw std::invalid_argument(
+                message(Message::validation_unknown_field,
+                        {arg(Placeholder::context, context), arg(Placeholder::field, key)}));
         }
     }
 

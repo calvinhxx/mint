@@ -1,5 +1,7 @@
 #include "mint/infrastructure/model_provider_client.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include "model_provider_profile.hpp"
 
 #include <algorithm>
@@ -16,6 +18,11 @@
 
 namespace mint {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 template <typename Enum, std::size_t Size>
 std::optional<Enum>
@@ -135,7 +142,7 @@ void validate_port(std::string_view port) {
     const auto parsed = std::from_chars(port.data(), port.data() + port.size(), value);
     if (port.empty() || parsed.ec != std::errc{} || parsed.ptr != port.data() + port.size() ||
         value > 65'535) {
-        throw std::invalid_argument("模型接口地址包含无效端口");
+        throw std::invalid_argument(message(Message::model_endpoint_invalid_port));
     }
 }
 
@@ -228,11 +235,11 @@ bool is_loopback_host(const ParsedUrl& url) {
 ParsedUrl parse_http_url(std::string_view url) {
     const auto scheme_end = url.find("://");
     if (scheme_end == std::string_view::npos) {
-        throw std::invalid_argument("模型接口地址必须是 http 或 https URL");
+        throw std::invalid_argument(message(Message::model_endpoint_http_url_required));
     }
     const auto scheme = lowercase_ascii(std::string(url.substr(0, scheme_end)));
     if (scheme != "http" && scheme != "https") {
-        throw std::invalid_argument("模型接口地址只支持 http 或 https");
+        throw std::invalid_argument(message(Message::model_endpoint_scheme_unsupported));
     }
 
     const auto authority_begin = scheme_end + 3;
@@ -242,7 +249,7 @@ ParsedUrl parse_http_url(std::string_view url) {
                                     : authority_end - authority_begin;
     auto authority = url.substr(authority_begin, authority_size);
     if (authority.empty() || authority.find('@') != std::string_view::npos) {
-        throw std::invalid_argument("模型接口地址缺少主机或包含 URL 凭据");
+        throw std::invalid_argument(message(Message::model_endpoint_authority_invalid));
     }
 
     std::string_view host;
@@ -252,12 +259,12 @@ ParsedUrl parse_http_url(std::string_view url) {
         bracketed_host = true;
         const auto close = authority.find(']');
         if (close == std::string_view::npos) {
-            throw std::invalid_argument("模型接口地址包含无效 IPv6 主机");
+            throw std::invalid_argument(message(Message::model_endpoint_ipv6_invalid));
         }
         host = authority.substr(1, close - 1);
         if (close + 1 < authority.size()) {
             if (authority[close + 1] != ':') {
-                throw std::invalid_argument("模型接口地址包含无效主机");
+                throw std::invalid_argument(message(Message::model_endpoint_host_invalid));
             }
             port = authority.substr(close + 2);
         }
@@ -265,7 +272,7 @@ ParsedUrl parse_http_url(std::string_view url) {
         const auto separator = authority.find(':');
         if (separator != std::string_view::npos) {
             if (authority.find(':', separator + 1) != std::string_view::npos) {
-                throw std::invalid_argument("IPv6 模型接口地址必须使用方括号");
+                throw std::invalid_argument(message(Message::model_endpoint_ipv6_brackets));
             }
             host = authority.substr(0, separator);
             port = authority.substr(separator + 1);
@@ -274,7 +281,7 @@ ParsedUrl parse_http_url(std::string_view url) {
         }
     }
     if (host.empty()) {
-        throw std::invalid_argument("模型接口地址缺少主机");
+        throw std::invalid_argument(message(Message::model_endpoint_host_missing));
     }
     if (!port.empty() || authority.back() == ':') {
         validate_port(port);
@@ -291,9 +298,7 @@ ParsedUrl parse_http_url(std::string_view url) {
                      .has_query_or_fragment =
                          url.find_first_of("?#", authority_begin) != std::string_view::npos};
     if (!parsed.uses_tls && !is_loopback_host(parsed)) {
-        throw std::invalid_argument(
-            "远程模型接口必须使用 https；明文 http 仅允许 localhost、127.0.0.0/8 或 ::1 "
-            "回环地址");
+        throw std::invalid_argument(message(Message::model_endpoint_remote_https_required));
     }
     return parsed;
 }
@@ -350,18 +355,20 @@ void validate_profile(const ModelProviderConfig& config, const ModelProviderProf
     const auto* definition = provider_definition(profile.provider);
     if (profile.provider != ModelProvider::custom &&
         (definition == nullptr || endpoint_path(*definition, profile.adapter).empty())) {
-        throw std::invalid_argument(std::string(model_provider_name(profile.provider)) +
-                                    " profile 不支持 " +
-                                    std::string(model_adapter_name(profile.adapter)) + " adapter");
+        throw std::invalid_argument(
+            message(Message::model_profile_adapter_unsupported,
+                    {arg(Placeholder::provider, model_provider_name(profile.provider)),
+                     arg(Placeholder::adapter, model_adapter_name(profile.adapter))}));
     }
     if (profile.provider != ModelProvider::custom && config.capabilities.has_value()) {
-        throw std::invalid_argument("只有 custom provider 可以覆盖 capabilities");
+        throw std::invalid_argument(message(Message::model_profile_capabilities_custom_only));
     }
     if (config.stream && !profile.capabilities.streaming) {
-        throw std::invalid_argument("当前 provider profile 不支持流式响应");
+        throw std::invalid_argument(message(Message::model_profile_streaming_unsupported));
     }
     if (profile.capabilities.stream_usage && !profile.capabilities.streaming) {
-        throw std::invalid_argument("stream_usage 需要先启用 streaming 能力");
+        throw std::invalid_argument(
+            message(Message::model_profile_stream_usage_requires_streaming));
     }
     if (profile.adapter == ModelAdapter::responses) {
         if (profile.capabilities.stream_usage ||
@@ -370,16 +377,17 @@ void validate_profile(const ModelProviderConfig& config, const ModelProviderProf
             profile.capabilities.chat_reasoning_replay ||
             profile.capabilities.requires_tool_call_content) {
             throw std::invalid_argument(
-                "Responses adapter 需要 max_output_tokens，且不使用 Chat 专属能力");
+                message(Message::model_profile_responses_capabilities_invalid));
         }
     } else if (profile.capabilities.stateless_reasoning_replay ||
                profile.capabilities.token_limit_parameter ==
                    ModelTokenLimitParameter::max_output_tokens) {
-        throw std::invalid_argument("当前 adapter 不支持 Responses 推理续传或 max_output_tokens");
+        throw std::invalid_argument(
+            message(Message::model_profile_responses_capabilities_unsupported));
     }
     if (profile.adapter == ModelAdapter::anthropic_messages &&
         profile.capabilities.token_limit_parameter != ModelTokenLimitParameter::max_tokens) {
-        throw std::invalid_argument("Anthropic Messages adapter 需要 max_tokens");
+        throw std::invalid_argument(message(Message::model_profile_anthropic_max_tokens_required));
     }
 }
 
@@ -469,8 +477,7 @@ void normalize_model_provider_endpoint(ModelProviderConfig& config) {
     if (config.api_url.empty()) {
         const auto endpoint = default_endpoint(config.provider, config.adapter);
         if (!endpoint.has_value()) {
-            throw std::invalid_argument(
-                "custom 或 auto provider 必须配置完整 endpoint；官方 provider 可省略");
+            throw std::invalid_argument(message(Message::model_endpoint_custom_required));
         }
         config.api_url = *endpoint;
         return;
@@ -489,13 +496,14 @@ void normalize_model_provider_endpoint(ModelProviderConfig& config) {
         return;
     }
     if (parsed.has_query_or_fragment) {
-        throw std::invalid_argument("官方 provider 的根地址不能包含 query 或 fragment");
+        throw std::invalid_argument(message(Message::model_endpoint_official_root_query));
     }
     const auto endpoint = default_endpoint(*provider, config.adapter);
     if (!endpoint.has_value()) {
-        throw std::invalid_argument(std::string(model_provider_name(*provider)) +
-                                    " profile 目前不支持 " +
-                                    std::string(model_adapter_name(config.adapter)) + " adapter");
+        throw std::invalid_argument(
+            message(Message::model_profile_adapter_unsupported,
+                    {arg(Placeholder::provider, model_provider_name(*provider)),
+                     arg(Placeholder::adapter, model_adapter_name(config.adapter))}));
     }
     config.api_url = *endpoint;
 }
@@ -534,10 +542,10 @@ parse_model_token_limit_parameter(std::string_view value) noexcept {
 
 void validate_model_provider_credentials(const ModelProviderConfig& config) {
     if (!config.api_key.empty() && !config.api_key_env.empty()) {
-        throw std::invalid_argument("api_key 与 api_key_env 不能同时设置");
+        throw std::invalid_argument(message(Message::model_credentials_mutually_exclusive));
     }
     if (!config.api_key_env.empty() && !valid_environment_name(config.api_key_env)) {
-        throw std::invalid_argument("api_key_env 不是有效的环境变量名");
+        throw std::invalid_argument(message(Message::model_credentials_environment_name_invalid));
     }
 }
 
@@ -548,7 +556,8 @@ void resolve_model_provider_credentials(ModelProviderConfig& config) {
     }
     const auto* value = std::getenv(config.api_key_env.c_str());
     if (value == nullptr || *value == '\0') {
-        throw std::runtime_error("模型 API Key 环境变量未设置: " + config.api_key_env);
+        throw std::runtime_error(message(Message::model_credentials_environment_missing,
+                                         {arg(Placeholder::name, config.api_key_env)}));
     }
     config.api_key = value;
 }

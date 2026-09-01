@@ -1,10 +1,17 @@
 #include "mint/infrastructure/model_provider_client.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <string>
 #include <utility>
 
 namespace mint {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 void truncate_utf8_at_boundary(std::string& value, std::size_t byte_limit) {
     if (value.size() <= byte_limit) {
@@ -72,9 +79,8 @@ ModelReply DemoModelClient::complete(const Json& messages, const Json& tools) {
         truncate_utf8_at_boundary(last_result, evidence_limit);
 
         ModelReply reply;
-        reply.text = "离线演示完成：Agent 已依次列出文件、搜索文本并读取 README.md。"
-                     "\n\n最后一次工具结果：\n" +
-                     last_result;
+        reply.text =
+            message(Message::model_demo_completed, {arg(Placeholder::result, last_result)});
         reply.assistant_message = {{"role", "assistant"}, {"content", reply.text}};
         reply.metadata = demo_metadata();
         return reply;

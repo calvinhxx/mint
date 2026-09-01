@@ -1,5 +1,7 @@
 #include "private_path.hpp"
 
+#include "mint/localization/localization.hpp"
+
 #include <cerrno>
 #include <filesystem>
 #include <stdexcept>
@@ -8,7 +10,8 @@
 #include <utility>
 
 #if defined(_WIN32)
-// Windows SDK base types must be declared before aclapi.h.
+// EN: Windows SDK base types must be declared before aclapi.h.
+// ZH-CN: 必须先声明 Windows SDK 基础类型，再包含 aclapi.h。
 #include <windows.h>
 
 #include <aclapi.h>
@@ -23,6 +26,11 @@
 
 namespace mint::private_path {
 namespace {
+
+using localization::arg;
+using localization::Message;
+using localization::message;
+using localization::Placeholder;
 
 std::runtime_error permission_error(std::string message) {
     return std::runtime_error(std::move(message));
@@ -53,24 +61,24 @@ class WindowsHandle final {
 std::vector<unsigned char> current_user_sid() {
     HANDLE raw_token = nullptr;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw_token) == 0) {
-        throw permission_error("无法读取当前 Windows 用户身份");
+        throw permission_error(message(Message::filesystem_private_windows_user_read_failed));
     }
     const WindowsHandle token(raw_token);
 
     DWORD bytes = 0;
     (void)GetTokenInformation(token.get(), TokenUser, nullptr, 0, &bytes);
     if (bytes == 0 || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-        throw permission_error("无法读取当前 Windows 用户身份");
+        throw permission_error(message(Message::filesystem_private_windows_user_read_failed));
     }
     std::vector<unsigned char> token_data(bytes);
     if (GetTokenInformation(token.get(), TokenUser, token_data.data(), bytes, &bytes) == 0) {
-        throw permission_error("无法读取当前 Windows 用户身份");
+        throw permission_error(message(Message::filesystem_private_windows_user_read_failed));
     }
     const auto* user = reinterpret_cast<const TOKEN_USER*>(token_data.data());
     const auto sid_bytes = GetLengthSid(user->User.Sid);
     std::vector<unsigned char> sid(sid_bytes);
     if (CopySid(sid_bytes, sid.data(), user->User.Sid) == 0) {
-        throw permission_error("无法复制当前 Windows 用户身份");
+        throw permission_error(message(Message::filesystem_private_windows_user_copy_failed));
     }
     return sid;
 }
@@ -79,7 +87,7 @@ std::vector<unsigned char> local_system_sid() {
     DWORD bytes = SECURITY_MAX_SID_SIZE;
     std::vector<unsigned char> sid(bytes);
     if (CreateWellKnownSid(WinLocalSystemSid, nullptr, sid.data(), &bytes) == 0) {
-        throw permission_error("无法创建 Windows SYSTEM 身份");
+        throw permission_error(message(Message::filesystem_private_windows_system_create_failed));
     }
     sid.resize(bytes);
     return sid;
@@ -104,7 +112,7 @@ PACL private_acl(bool directory, const std::vector<unsigned char>& user,
     PACL acl = nullptr;
     const auto result = SetEntriesInAclW(2, entries, nullptr, &acl);
     if (result != ERROR_SUCCESS) {
-        throw permission_error("无法创建私有 Windows 路径权限");
+        throw permission_error(message(Message::filesystem_private_windows_acl_create_failed));
     }
     return acl;
 }
@@ -121,7 +129,7 @@ void apply_private_acl(const std::filesystem::path& path, bool directory) {
         const_cast<unsigned char*>(user.data()), nullptr, acl, nullptr);
     (void)LocalFree(acl);
     if (result != ERROR_SUCCESS) {
-        throw permission_error("无法限制 Windows 私有路径权限");
+        throw permission_error(message(Message::filesystem_private_windows_acl_apply_failed));
     }
 }
 
@@ -134,7 +142,7 @@ void apply_private_acl(HANDLE handle, bool directory) {
                         const_cast<unsigned char*>(user.data()), nullptr, acl, nullptr);
     (void)LocalFree(acl);
     if (result != ERROR_SUCCESS) {
-        throw permission_error("无法限制 Windows 私有路径权限");
+        throw permission_error(message(Message::filesystem_private_windows_acl_apply_failed));
     }
 }
 
@@ -237,17 +245,17 @@ bool has_private_acl(HANDLE handle, bool directory) {
 WindowsHandle security_handle(std::FILE* stream) {
     const int descriptor = ::_fileno(stream);
     if (descriptor < 0) {
-        throw permission_error("无法读取 Windows 私有文件句柄");
+        throw permission_error(message(Message::filesystem_private_windows_handle_read_failed));
     }
     const auto raw_handle = ::_get_osfhandle(descriptor);
     if (raw_handle == -1) {
-        throw permission_error("无法读取 Windows 私有文件句柄");
+        throw permission_error(message(Message::filesystem_private_windows_handle_read_failed));
     }
     const auto reopened =
         ReOpenFile(reinterpret_cast<HANDLE>(raw_handle), READ_CONTROL | WRITE_DAC | WRITE_OWNER,
                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
     if (reopened == INVALID_HANDLE_VALUE) {
-        throw permission_error("无法以安全权限重新打开 Windows 私有文件");
+        throw permission_error(message(Message::filesystem_private_windows_reopen_failed));
     }
     return WindowsHandle(reopened);
 }
@@ -258,10 +266,12 @@ void reject_symlink(const std::filesystem::path& path, std::string_view descript
     std::error_code error;
     const auto status = std::filesystem::symlink_status(path, error);
     if (error && error != std::errc::no_such_file_or_directory) {
-        throw permission_error("无法检查" + std::string(description));
+        throw permission_error(message(Message::filesystem_private_inspect_failed,
+                                       {arg(Placeholder::description, description)}));
     }
     if (!error && std::filesystem::is_symlink(status)) {
-        throw permission_error(std::string(description) + "不能是符号链接");
+        throw permission_error(message(Message::filesystem_private_symlink,
+                                       {arg(Placeholder::description, description)}));
     }
 }
 
@@ -273,23 +283,26 @@ void secure_directory(const std::filesystem::path& path, bool created, std::stri
     } else if (!has_private_acl(path, true) &&
                existing_policy == ExistingDirectoryPolicy::migrate_owned) {
         if (!owned_by_current_user(path)) {
-            throw permission_error("已有" + std::string(description) +
-                                   "不属于当前 Windows 用户，拒绝迁移权限");
+            throw permission_error(message(Message::filesystem_private_windows_wrong_owner,
+                                           {arg(Placeholder::description, description)}));
         }
         apply_private_acl(path, true);
     }
     if (!has_private_acl(path, true)) {
-        throw permission_error("已有" + std::string(description) + "不是当前用户专用目录");
+        throw permission_error(message(Message::filesystem_private_not_private_directory,
+                                       {arg(Placeholder::description, description)}));
     }
 #else
     (void)existing_policy;
     if (created && ::chmod(path.c_str(), S_IRWXU) != 0) {
-        throw permission_error("无法限制" + std::string(description) + "权限");
+        throw permission_error(message(Message::filesystem_private_permission_failed,
+                                       {arg(Placeholder::description, description)}));
     }
     struct stat status = {};
     if (::lstat(path.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) ||
         status.st_uid != ::geteuid() || (status.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
-        throw permission_error("已有" + std::string(description) + "不是当前用户专用目录");
+        throw permission_error(message(Message::filesystem_private_not_private_directory,
+                                       {arg(Placeholder::description, description)}));
     }
 #endif
 }
@@ -298,7 +311,8 @@ void verify_directory(const std::filesystem::path& path, std::string_view descri
     std::error_code error;
     const auto status = std::filesystem::symlink_status(path, error);
     if (error || std::filesystem::is_symlink(status) || !std::filesystem::is_directory(status)) {
-        throw permission_error("无法创建安全的" + std::string(description));
+        throw permission_error(message(Message::filesystem_private_secure_create_failed,
+                                       {arg(Placeholder::description, description)}));
     }
 }
 
@@ -307,13 +321,14 @@ void verify_directory(const std::filesystem::path& path, std::string_view descri
 void ensure_directory(const std::filesystem::path& path, std::string_view description,
                       ExistingDirectoryPolicy existing_policy) {
     if (path.empty() || description.empty()) {
-        throw std::invalid_argument("私有目录及其说明不能为空");
+        throw std::invalid_argument(message(Message::filesystem_private_directory_argument_empty));
     }
     reject_symlink(path, description);
     std::error_code error;
     const auto created = std::filesystem::create_directories(path, error);
     if (error) {
-        throw permission_error("无法创建" + std::string(description));
+        throw permission_error(message(Message::filesystem_private_create_failed,
+                                       {arg(Placeholder::description, description)}));
     }
     verify_directory(path, description);
     secure_directory(path, created, description, existing_policy);
@@ -321,12 +336,14 @@ void ensure_directory(const std::filesystem::path& path, std::string_view descri
 
 bool create_directory(const std::filesystem::path& path, std::string_view description) {
     if (path.empty() || description.empty()) {
-        throw std::invalid_argument("私有目录及其说明不能为空");
+        throw std::invalid_argument(message(Message::filesystem_private_directory_argument_empty));
     }
     std::error_code error;
     const auto created = std::filesystem::create_directory(path, error);
     if (error) {
-        throw permission_error("无法创建" + std::string(description) + ": " + error.message());
+        throw permission_error(message(Message::filesystem_private_create_error,
+                                       {arg(Placeholder::description, description),
+                                        arg(Placeholder::error, error.message())}));
     }
     if (!created) {
         return false;
@@ -338,19 +355,19 @@ bool create_directory(const std::filesystem::path& path, std::string_view descri
 
 void secure_open_file(const std::filesystem::path& path, std::FILE* stream) {
     if (stream == nullptr) {
-        throw permission_error("无法限制私有文件权限");
+        throw permission_error(message(Message::filesystem_private_file_permission_failed));
     }
 #if defined(_WIN32)
     (void)path;
     const auto handle = security_handle(stream);
     apply_private_acl(handle.get(), false);
     if (!has_private_acl(handle.get(), false)) {
-        throw permission_error("无法验证 Windows 私有文件权限");
+        throw permission_error(message(Message::filesystem_private_windows_file_verify_failed));
     }
 #else
     (void)path;
     if (::fchmod(::fileno(stream), S_IRUSR | S_IWUSR) != 0) {
-        throw permission_error("无法限制私有文件权限");
+        throw permission_error(message(Message::filesystem_private_file_permission_failed));
     }
 #endif
 }
