@@ -45,26 +45,6 @@ python3 scripts/fixture-regression.py \
 
 脱敏后的正式证据保存在 `release/evidence/<version>`。原始响应、提示词、API Key 和临时 fixture 不进入仓库。一个 provider 的真实结果不能代表其他 provider 已完成线上验证。
 
-## Agent 评测
-
-`evals/scenarios.json` 包含读取、搜索、修改、验证和工具边界的种子场景。它用于回归，不是模型排行榜。
-
-运行场景后保留 `mint run --json` 的结果，再收集脱敏事件：
-
-```bash
-python3 scripts/eval-regression.py collect \
-  --scenario read-project-overview \
-  --result build/evals/raw-result.json \
-  --events /path/to/events.jsonl \
-  --artifacts build/evals/artifacts
-
-python3 scripts/eval-regression.py score \
-  --artifacts build/evals/artifacts \
-  --output build/evals/report.json
-```
-
-同一报告只接受相同 provider、adapter 和 model 的产物。离线采集与评分通过，不代表真实模型已经运行。
-
 ## Tag 前检查
 
 1. `scripts/release-check.sh` 通过；

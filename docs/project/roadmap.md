@@ -32,7 +32,6 @@
 - Windows 和 macOS 包尚未签名，macOS 尚未 notarize；
 - Linux 预编译包以 Ubuntu 24.04 为兼容基线；
 - provider 模板与离线协议测试不等于线上服务验证；
-- 种子评测集尚未形成固定模型基线。
 
 持续聊天、GUI 和多 Agent 编排不在当前产品范围。
 
