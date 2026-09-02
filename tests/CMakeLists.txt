@@ -27,7 +27,7 @@ mint_add_gtest(mint_unit_tests
     LIBRARIES mint_cli
     INCLUDE_DIRECTORIES
         "${PROJECT_SOURCE_DIR}/src/cli"
-        "${PROJECT_SOURCE_DIR}/src/infrastructure"
+        "${PROJECT_SOURCE_DIR}/src/core/infrastructure"
     TEST_PREFIX "unit."
     LABELS unit
 )
@@ -44,9 +44,9 @@ mint_add_gtest(mint_tests
         integration/tool_registry_tests.cpp
     LIBRARIES mint::core mint_cli mint_test_support
     INCLUDE_DIRECTORIES
-        "${PROJECT_SOURCE_DIR}/src/application"
+        "${PROJECT_SOURCE_DIR}/src/core/application"
         "${PROJECT_SOURCE_DIR}/src/cli"
-        "${PROJECT_SOURCE_DIR}/src/tools"
+        "${PROJECT_SOURCE_DIR}/src/core/tools"
     TEST_PREFIX "integration."
     LABELS integration
 )
@@ -75,7 +75,7 @@ mint_add_gtest(mint_provider_protocol_tests
     LIBRARIES mint_cli mint_test_support
     INCLUDE_DIRECTORIES
         "${PROJECT_SOURCE_DIR}/src/cli"
-        "${PROJECT_SOURCE_DIR}/src/infrastructure"
+        "${PROJECT_SOURCE_DIR}/src/core/infrastructure"
     TEST_PREFIX "contract.protocol."
     LABELS contract provider acceptance
 )
@@ -89,9 +89,9 @@ mint_add_gtest(mint_provider_tests
         contract/provider_profile_tests.cpp
     LIBRARIES mint_cli mint_test_support
     INCLUDE_DIRECTORIES
-        "${PROJECT_SOURCE_DIR}/src/application"
+        "${PROJECT_SOURCE_DIR}/src/core/application"
         "${PROJECT_SOURCE_DIR}/src/cli"
-        "${PROJECT_SOURCE_DIR}/src/infrastructure"
+        "${PROJECT_SOURCE_DIR}/src/core/infrastructure"
     TEST_PREFIX "contract.provider."
     LABELS contract provider acceptance
 )

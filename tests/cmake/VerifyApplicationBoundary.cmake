@@ -7,8 +7,8 @@ cmake_policy(SET CMP0057 NEW)
 file(GLOB_RECURSE application_sources
     LIST_DIRECTORIES FALSE
     "${SOURCE_DIR}/include/mint/application/*.hpp"
-    "${SOURCE_DIR}/src/application/*.cpp"
-    "${SOURCE_DIR}/src/application/*.hpp"
+    "${SOURCE_DIR}/src/core/application/*.cpp"
+    "${SOURCE_DIR}/src/core/application/*.hpp"
 )
 
 set(violations)
@@ -27,12 +27,12 @@ foreach(source IN LISTS application_sources)
     endforeach()
 endforeach()
 
-file(READ "${SOURCE_DIR}/src/application/CMakeLists.txt" application_cmake)
+file(READ "${SOURCE_DIR}/src/core/application/CMakeLists.txt" application_cmake)
 string(REGEX MATCHALL "target_link_libraries\\(mint_(agent|project)[^\\)]*\\)"
              link_blocks "${application_cmake}")
 list(LENGTH link_blocks link_block_count)
 if(link_block_count LESS 2)
-    list(APPEND violations "src/application/CMakeLists.txt: missing dependency declarations")
+    list(APPEND violations "src/core/application/CMakeLists.txt: missing dependency declarations")
 endif()
 
 set(allowed_targets
@@ -47,7 +47,7 @@ foreach(block IN LISTS link_blocks)
     string(REGEX MATCHALL "mint(::|_)[A-Za-z0-9_]+" linked_targets "${block}")
     foreach(target IN LISTS linked_targets)
         if(NOT target IN_LIST allowed_targets)
-            list(APPEND violations "src/application/CMakeLists.txt: ${target}")
+            list(APPEND violations "src/core/application/CMakeLists.txt: ${target}")
         endif()
     endforeach()
 endforeach()
