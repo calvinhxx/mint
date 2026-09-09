@@ -108,7 +108,10 @@ target_link_libraries(mint_persistence
 
 add_library(mint_model_settings STATIC
     settings/model_config_service.cpp
+    settings/model_settings_credentials.cpp
     settings/model_settings_files.cpp
+    settings/model_settings_profile.cpp
+    settings/model_settings_transactions.cpp
 )
 add_library(mint::model_settings ALIAS mint_model_settings)
 mint_configure_target(mint_model_settings)

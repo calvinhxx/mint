@@ -8,13 +8,13 @@
 #include <QDir>
 #include <QFile>
 #include <QFutureWatcher>
+#include <QPointer>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QUuid>
 
 #include <QtConcurrentRun>
 
-#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -47,7 +47,7 @@ QStringList qstring_arguments(const std::vector<std::string>& arguments) {
     return result;
 }
 
-void consume_lines(QByteArray& buffer, const std::function<void(const QByteArray&)>& consume) {
+void consume_lines(QByteArray& buffer, const std::function<bool(const QByteArray&)>& consume) {
     for (;;) {
         const auto newline = buffer.indexOf('\n');
         if (newline < 0) {
@@ -55,97 +55,66 @@ void consume_lines(QByteArray& buffer, const std::function<void(const QByteArray
         }
         const auto line = buffer.left(newline).trimmed();
         buffer.remove(0, newline + 1);
-        if (!line.isEmpty()) {
-            consume(line);
+        if (!line.isEmpty() && !consume(line)) {
+            return;
         }
     }
-}
-
-constexpr qint64 event_frame_bytes = 64 * 1024;
-constexpr std::size_t event_frame_records = 128;
-
-struct EventBatch {
-    std::vector<mint::desktop::RunEvent> events;
-    QByteArray remainder;
-    qint64 offset = 0;
-    bool more = false;
-};
-
-EventBatch read_event_batch(const std::filesystem::path& path, qint64 offset, QByteArray buffer,
-                            bool terminal) {
-    EventBatch batch;
-    batch.offset = offset;
-    QFile file(qstring_from_path(path));
-    if (file.open(QIODevice::ReadOnly) && file.seek(offset)) {
-        // EN: Consume buffered records before reading another bounded slice of the file.
-        // ZH-CN: 先处理已有完整记录，再读取下一段有界文件内容。
-        if (!buffer.contains('\n')) {
-            const auto bytes = file.read(event_frame_bytes);
-            batch.offset += bytes.size();
-            buffer.append(bytes);
-        }
-        batch.more = batch.offset < file.size();
-    }
-    qsizetype consumed = 0;
-    for (std::size_t count = 0; count < event_frame_records; ++count) {
-        const auto newline = buffer.indexOf('\n', consumed);
-        if (newline < 0) {
-            break;
-        }
-        if (auto event = MintCliProtocol::parse_event(
-                buffer.mid(consumed, newline - consumed).trimmed().toStdString())) {
-            batch.events.push_back(std::move(*event));
-        }
-        consumed = newline + 1;
-    }
-    buffer.remove(0, consumed);
-    batch.more = batch.more || buffer.contains('\n');
-    // EN: A finished writer can leave one complete JSON record without a final newline.
-    // ZH-CN: 已结束的写入进程可能留下没有末尾换行的完整 JSON 记录。
-    if (terminal && !batch.more && !buffer.trimmed().isEmpty()) {
-        if (batch.events.size() == event_frame_records) {
-            batch.more = true;
-        } else {
-            if (auto event = MintCliProtocol::parse_event(buffer.trimmed().toStdString())) {
-                batch.events.push_back(std::move(*event));
-            }
-            buffer.clear();
-        }
-    }
-    batch.remainder = std::move(buffer);
-    return batch;
 }
 
 } // namespace
 
 MintCliProcess::MintCliProcess(std::filesystem::path executable, std::filesystem::path state_root,
                                QObject* parent)
-    : QObject(parent), executable_(std::move(executable)), command_builder_(std::move(state_root)) {
-    event_timer_.setInterval(120);
-    connect(&event_timer_, &QTimer::timeout, this, [this] { tail_events(); });
+    : QObject(parent), executable_(std::move(executable)), command_builder_(std::move(state_root)),
+      event_stream_(
+          [this](std::vector<mint::desktop::RunEvent> events) {
+              if (const auto received = callbacks_.events_received) {
+                  received(std::move(events));
+              } else if (const auto received_one = callbacks_.event_received) {
+                  const QPointer<MintCliProcess> lifetime(this);
+                  const auto generation = callbacks_generation_;
+                  for (auto& event : events) {
+                      received_one(std::move(event));
+                      if (!lifetime || generation != callbacks_generation_) {
+                          return;
+                      }
+                  }
+              }
+          },
+          [this] { complete_run(); }) {
     connect(&run_process_, &QProcess::readyReadStandardOutput, this,
             [this] { consume_standard_output(); });
-    connect(&run_process_, &QProcess::readyReadStandardError, this,
-            [this] { consume_standard_error(); });
-    connect(&run_process_, &QProcess::finished, this,
-            [this](int code, QProcess::ExitStatus status) { handle_run_finished(code, status); });
-    connect(&run_process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) {
-            run_active_ = false;
-            ++event_generation_;
-            pending_exit_.reset();
-            event_timer_.stop();
-            QFile::remove(qstring_from_path(cancel_file_));
-            emit_error(mint::desktop::RuntimeOperation::task_run, run_process_.errorString());
-        }
-    });
+    // EN: Deliver external callbacks after Qt finishes accessing the process in its signal stack.
+    // ZH-CN: 等 Qt 退出当前进程信号调用栈后再交付外部回调，避免回调销毁仍被 Qt 使用的进程。
+    connect(
+        &run_process_, &QProcess::readyReadStandardError, this,
+        [this] { consume_standard_error(); }, Qt::QueuedConnection);
+    connect(
+        &run_process_, &QProcess::finished, this,
+        [this](int code, QProcess::ExitStatus status) { handle_run_finished(code, status); },
+        Qt::QueuedConnection);
+    // EN: QProcess still accesses itself after emitting FailedToStart; external callbacks may
+    //     synchronously destroy this runtime and its process, so deliver the failure afterward.
+    // ZH-CN: QProcess 发出 FailedToStart 后仍会访问自身；外部回调可能立即销毁运行时和进程，
+    //        因此应在 Qt 完成当前信号调用后再交付失败。
+    connect(
+        &run_process_, &QProcess::errorOccurred, this,
+        [this](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) {
+                run_active_ = false;
+                pending_exit_.reset();
+                event_stream_.reset();
+                QFile::remove(qstring_from_path(cancel_file_));
+                emit_error(mint::desktop::RuntimeOperation::task_run, run_process_.errorString());
+            }
+        },
+        Qt::QueuedConnection);
 }
 
 MintCliProcess::~MintCliProcess() {
     callbacks_ = {};
-    ++event_generation_;
     run_active_ = false;
-    event_timer_.stop();
+    event_stream_.reset();
     if (run_process_.state() == QProcess::NotRunning) {
         return;
     }
@@ -160,6 +129,7 @@ MintCliProcess::~MintCliProcess() {
 }
 
 void MintCliProcess::set_callbacks(mint::desktop::AgentRuntimeCallbacks callbacks) {
+    ++callbacks_generation_;
     callbacks_ = std::move(callbacks);
 }
 
@@ -174,15 +144,18 @@ void MintCliProcess::run_query(const std::filesystem::path& root,
             [process, output] { output->append(process->readAllStandardOutput()); });
     connect(process, &QProcess::readyReadStandardError, this,
             [process, error] { error->append(process->readAllStandardError()); });
-    connect(process, &QProcess::errorOccurred, this,
-            [process, output, error, handled, completion](QProcess::ProcessError process_error) {
-                if (process_error != QProcess::FailedToStart || *handled) {
-                    return;
-                }
-                *handled = true;
-                completion(-1, QProcess::CrashExit, *output, *error, process->errorString());
-                process->deleteLater();
-            });
+    connect(
+        process, &QProcess::errorOccurred, this,
+        [process, output, error, handled, completion](QProcess::ProcessError process_error) {
+            if (process_error != QProcess::FailedToStart || *handled) {
+                return;
+            }
+            *handled = true;
+            const auto detail = process->errorString();
+            process->deleteLater();
+            completion(-1, QProcess::CrashExit, *output, *error, detail);
+        },
+        Qt::QueuedConnection);
     connect(
         process, &QProcess::finished, this,
         [process, output, error, handled, completion](int exit_code, QProcess::ExitStatus status) {
@@ -192,9 +165,11 @@ void MintCliProcess::run_query(const std::filesystem::path& root,
             *handled = true;
             output->append(process->readAllStandardOutput());
             error->append(process->readAllStandardError());
-            completion(exit_code, status, *output, *error, process->errorString());
+            const auto detail = process->errorString();
             process->deleteLater();
-        });
+            completion(exit_code, status, *output, *error, detail);
+        },
+        Qt::QueuedConnection);
     if (!root.empty()) {
         process->setWorkingDirectory(qstring_from_path(root));
     }
@@ -204,36 +179,35 @@ void MintCliProcess::run_query(const std::filesystem::path& root,
 void MintCliProcess::refresh_tasks(const std::filesystem::path& root, const std::string& language) {
     const auto generation = ++status_generation_;
     ++load_generation_;
-    run_query(
-        root, command_builder_.status(root, language),
-        [this, generation](int exit_code, QProcess::ExitStatus status, QByteArray output,
-                           QByteArray error, QString process_error) {
-            if (generation == status_generation_) {
-                if (status != QProcess::NormalExit || exit_code != 0) {
-                    const auto protocol_error =
-                        MintCliProtocol::parse_error(output.trimmed().toStdString());
-                    emit_error(mint::desktop::RuntimeOperation::task_history,
-                               protocol_error.empty()
-                                   ? QString::fromUtf8(error.trimmed().isEmpty()
-                                                           ? process_error.toUtf8()
-                                                           : error.trimmed())
-                                   : QString::fromStdString(protocol_error));
-                } else {
-                    std::string parse_error;
-                    auto response =
-                        MintCliProtocol::parse_status(output.trimmed().toStdString(), parse_error);
-                    if (response.has_value()) {
-                        project_directory_ = std::move(response->state_directory);
-                        if (callbacks_.tasks_loaded) {
-                            callbacks_.tasks_loaded(std::move(response->tasks), project_directory_);
-                        }
-                    } else {
-                        emit_error(mint::desktop::RuntimeOperation::task_history,
-                                   QString::fromStdString(parse_error));
-                    }
-                }
-            }
-        });
+    run_query(root, command_builder_.status(root, language),
+              [this, generation](int exit_code, QProcess::ExitStatus status, QByteArray output,
+                                 QByteArray error, QString process_error) {
+                  if (generation == status_generation_) {
+                      if (status != QProcess::NormalExit || exit_code != 0) {
+                          const auto protocol_error =
+                              MintCliProtocol::parse_error(output.trimmed().toStdString());
+                          emit_error(mint::desktop::RuntimeOperation::task_history,
+                                     protocol_error.empty()
+                                         ? QString::fromUtf8(error.trimmed().isEmpty()
+                                                                 ? process_error.toUtf8()
+                                                                 : error.trimmed())
+                                         : QString::fromStdString(protocol_error));
+                      } else {
+                          std::string parse_error;
+                          auto response = MintCliProtocol::parse_status(
+                              output.trimmed().toStdString(), parse_error);
+                          if (response.has_value()) {
+                              project_directory_ = std::move(response->state_directory);
+                              if (const auto loaded = callbacks_.tasks_loaded) {
+                                  loaded(std::move(response->tasks), project_directory_);
+                              }
+                          } else {
+                              emit_error(mint::desktop::RuntimeOperation::task_history,
+                                         QString::fromStdString(parse_error));
+                          }
+                      }
+                  }
+              });
 }
 
 void MintCliProcess::load_task(const std::string& task_id) {
@@ -245,10 +219,11 @@ void MintCliProcess::load_task(const std::string& task_id) {
     auto* watcher = new QFutureWatcher<mint::desktop::TaskHistory>(this);
     connect(watcher, &QFutureWatcher<mint::desktop::TaskHistory>::finished, this,
             [this, watcher, generation, task_id] {
-                auto history = watcher->result();
+                auto history = watcher->future().takeResult();
                 watcher->deleteLater();
-                if (generation == load_generation_ && callbacks_.task_loaded) {
-                    callbacks_.task_loaded(task_id, std::move(history));
+                if (const auto loaded = callbacks_.task_loaded;
+                    generation == load_generation_ && loaded) {
+                    loaded(task_id, std::move(history));
                 }
             });
     watcher->setFuture(
@@ -307,20 +282,15 @@ bool MintCliProcess::running() const noexcept {
 void MintCliProcess::prepare_run() {
     ++status_generation_;
     ++load_generation_;
-    ++event_generation_;
     run_active_ = true;
-    event_read_pending_ = false;
-    event_read_queued_ = false;
+    event_stream_.reset();
     pending_exit_.reset();
     final_result_.reset();
     final_error_.clear();
     standard_output_buffer_.clear();
     standard_error_buffer_.clear();
-    event_buffer_.clear();
     last_diagnostic_.clear();
-    event_offset_ = 0;
     awaiting_approval_ = false;
-    events_path_.clear();
     cancel_file_ = path_from_qstring(
         QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
             .filePath(QStringLiteral("mint-gui-%1.cancel")
@@ -338,14 +308,19 @@ void MintCliProcess::launch_run(const std::filesystem::path& root,
 
 void MintCliProcess::consume_standard_output() {
     standard_output_buffer_.append(run_process_.readAllStandardOutput());
-    consume_lines(standard_output_buffer_,
-                  [this](const QByteArray& line) { handle_standard_output_line(line); });
+    consume_lines(standard_output_buffer_, [this](const QByteArray& line) {
+        handle_standard_output_line(line);
+        return true;
+    });
 }
 
 void MintCliProcess::consume_standard_error() {
     standard_error_buffer_.append(run_process_.readAllStandardError());
     consume_lines(standard_error_buffer_,
-                  [this](const QByteArray& line) { handle_standard_error_line(line); });
+                  [this, lifetime = QPointer(this)](const QByteArray& line) {
+                      handle_standard_error_line(line);
+                      return !lifetime.isNull();
+                  });
 }
 
 void MintCliProcess::handle_standard_output_line(const QByteArray& line) {
@@ -359,47 +334,57 @@ void MintCliProcess::handle_standard_output_line(const QByteArray& line) {
 }
 
 void MintCliProcess::handle_standard_error_line(const QByteArray& line) {
+    if (!run_active_) {
+        return;
+    }
     const auto interaction = MintCliProtocol::parse_interaction(line.toStdString());
     if (!interaction.has_value()) {
         last_diagnostic_ = line;
         return;
     }
     if (interaction->kind == InteractionKind::task_ready) {
-        ++event_generation_;
-        event_read_pending_ = false;
-        event_read_queued_ = false;
-        events_path_ = interaction->events_path;
-        event_offset_ = 0;
-        event_buffer_.clear();
-        if (callbacks_.task_ready) {
-            callbacks_.task_ready(interaction->task_id);
+        const QPointer<MintCliProcess> lifetime(this);
+        if (const auto ready = callbacks_.task_ready) {
+            ready(interaction->task_id);
         }
-        event_timer_.start();
-        tail_events();
+        if (lifetime) {
+            event_stream_.open(interaction->events_path);
+        }
         return;
     }
     awaiting_approval_ = true;
-    if (interaction->approval.has_value() && callbacks_.approval_requested) {
-        callbacks_.approval_requested(std::move(*interaction->approval));
+    if (const auto requested = callbacks_.approval_requested;
+        interaction->approval.has_value() && requested) {
+        requested(std::move(*interaction->approval));
     }
 }
 
 void MintCliProcess::handle_run_finished(int exit_code, QProcess::ExitStatus exit_status) {
+    if (!run_active_) {
+        return;
+    }
     consume_standard_output();
+    const QPointer<MintCliProcess> lifetime(this);
     consume_standard_error();
+    if (!lifetime) {
+        return;
+    }
     if (!standard_output_buffer_.trimmed().isEmpty()) {
         handle_standard_output_line(standard_output_buffer_.trimmed());
         standard_output_buffer_.clear();
     }
     if (!standard_error_buffer_.trimmed().isEmpty()) {
-        handle_standard_error_line(standard_error_buffer_.trimmed());
+        const auto line = standard_error_buffer_.trimmed();
         standard_error_buffer_.clear();
+        handle_standard_error_line(line);
+        if (!lifetime) {
+            return;
+        }
     }
-    event_timer_.stop();
     QFile::remove(qstring_from_path(cancel_file_));
     awaiting_approval_ = false;
     pending_exit_ = ProcessExit{.code = exit_code, .status = exit_status};
-    tail_events();
+    event_stream_.drain();
 }
 
 void MintCliProcess::complete_run() {
@@ -409,15 +394,14 @@ void MintCliProcess::complete_run() {
     const auto [exit_code, exit_status] = *pending_exit_;
     pending_exit_.reset();
     run_active_ = false;
-    ++event_generation_;
 
     // EN: The CLI returns nonzero for resumable limits, cancellation and task failure. Its
     //     structured result owns the task outcome; QProcess only describes process transport.
     // ZH-CN: CLI 在可恢复的限额、取消和任务失败时返回非零值。任务结果由结构化输出决定，
     //        QProcess 只描述进程是否正常退出。
     if (exit_status == QProcess::NormalExit && final_result_.has_value()) {
-        if (callbacks_.run_finished) {
-            callbacks_.run_finished(std::move(*final_result_));
+        if (const auto finished = callbacks_.run_finished) {
+            finished(std::move(*final_result_));
         }
         return;
     }
@@ -437,66 +421,6 @@ void MintCliProcess::complete_run() {
     emit_error(mint::desktop::RuntimeOperation::task_run, QString::fromStdString(detail));
 }
 
-void MintCliProcess::tail_events() {
-    if (!run_active_ || event_read_pending_) {
-        return;
-    }
-    if (events_path_.empty()) {
-        complete_run();
-        return;
-    }
-    event_read_pending_ = true;
-    const auto generation = event_generation_;
-    const auto terminal = pending_exit_.has_value();
-    auto* watcher = new QFutureWatcher<EventBatch>(this);
-    connect(watcher, &QFutureWatcher<EventBatch>::finished, this,
-            [this, watcher, generation, terminal] {
-                auto batch = watcher->future().takeResult();
-                watcher->deleteLater();
-                if (generation != event_generation_ || !run_active_) {
-                    return;
-                }
-                event_read_pending_ = false;
-                event_offset_ = batch.offset;
-                event_buffer_ = std::move(batch.remainder);
-                if (!batch.events.empty()) {
-                    if (callbacks_.events_received) {
-                        callbacks_.events_received(std::move(batch.events));
-                    } else if (callbacks_.event_received) {
-                        for (auto& event : batch.events) {
-                            callbacks_.event_received(std::move(event));
-                        }
-                    }
-                }
-                if (generation != event_generation_ || !run_active_) {
-                    return;
-                }
-                if (batch.more || (pending_exit_.has_value() && !terminal)) {
-                    queue_event_read();
-                } else if (pending_exit_.has_value()) {
-                    complete_run();
-                }
-            });
-    watcher->setFuture(QtConcurrent::run([path = events_path_, offset = event_offset_,
-                                          buffer = std::move(event_buffer_), terminal]() mutable {
-        return read_event_batch(path, offset, std::move(buffer), terminal);
-    }));
-}
-
-void MintCliProcess::queue_event_read() {
-    if (event_read_queued_) {
-        return;
-    }
-    event_read_queued_ = true;
-    const auto generation = event_generation_;
-    QTimer::singleShot(0, this, [this, generation] {
-        if (generation == event_generation_ && run_active_) {
-            event_read_queued_ = false;
-            tail_events();
-        }
-    });
-}
-
 bool MintCliProcess::write_interaction(std::string payload,
                                        mint::desktop::RuntimeOperation failure_operation) {
     const auto bytes = QByteArray::fromStdString(payload);
@@ -509,8 +433,8 @@ bool MintCliProcess::write_interaction(std::string payload,
 
 void MintCliProcess::emit_error(mint::desktop::RuntimeOperation operation,
                                 const QString& detail) const {
-    if (callbacks_.error) {
-        callbacks_.error({.operation = operation, .detail = detail.toUtf8().toStdString()});
+    if (const auto error = callbacks_.error) {
+        error({.operation = operation, .detail = detail.toUtf8().toStdString()});
     }
 }
 

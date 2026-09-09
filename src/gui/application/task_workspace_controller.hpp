@@ -2,6 +2,7 @@
 
 #include "application/agent_runtime.hpp"
 #include "application/task_organization.hpp"
+#include "application/task_run.hpp"
 #include "application/workspaces/workspace_catalog.hpp"
 
 #include <functional>
@@ -112,25 +113,12 @@ class TaskWorkspaceController final {
     void select_visible_task(std::string_view preferred_task_id = {});
     void accept_tasks(std::vector<TaskSummary> tasks, std::filesystem::path project_directory);
     void accept_history(TaskHistory history);
-    void accept_event(RunEvent event);
     void accept_events(std::vector<RunEvent> events);
     void accept_result(TaskResult result);
     void accept_error(RuntimeFailure failure);
-    [[nodiscard]] std::optional<std::size_t> find_task(const std::string& id) const;
+    [[nodiscard]] std::optional<std::size_t> find_task(std::string_view id) const;
     [[nodiscard]] bool is_task_visible(const TaskSummary& task) const;
     void switch_to_root(std::filesystem::path root, TaskOrganizer organizer);
-
-    struct RunSnapshot {
-        std::filesystem::path root;
-        std::string task_id;
-        std::string title;
-        std::string status = "running";
-        std::vector<RunEvent> events;
-        std::size_t last_event_sequence = 0;
-        std::optional<ApprovalRequest> approval;
-        std::optional<TaskResult> result;
-        std::string error;
-    };
 
     struct SelectionBookmark {
         std::string task_id;
@@ -145,7 +133,7 @@ class TaskWorkspaceController final {
     TaskWorkspaceState state_;
     // EN: Retain only the current/latest run; historical conversations remain disk-backed.
     // ZH-CN: 仅保留当前或最近一次运行快照，历史会话仍按需从磁盘读取。
-    std::optional<RunSnapshot> run_;
+    std::optional<TaskRun> run_;
     std::unordered_map<std::string, SelectionBookmark> selections_;
     bool viewing_run_ = false;
     bool keep_empty_selection_ = false;

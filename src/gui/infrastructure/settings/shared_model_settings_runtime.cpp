@@ -1,64 +1,14 @@
 #include "shared_model_settings_runtime.hpp"
 
-#include "mint/infrastructure/model_config_service.hpp"
+#include "shared_model_settings_operations.hpp"
 
 #include <QFileInfo>
 #include <QFutureWatcher>
+#include <QPointer>
 #include <QtConcurrentRun>
-
-#include <algorithm>
 
 namespace mint::infrastructure::desktop {
 namespace {
-
-struct OperationResult {
-    std::optional<mint::desktop::ProviderDescriptor> provider;
-    std::optional<mint::desktop::LegacyModelConflict> conflict;
-    mint::desktop::ModelSettingsFailure failure = mint::desktop::ModelSettingsFailure::unavailable;
-    bool migrated = false;
-    std::filesystem::path shared_config;
-};
-
-mint::desktop::ProviderDescriptor describe(const ModelConfigSnapshot& snapshot) {
-    return {.provider = snapshot.configured
-                            ? std::string(model_provider_name(
-                                  resolve_model_provider_profile(snapshot.config).provider))
-                            : std::string{},
-            .model = snapshot.configured ? snapshot.config.model : std::string{},
-            .adapter = std::string(model_adapter_name(snapshot.config.adapter)),
-            .endpoint = snapshot.configured ? snapshot.config.api_url : std::string{},
-            .config = snapshot.path,
-            .credential_available = snapshot.credential_available,
-            .revision = snapshot.revision,
-            .configured = snapshot.configured,
-            .saved_api_key = snapshot.saved_api_key,
-            .is_override = snapshot.is_override};
-}
-
-mint::desktop::LegacyModelConflict describe_conflict(ModelConfigService& service,
-                                                     const ModelConfigSnapshot& shared,
-                                                     const std::filesystem::path& legacy) {
-    mint::desktop::LegacyModelConflict result{.shared = describe(shared), .legacy_config = legacy};
-    try {
-        result.legacy = describe(service.inspect(legacy));
-    } catch (...) {
-        // EN: An unavailable old source still requires an explicit choice to keep shared settings.
-        // ZH-CN: 旧来源不可用时，仍须明确选择保留共享配置。
-    }
-    return result;
-}
-
-ModelAdapter adapter_from(mint::desktop::CustomModelAdapter adapter) {
-    switch (adapter) {
-    case mint::desktop::CustomModelAdapter::chat_completions:
-        return ModelAdapter::chat_completions;
-    case mint::desktop::CustomModelAdapter::responses:
-        return ModelAdapter::responses;
-    case mint::desktop::CustomModelAdapter::anthropic_messages:
-        return ModelAdapter::anthropic_messages;
-    }
-    return ModelAdapter::chat_completions;
-}
 
 QString qstring_from_path(const std::filesystem::path& path) {
 #if defined(_WIN32)
@@ -74,39 +24,38 @@ SharedModelSettingsRuntime::SharedModelSettingsRuntime(std::filesystem::path sta
                                                        std::filesystem::path legacy_config,
                                                        QObject* parent)
     : QObject(parent),
-      state_directory_(state_directory.empty()
-                           ? std::filesystem::path{}
-                           : std::filesystem::absolute(state_directory).lexically_normal()),
+      state_directory_(state_directory.empty() ? std::filesystem::path{}
+                                               : std::filesystem::absolute(state_directory)),
       legacy_config_(std::move(legacy_config)) {
     debounce_.setSingleShot(true);
     debounce_.setInterval(120);
     connect(&watcher_, &QFileSystemWatcher::directoryChanged, this, [this] { debounce_.start(); });
-    connect(&debounce_, &QTimer::timeout, this, [this] {
-        if (callbacks_.changed)
-            callbacks_.changed();
-    });
+    const auto notify_change = [this] {
+        const auto changed = callbacks_.changed;
+        if (changed) {
+            changed();
+        }
+    };
+    connect(&debounce_, &QTimer::timeout, this, notify_change);
     // EN: Retry only when the directory is missing or the OS refuses a watch.
     // ZH-CN: 仅在目录缺失或系统无法建立监视时重试。
     watch_retry_.setInterval(2000);
-    connect(&watch_retry_, &QTimer::timeout, this, [this] {
-        if (callbacks_.changed)
-            callbacks_.changed();
-    });
+    connect(&watch_retry_, &QTimer::timeout, this, notify_change);
 }
 
 void SharedModelSettingsRuntime::set_model_settings_callbacks(
     mint::desktop::ModelSettingsCallbacks callbacks) {
-    ++generation_;
+    ++subscription_;
     callbacks_ = std::move(callbacks);
+    pending_inspection_.reset();
+    pending_mutation_.reset();
     if (!callbacks_.inspected && !callbacks_.saved) {
-        pending_inspection_.reset();
-        if (pending_update_ && pending_update_->api_key) {
-            std::fill(pending_update_->api_key->begin(), pending_update_->api_key->end(), '\0');
-        }
-        pending_update_.reset();
-        pending_resolution_.reset();
         watch_retry_.stop();
         debounce_.stop();
+        if (!watcher_.directories().isEmpty()) {
+            (void)watcher_.removePaths(watcher_.directories());
+        }
+        registered_directory_.clear();
     }
 }
 
@@ -115,156 +64,106 @@ void SharedModelSettingsRuntime::set_legacy_imported_callback(std::function<bool
 }
 
 void SharedModelSettingsRuntime::inspect_model(mint::desktop::ModelInspectionRequest request) {
-    ++generation_;
+    ++inspection_;
     pending_inspection_ = std::move(request);
     start_pending();
 }
 
 void SharedModelSettingsRuntime::update_model(mint::desktop::ModelUpdateRequest request) {
-    if (pending_update_ || pending_resolution_) {
-        if (request.api_key)
-            std::fill(request.api_key->begin(), request.api_key->end(), '\0');
+    auto operation = std::make_shared<ModelSettingsOperation>(std::move(request));
+    if (pending_mutation_) {
         return;
     }
-    ++generation_;
+    ++inspection_;
     pending_inspection_.reset();
-    pending_update_ = std::move(request);
+    pending_mutation_ = std::move(operation);
     start_pending();
 }
 
 void SharedModelSettingsRuntime::resolve_legacy_conflict(
     mint::desktop::LegacyModelResolution request) {
-    if (pending_update_ || pending_resolution_)
+    if (pending_mutation_) {
         return;
-    ++generation_;
+    }
+    ++inspection_;
     pending_inspection_.reset();
-    pending_resolution_ = std::move(request);
+    pending_mutation_ = std::make_shared<ModelSettingsOperation>(std::move(request));
     start_pending();
 }
 
 void SharedModelSettingsRuntime::start_pending() {
-    if (busy_ || (!pending_update_ && !pending_inspection_ && !pending_resolution_))
+    if (busy_ || (!pending_mutation_ && !pending_inspection_)) {
         return;
+    }
+    auto operation = std::move(pending_mutation_);
+    if (!operation) {
+        operation = std::make_shared<ModelSettingsOperation>(std::move(*pending_inspection_));
+        pending_inspection_.reset();
+    }
     busy_ = true;
-    const auto generation = generation_;
-    const auto saving = pending_update_.has_value() || pending_resolution_.has_value();
-    auto update = std::move(pending_update_);
-    auto inspection = std::move(pending_inspection_);
-    auto resolution = std::move(pending_resolution_);
-    pending_update_.reset();
-    pending_inspection_.reset();
-    pending_resolution_.reset();
-    auto* completion = new QFutureWatcher<OperationResult>(this);
-    connect(completion, &QFutureWatcher<OperationResult>::finished, this,
-            [this, completion, generation, saving] {
+    const auto subscription = subscription_;
+    const auto inspection = inspection_;
+    const auto saving = operation->is_mutation();
+    auto* completion = new QFutureWatcher<ModelSettingsOperationResult>(this);
+    connect(completion, &QFutureWatcher<ModelSettingsOperationResult>::finished, this,
+            [this, completion, subscription, inspection, saving] {
                 auto result = completion->result();
                 completion->deleteLater();
-                busy_ = false;
-                if (result.migrated) {
-                    if (!legacy_imported_callback_ || legacy_imported_callback_()) {
-                        legacy_config_.clear();
-                    } else {
-                        result.provider.reset();
-                        result.failure = mint::desktop::ModelSettingsFailure::unavailable;
-                    }
-                }
-                if (!result.shared_config.empty() && (callbacks_.inspected || callbacks_.saved)) {
-                    watch_directory(result.shared_config);
-                }
-                if (generation == generation_) {
-                    if (result.conflict) {
-                        if (callbacks_.migration_conflict)
-                            callbacks_.migration_conflict(*result.conflict);
-                    } else if (result.provider) {
-                        const auto& callback = saving ? callbacks_.saved : callbacks_.inspected;
-                        if (callback)
-                            callback(*result.provider);
-                    } else if (callbacks_.error) {
-                        callbacks_.error(result.failure);
-                    }
-                }
-                start_pending();
+                complete_operation(std::move(result), subscription, inspection, saving);
             });
-    completion->setFuture(QtConcurrent::run([state_directory = state_directory_,
-                                             legacy = legacy_config_, update = std::move(update),
-                                             inspection = std::move(inspection),
-                                             resolution = std::move(resolution)]() mutable {
-        OperationResult result;
-        try {
-            ModelConfigService service(state_directory);
-            result.shared_config = service.config_path();
-            if (update) {
-                result.provider = describe(
-                    service.update({.expected_revision = std::move(update->expected_revision),
-                                    .adapter = adapter_from(update->adapter),
-                                    .base_url = std::move(update->base_url),
-                                    .model = std::move(update->model),
-                                    .api_key = std::move(update->api_key),
-                                    .remove_api_key = update->remove_api_key}));
-                result.migrated = !legacy.empty();
-            } else if (resolution) {
-                if (legacy.empty() || resolution->expected_revision.empty()) {
-                    throw ModelConfigError(ModelConfigErrorCode::invalid_input,
-                                           "No previous GUI configuration is selected.");
-                }
-                if (resolution->choice == mint::desktop::LegacyModelChoice::import_legacy) {
-                    result.provider =
-                        describe(service.migrate_legacy(legacy, resolution->expected_revision));
-                } else {
-                    const auto shared = service.inspect();
-                    if (!shared.configured || shared.revision != resolution->expected_revision) {
-                        throw ModelConfigError(ModelConfigErrorCode::conflict,
-                                               "Shared model settings changed before selection.");
-                    }
-                    result.provider = describe(shared);
-                }
-                result.migrated = true;
-            } else {
-                auto config = inspection->config;
-                if (config.empty()) {
-                    auto snapshot = service.inspect();
-                    if (!legacy.empty()) {
-                        // EN: Preserve the old explicit choice until import or user resolution.
-                        //     Never discover workspace files or choose a profile by modification
-                        //     time.
-                        // ZH-CN:
-                        // 导入或用户明确选择前保留旧入口；不发现工作区文件，也不按修改时间猜配置。
-                        if (!snapshot.configured) {
-                            try {
-                                snapshot = service.migrate_legacy(legacy);
-                                result.migrated = true;
-                            } catch (const ModelConfigError& error) {
-                                if (error.code() != ModelConfigErrorCode::conflict)
-                                    throw;
-                                snapshot = service.inspect();
-                                if (!snapshot.configured)
-                                    throw;
-                            }
-                        }
-                        if (!result.migrated) {
-                            result.conflict = describe_conflict(service, snapshot, legacy);
-                        }
-                    }
-                    result.provider = describe(snapshot);
-                } else {
-                    if (config.is_relative())
-                        config = inspection->root / config;
-                    result.provider = describe(service.inspect(config));
-                }
-            }
-        } catch (const ModelConfigError& error) {
-            result.failure = error.code() == ModelConfigErrorCode::conflict
-                                 ? mint::desktop::ModelSettingsFailure::conflict
-                             : error.code() == ModelConfigErrorCode::invalid_input
-                                 ? mint::desktop::ModelSettingsFailure::invalid_input
-                                 : mint::desktop::ModelSettingsFailure::unavailable;
-        } catch (...) {
-            // EN: Parser and filesystem diagnostics may contain sensitive source text.
-            // ZH-CN: 解析器或文件系统诊断可能包含敏感原文。
+    completion->setFuture(
+        QtConcurrent::run([state_directory = state_directory_, legacy = legacy_config_,
+                           operation = std::move(operation)] {
+            return execute_model_settings_operation(state_directory, legacy, *operation);
+        }));
+}
+
+void SharedModelSettingsRuntime::complete_operation(ModelSettingsOperationResult result,
+                                                    std::size_t subscription,
+                                                    std::size_t inspection, bool saving) {
+    QPointer<SharedModelSettingsRuntime> alive(this);
+    if (result.migrated) {
+        const auto imported = legacy_imported_callback_;
+        const bool retired = !imported || imported();
+        if (!alive) {
+            return;
+        }
+        if (retired) {
+            legacy_config_.clear();
+        } else {
+            result.provider.reset();
             result.failure = mint::desktop::ModelSettingsFailure::unavailable;
         }
-        return result;
-    }));
+    }
+    if (!result.shared_config.empty() && (callbacks_.inspected || callbacks_.saved)) {
+        watch_directory(result.shared_config);
+    }
+    busy_ = false;
+    // EN: New inspections replace older reads, but must not swallow an accepted save result.
+    //     Copy callbacks before invoking them; a callback may detach or destroy this adapter.
+    // ZH-CN: 新查询覆盖旧查询，但不能吞掉已接受的保存结果。
+    //        调用前复制回调，因为回调可能解绑或销毁当前适配器。
+    if (subscription == subscription_ && (saving || inspection == inspection_)) {
+        if (result.conflict) {
+            const auto callback = callbacks_.migration_conflict;
+            if (callback) {
+                callback(std::move(*result.conflict));
+            }
+        } else if (result.provider) {
+            const auto callback = saving ? callbacks_.saved : callbacks_.inspected;
+            if (callback) {
+                callback(std::move(*result.provider));
+            }
+        } else {
+            const auto callback = callbacks_.error;
+            if (callback) {
+                callback(result.failure);
+            }
+        }
+    }
+    if (alive) {
+        start_pending();
+    }
 }
 
 void SharedModelSettingsRuntime::watch_directory(const std::filesystem::path& config_path) {
@@ -279,14 +178,16 @@ void SharedModelSettingsRuntime::watch_directory(const std::filesystem::path& co
     const bool was_watched =
         registered_directory_ == directory && watcher_.directories().contains(directory);
     if (!was_watched) {
-        if (!registered_directory_.isEmpty())
+        if (!registered_directory_.isEmpty()) {
             (void)watcher_.removePath(registered_directory_);
+        }
         registered_directory_.clear();
         if (!watcher_.addPath(directory)) {
             // EN: A failed native registration may leave a path entry; do not disable recovery.
             // ZH-CN: 原生注册失败后可能残留路径记录，不能因此关闭恢复重试。
-            if (watcher_.directories().contains(directory))
+            if (watcher_.directories().contains(directory)) {
                 (void)watcher_.removePath(directory);
+            }
             watch_retry_.start();
             return;
         }

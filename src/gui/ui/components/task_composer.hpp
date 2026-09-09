@@ -14,6 +14,7 @@ class TaskComposer final : public QWidget {
 
   public:
     explicit TaskComposer(QWidget* parent = nullptr);
+    ~TaskComposer() override;
 
     void set_running(bool running);
     void set_run_available(bool available);

@@ -568,6 +568,113 @@ TEST(DesktopController, ResumeIgnoresReplayedEventsAndKeepsNewEventsInOrder) {
     EXPECT_EQ(controller.state().events.size(), 3U);
 }
 
+TEST(DesktopController, StartKeepsItsRequestWhenANotificationChangesWorkspaceAndConfiguration) {
+    using mint::desktop::WorkspaceChange;
+    for (const auto trigger : {WorkspaceChange::tasks, WorkspaceChange::selection}) {
+        SCOPED_TRACE(static_cast<int>(trigger));
+        FakeRuntime runtime;
+        mint::desktop::TaskWorkspaceController controller(
+            runtime, {.root = "/projects/alpha", .config = "/config/alpha.json", .language = "en"});
+        ASSERT_TRUE(controller.show_archived_tasks(true));
+        bool redirected = false;
+        controller.set_listener([&](WorkspaceChange change) {
+            if (redirected || change != trigger) {
+                return;
+            }
+            redirected = true;
+            EXPECT_TRUE(controller.state().running);
+            EXPECT_FALSE(controller.start("A nested run"));
+            EXPECT_TRUE(controller.set_root("/projects/beta"));
+            controller.set_config("/config/beta.json");
+            controller.set_language("zh-CN");
+        });
+
+        ASSERT_TRUE(controller.start("Inspect alpha"));
+        EXPECT_TRUE(redirected);
+        EXPECT_EQ(runtime.run_request.root, "/projects/alpha");
+        EXPECT_EQ(runtime.run_request.config, "/config/alpha.json");
+        EXPECT_EQ(runtime.run_request.language, "en");
+        EXPECT_EQ(runtime.run_request.question, "Inspect alpha");
+        EXPECT_EQ(controller.state().root, "/projects/beta");
+        EXPECT_EQ(controller.state().running_root, "/projects/alpha");
+        EXPECT_FALSE(controller.state().selected_task_running);
+    }
+}
+
+TEST(DesktopController, ResumeKeepsItsRequestWhenANotificationSelectsAnotherWorkspacesTask) {
+    FakeRuntime runtime;
+    mint::desktop::TaskWorkspaceController controller(
+        runtime, {.root = "/projects/alpha", .config = "/config/alpha.json", .language = "en"});
+    runtime.callbacks.tasks_loaded(
+        {{.id = "alpha-task", .question = "Alpha", .status = "max_turns", .resumable = true}},
+        "/state/alpha");
+    runtime.callbacks.task_loaded("alpha-task", {});
+    bool redirected = false;
+    controller.set_listener([&](mint::desktop::WorkspaceChange change) {
+        if (redirected || change != mint::desktop::WorkspaceChange::run_state) {
+            return;
+        }
+        redirected = true;
+        EXPECT_TRUE(controller.set_root("/projects/beta"));
+        runtime.callbacks.tasks_loaded(
+            {{.id = "beta-task", .question = "Beta", .status = "max_turns", .resumable = true}},
+            "/state/beta");
+        runtime.callbacks.task_loaded("beta-task", {});
+        controller.set_config("/config/beta.json");
+        controller.set_language("zh-CN");
+        EXPECT_FALSE(controller.resume());
+    });
+
+    ASSERT_TRUE(controller.resume());
+    EXPECT_TRUE(redirected);
+    EXPECT_EQ(runtime.resume_request.root, "/projects/alpha");
+    EXPECT_EQ(runtime.resume_request.task_id, "alpha-task");
+    EXPECT_EQ(runtime.resume_request.config, "/config/alpha.json");
+    EXPECT_EQ(runtime.resume_request.language, "en");
+    EXPECT_EQ(controller.state().root, "/projects/beta");
+    EXPECT_EQ(controller.state().task_id, "beta-task");
+    EXPECT_EQ(controller.state().running_root, "/projects/alpha");
+    EXPECT_EQ(controller.state().running_task_id, "alpha-task");
+    EXPECT_FALSE(controller.state().selected_task_running);
+}
+
+TEST(DesktopController, TerminalEventsKeepRunAdmissionUntilTheStructuredResultArrives) {
+    FakeRuntime runtime;
+    mint::desktop::TaskWorkspaceController controller(runtime, {.root = "/projects/alpha"});
+    ASSERT_TRUE(controller.start("Current run"));
+    runtime.callbacks.task_ready("active-task");
+    runtime.callbacks.events_received({{.sequence = 1,
+                                        .kind = mint::desktop::RunEventKind::task_finished,
+                                        .status = "max_turns"}});
+    EXPECT_TRUE(controller.state().running);
+    EXPECT_EQ(controller.state().running_status, "max_turns");
+    EXPECT_FALSE(controller.state().can_resume());
+    EXPECT_FALSE(controller.start("Too early"));
+
+    ASSERT_TRUE(controller.set_root("/projects/beta"));
+    EXPECT_TRUE(controller.state().running);
+    EXPECT_FALSE(controller.state().selected_task_running);
+    runtime.callbacks.run_finished({.answer = "Partial answer"});
+    EXPECT_FALSE(controller.state().running);
+    EXPECT_EQ(controller.state().root, "/projects/beta");
+    EXPECT_FALSE(controller.state().result.has_value());
+
+    ASSERT_TRUE(controller.set_root("/projects/alpha"));
+    runtime.callbacks.tasks_loaded({}, "/state/alpha");
+    ASSERT_TRUE(controller.state().result.has_value());
+    EXPECT_EQ(controller.state().status, "max_turns");
+    EXPECT_TRUE(controller.state().can_resume());
+    ASSERT_TRUE(controller.resume());
+    EXPECT_TRUE(controller.state().running);
+    EXPECT_EQ(controller.state().status, "running");
+    EXPECT_FALSE(controller.state().result.has_value());
+    runtime.callbacks.events_received(
+        {{.sequence = 1, .kind = mint::desktop::RunEventKind::task_finished, .status = "max_turns"},
+         {.sequence = 2, .kind = mint::desktop::RunEventKind::model_requested}});
+    EXPECT_EQ(controller.state().events.size(), 2U);
+    EXPECT_EQ(controller.state().status, "running");
+}
+
 TEST(DesktopController, KeepsOrganizationAvailableAndProtectsOnlyTheActiveRun) {
     FakeRuntime runtime;
     mint::desktop::TaskWorkspaceController controller(runtime, {.root = "/projects/alpha"});

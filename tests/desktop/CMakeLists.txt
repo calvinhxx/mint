@@ -6,18 +6,22 @@ mint_configure_target(mint_desktop_process_fixture)
 mint_add_gtest(mint_desktop_tests
     SOURCES
         desktop_branding_tests.cpp
+        desktop_conversation_tests.cpp
         desktop_controller_tests.cpp
         desktop_input_tests.cpp
+        desktop_model_settings_ui_tests.cpp
         desktop_model_tests.cpp
         desktop_preferences_tests.cpp
         desktop_process_tests.cpp
         desktop_protocol_tests.cpp
+        desktop_settings_tests.cpp
         desktop_sidebar_interaction_tests.cpp
         desktop_startup_tests.cpp
         ${PROJECT_SOURCE_DIR}/src/gui/app/gui_options.cpp
         desktop_task_organization_tests.cpp
         desktop_test_main.cpp
         desktop_timeline_tests.cpp
+        desktop_workspace_tests.cpp
     LIBRARIES
         mint::gui_cli_adapter
         mint::gui_settings

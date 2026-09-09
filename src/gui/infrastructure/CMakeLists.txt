@@ -2,6 +2,7 @@ add_library(mint_gui_cli_adapter STATIC
     cli/mint_cli_command_builder.cpp
     cli/mint_cli_process.cpp
     cli/mint_cli_protocol.cpp
+    cli/run_event_stream.cpp
     cli/task_history_reader.cpp
 )
 add_library(mint::gui_cli_adapter ALIAS mint_gui_cli_adapter)
@@ -20,6 +21,7 @@ target_link_libraries(mint_gui_cli_adapter
 )
 
 add_library(mint_gui_settings STATIC
+    settings/shared_model_settings_operations.cpp
     settings/shared_model_settings_runtime.cpp
     settings/qsettings_preferences_repository.cpp
     settings/qsettings_task_organization_repository.cpp

@@ -13,7 +13,31 @@
 #endif
 
 int main(int argc, char** argv) {
+    for (int index = 1; index < argc; ++index) {
+        if (std::string(argv[index]) == "status") {
+            std::cout << R"({"state_directory":"fixture-state","tasks":[]})" << '\n';
+            return 0;
+        }
+    }
     const std::string scenario = argc > 1 ? argv[argc - 1] : "";
+    if (scenario == "multiple_interactions" || scenario == "unterminated_interaction" ||
+        scenario == "exited_interactions") {
+        std::string output =
+            R"({"channel":"mint_interaction","type":"task_ready","data":{"task_id":"fixture-task","events_path":""}})";
+        if (scenario != "unterminated_interaction") {
+            output +=
+                "\n"
+                R"({"channel":"mint_interaction","type":"command_approval","data":{"program":"fixture"}})"
+                "\n";
+        }
+        std::cerr << output;
+        std::cout << R"({"status":"completed","answer":"Interaction delivered"})" << '\n'
+                  << std::flush;
+        if (scenario == "exited_interactions") {
+            std::ofstream(std::filesystem::current_path() / "fixture-exit-ready").put('1');
+        }
+        return 0;
+    }
     if (scenario == "long_events" || scenario == "one_event") {
         const auto path = std::filesystem::current_path() / "fixture-events.jsonl";
         const auto count = scenario == "long_events" ? 8193 : 1;

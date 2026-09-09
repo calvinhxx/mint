@@ -6,7 +6,12 @@
 #include <QObject>
 #include <QTimer>
 
+#include <memory>
+
 namespace mint::infrastructure::desktop {
+
+struct ModelSettingsOperation;
+struct ModelSettingsOperationResult;
 
 // EN: The sole Qt adapter delegates persistence to ModelConfigService; workers never capture this.
 // ZH-CN: 唯一 Qt 适配器将持久化交给 ModelConfigService，工作线程不会捕获自身对象。
@@ -24,19 +29,21 @@ class SharedModelSettingsRuntime final : public QObject,
 
   private:
     void start_pending();
+    void complete_operation(ModelSettingsOperationResult result, std::size_t subscription,
+                            std::size_t inspection, bool saving);
     void watch_directory(const std::filesystem::path& config_path);
     std::filesystem::path state_directory_;
     std::filesystem::path legacy_config_;
     mint::desktop::ModelSettingsCallbacks callbacks_;
     std::function<bool()> legacy_imported_callback_;
     std::optional<mint::desktop::ModelInspectionRequest> pending_inspection_;
-    std::optional<mint::desktop::ModelUpdateRequest> pending_update_;
-    std::optional<mint::desktop::LegacyModelResolution> pending_resolution_;
+    std::shared_ptr<ModelSettingsOperation> pending_mutation_;
     QFileSystemWatcher watcher_;
     QString registered_directory_;
     QTimer debounce_;
     QTimer watch_retry_;
-    std::size_t generation_ = 0;
+    std::size_t subscription_ = 0;
+    std::size_t inspection_ = 0;
     bool busy_ = false;
 };
 

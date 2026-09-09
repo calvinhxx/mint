@@ -127,8 +127,9 @@ TaskWorkspacePage::TaskWorkspacePage(desktop::TaskWorkspaceController& controlle
             !controller_.state().running) {
             migration_prompt_shown_ = true;
             QTimer::singleShot(0, this, [this] {
-                if (model_settings_.state().legacy_conflict)
+                if (model_settings_.state().legacy_conflict) {
                     open_settings();
+                }
             });
         }
     });

@@ -9,9 +9,13 @@
 
 #include <QApplication>
 #include <QImage>
+#include <QPointer>
+#include <QSignalSpy>
 #include <QTest>
 
 #include <gtest/gtest.h>
+
+#include <memory>
 
 namespace {
 
@@ -63,6 +67,30 @@ TEST(DesktopInputs, EditableFieldsAvoidFluentUnderlines) {
     ASSERT_NE(api_key, nullptr);
     EXPECT_EQ(api_key->focusedBorderWidth(), 0);
     EXPECT_EQ(api_key->unfocusedBorderWidth(), 0);
+}
+
+TEST(DesktopInputs, FocusedComposerDisconnectsCallbacksBeforeChildTeardown) {
+    auto composer = std::make_unique<mint::ui::TaskComposer>();
+    composer->resize(640, 96);
+    composer->show();
+    composer->activateWindow();
+    auto* input =
+        composer->findChild<fluent::textfields::TextEdit*>(QStringLiteral("MintTaskInput"));
+    ASSERT_NE(input, nullptr);
+    ASSERT_NE(input->focusProxy(), nullptr);
+    QPointer<QWidget> editor = input->focusProxy();
+    input->setPlainText(QStringLiteral("Keep focus while destroying the composer"));
+    input->setFocus(Qt::OtherFocusReason);
+    const auto input_has_focus = [&] {
+        return composer->isAncestorOf(QApplication::focusWidget());
+    };
+    ASSERT_TRUE(QTest::qWaitFor(input_has_focus));
+
+    QSignalSpy focus_changes(qApp, &QApplication::focusChanged);
+    composer.reset();
+
+    EXPECT_TRUE(editor.isNull());
+    EXPECT_GT(focus_changes.count(), 0);
 }
 
 TEST(DesktopInputs, SingleFrameHasMatchingTopAndBottomEdgesInBothThemes) {

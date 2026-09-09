@@ -42,8 +42,9 @@ void ModelSettingsController::refresh() {
 }
 
 void ModelSettingsController::inspect(bool foreground) {
-    if (state_.saving)
+    if (state_.saving) {
         return;
+    }
     if (foreground) {
         state_.loading = true;
         state_.problem = ModelSettingsProblem::none;
@@ -54,21 +55,25 @@ void ModelSettingsController::inspect(bool foreground) {
 }
 
 void ModelSettingsController::set_root(std::filesystem::path root) {
-    if (root.empty() || root == options_.root)
+    if (root.empty() || root == options_.root) {
         return;
+    }
     options_.root = std::move(root);
     // EN: Shared configuration is independent of the active workspace.
     // ZH-CN: 共享配置不依赖当前工作区。
-    if (!options_.config.empty() && options_.config.is_relative())
+    if (!options_.config.empty() && options_.config.is_relative()) {
         refresh();
+    }
 }
 
 void ModelSettingsController::set_config(std::filesystem::path config) {
     config = config.lexically_normal();
-    if (config == ".")
+    if (config == ".") {
         config.clear();
-    if (config == options_.config)
+    }
+    if (config == options_.config) {
         return;
+    }
     options_.config = std::move(config);
     state_.selected_config = options_.config;
     refresh();
@@ -80,8 +85,9 @@ void ModelSettingsController::set_language(std::string language) {
 
 bool ModelSettingsController::save_custom_profile(CustomModelSettingsRequest request) {
     if (state_.saving || state_.loading || state_.legacy_conflict) {
-        if (request.api_key)
+        if (request.api_key) {
             std::fill(request.api_key->begin(), request.api_key->end(), '\0');
+        }
         return false;
     }
     state_.saving = true;
@@ -92,14 +98,17 @@ bool ModelSettingsController::save_custom_profile(CustomModelSettingsRequest req
 }
 
 bool ModelSettingsController::remove_api_key(std::string expected_revision) {
-    if (!state_.provider || state_.saved_credential != SavedCredentialState::ready)
+    if (!state_.provider || state_.saved_credential != SavedCredentialState::ready) {
         return false;
+    }
     const auto& provider = *state_.provider;
     auto adapter = CustomModelAdapter::chat_completions;
-    if (provider.adapter == "responses")
+    if (provider.adapter == "responses") {
         adapter = CustomModelAdapter::responses;
-    if (provider.adapter == "anthropic_messages")
+    }
+    if (provider.adapter == "anthropic_messages") {
         adapter = CustomModelAdapter::anthropic_messages;
+    }
     return save_custom_profile({.expected_revision = std::move(expected_revision),
                                 .adapter = adapter,
                                 .base_url = provider.endpoint,
@@ -121,8 +130,9 @@ bool ModelSettingsController::resolve_legacy_conflict(LegacyModelChoice choice) 
 }
 
 void ModelSettingsController::notify() const {
-    if (listener_)
+    if (listener_) {
         listener_();
+    }
 }
 
 void ModelSettingsController::accept_provider(ProviderDescriptor provider, bool saved) {
@@ -142,8 +152,9 @@ void ModelSettingsController::accept_provider(ProviderDescriptor provider, bool 
     }
     state_.saved_credential = state_.provider->saved_api_key ? SavedCredentialState::ready
                                                              : SavedCredentialState::missing;
-    if (saved && saved_listener_)
+    if (saved && saved_listener_) {
         saved_listener_();
+    }
     notify();
 }
 

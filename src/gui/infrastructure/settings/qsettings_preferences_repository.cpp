@@ -82,15 +82,18 @@ std::filesystem::path QSettingsPreferencesRepository::legacy_model_config() cons
 bool QSettingsPreferencesRepository::clear_legacy_model_config(
     const std::filesystem::path& expected_config) {
     settings_->sync();
-    if (settings_->status() != QSettings::NoError)
+    if (settings_->status() != QSettings::NoError) {
         return false;
+    }
     const auto current = legacy_model_config();
-    if (current.empty())
+    if (current.empty()) {
         return true;
+    }
     // EN: A still-running older GUI may have selected another profile since startup.
     // ZH-CN: 仍在运行的旧 GUI 可能已在本次启动后选择了另一份配置。
-    if (current != expected_config)
+    if (current != expected_config) {
         return false;
+    }
     settings_->remove(model_config_key);
     settings_->sync();
     return settings_->status() == QSettings::NoError;

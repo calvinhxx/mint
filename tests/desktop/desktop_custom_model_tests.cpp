@@ -1,4 +1,5 @@
 #include "application/model_settings_controller.hpp"
+#include "infrastructure/settings/shared_model_settings_operations.hpp"
 #include "infrastructure/settings/shared_model_settings_runtime.hpp"
 #include "mint/infrastructure/model_config_service.hpp"
 
@@ -6,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QPointer>
 #include <QSaveFile>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -15,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <memory>
 
 namespace {
 
@@ -36,17 +39,39 @@ std::filesystem::path state_path(const QTemporaryDir& directory) {
 
 bool write_fixture(const QString& path, const QByteArray& contents) {
     QFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
+    if (!file.open(QIODevice::WriteOnly)) {
         return false;
+    }
     return file.write(contents) == contents.size();
 }
 
 QByteArray read_fixture(const QString& path) {
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
+    if (!file.open(QIODevice::ReadOnly)) {
         return {};
+    }
     return file.readAll();
 }
+
+class UnsetEnvironment final {
+  public:
+    explicit UnsetEnvironment(const char* name)
+        : name_(name), value_(qgetenv(name)), present_(qEnvironmentVariableIsSet(name)) {
+        qunsetenv(name);
+    }
+    ~UnsetEnvironment() {
+        if (present_) {
+            qputenv(name_, value_);
+        } else {
+            qunsetenv(name_);
+        }
+    }
+
+  private:
+    const char* name_;
+    QByteArray value_;
+    bool present_;
+};
 
 class SharedModelSettings : public ::testing::Test {
   protected:
@@ -480,6 +505,155 @@ TEST_F(SharedModelSettings, LatestInspectionWinsAndCallbackTeardownIsSafe) {
     QThreadPool::globalInstance()->waitForDone();
     QCoreApplication::processEvents();
     EXPECT_EQ(received.size(), 1U);
+}
+
+TEST_F(SharedModelSettings, InspectionQueuedDuringSaveStillDeliversTheSaveResult) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    SharedModelSettingsRuntime runtime(state_path(directory) / "state");
+    std::vector<std::string> received;
+    runtime.set_model_settings_callbacks(
+        {.inspected = [&](auto provider) { received.push_back("inspected:" + provider.model); },
+         .saved = [&](auto provider) { received.push_back("saved:" + provider.model); }});
+    runtime.update_model({.base_url = "https://fixture.example.test/v1", .model = "new-model"});
+    runtime.inspect_model({});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return received.size() == 2; }));
+    EXPECT_EQ(received, (std::vector<std::string>{"saved:new-model", "inspected:new-model"}));
+}
+
+TEST_F(SharedModelSettings, ANewCallbackSubscriptionDoesNotInheritQueuedSaves) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const auto state = state_path(directory) / "state";
+    SharedModelSettingsRuntime runtime(state);
+    int previous_callbacks = 0;
+    runtime.set_model_settings_callbacks({.inspected = [&](auto) { ++previous_callbacks; },
+                                          .saved = [&](auto) { ++previous_callbacks; }});
+    runtime.inspect_model({});
+    runtime.update_model({.base_url = "https://fixture.example.test/v1",
+                          .model = "cancelled-draft",
+                          .api_key = "synthetic-queued-key"});
+    std::optional<mint::desktop::ProviderDescriptor> latest;
+    runtime.set_model_settings_callbacks(
+        {.inspected = [&](auto provider) { latest = std::move(provider); }});
+    runtime.inspect_model({});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return latest.has_value(); }));
+    EXPECT_EQ(previous_callbacks, 0);
+    EXPECT_FALSE(latest->configured);
+    EXPECT_FALSE(std::filesystem::exists(state / "model.json"));
+    EXPECT_FALSE(std::filesystem::exists(state / "credentials.json"));
+}
+
+TEST_F(SharedModelSettings, SavedCallbackCanDestroyTheAdapterWithAnInspectionPending) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const auto state = state_path(directory) / "state";
+    auto runtime = std::make_unique<SharedModelSettingsRuntime>(state);
+    QPointer<SharedModelSettingsRuntime> lifetime(runtime.get());
+    int saved = 0;
+    int inspected = 0;
+    runtime->set_model_settings_callbacks({.inspected = [&](auto) { ++inspected; },
+                                           .saved =
+                                               [&](auto) {
+                                                   ++saved;
+                                                   runtime.reset();
+                                               }});
+    runtime->update_model({.base_url = "https://fixture.example.test/v1", .model = "saved"});
+    runtime->inspect_model({});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return lifetime.isNull(); }));
+    QCoreApplication::processEvents();
+    EXPECT_EQ(saved, 1);
+    EXPECT_EQ(inspected, 0);
+    EXPECT_EQ(mint::ModelConfigService(state).inspect().config.model, "saved");
+}
+
+TEST_F(SharedModelSettings, MigrationCleanupCallbackCanDestroyTheAdapter) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    ASSERT_TRUE(write_fixture(
+        directory.filePath("legacy.json"),
+        QByteArrayLiteral(
+            R"({"endpoint":"https://fixture.example.test/v1/chat/completions","model":"imported"})")));
+    const auto state = state_path(directory) / "state";
+    auto runtime =
+        std::make_unique<SharedModelSettingsRuntime>(state, state_path(directory) / "legacy.json");
+    QPointer<SharedModelSettingsRuntime> lifetime(runtime.get());
+    int inspected = 0;
+    int retired = 0;
+    runtime->set_model_settings_callbacks({.inspected = [&](auto) { ++inspected; }});
+    runtime->set_legacy_imported_callback([&] {
+        ++retired;
+        runtime.reset();
+        return true;
+    });
+    runtime->inspect_model({});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return lifetime.isNull(); }));
+    QCoreApplication::processEvents();
+    EXPECT_EQ(retired, 1);
+    EXPECT_EQ(inspected, 0);
+    EXPECT_EQ(mint::ModelConfigService(state).inspect().config.model, "imported");
+}
+
+TEST_F(SharedModelSettings, ExplicitOverrideInspectionNeedsNoGlobalStateDirectory) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    ASSERT_TRUE(write_fixture(
+        directory.filePath("override.json"),
+        QByteArrayLiteral(
+            R"({"endpoint":"https://fixture.example.test/v1/chat/completions","model":"standalone","api_key":"synthetic-inline-key"})")));
+    const UnsetEnvironment home("HOME");
+    const UnsetEnvironment local_app_data("LOCALAPPDATA");
+    const UnsetEnvironment xdg_state("XDG_STATE_HOME");
+    SharedModelSettingsRuntime runtime;
+    std::optional<mint::desktop::ProviderDescriptor> received;
+    runtime.set_model_settings_callbacks(
+        {.inspected = [&](auto provider) { received = std::move(provider); }});
+    runtime.inspect_model({.root = state_path(directory), .config = "override.json"});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return received.has_value(); }));
+    EXPECT_EQ(received->model, "standalone");
+    EXPECT_TRUE(received->credential_available);
+    EXPECT_TRUE(received->is_override);
+    EXPECT_TRUE(received->revision.empty());
+}
+
+TEST_F(SharedModelSettings, FailedBackgroundOperationErasesItsOwnedDraftKey) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    using mint::infrastructure::desktop::execute_model_settings_operation;
+    using mint::infrastructure::desktop::ModelSettingsOperation;
+    ModelSettingsOperation operation(mint::desktop::ModelUpdateRequest{
+        .adapter = static_cast<mint::desktop::CustomModelAdapter>(99),
+        .base_url = "https://fixture.example.test/v1",
+        .model = "rejected",
+        .api_key = "synthetic-rejected-key"});
+    const auto state = state_path(directory) / "state";
+    const auto result = execute_model_settings_operation(state, {}, operation);
+    EXPECT_FALSE(result.provider.has_value());
+    EXPECT_EQ(result.failure, mint::desktop::ModelSettingsFailure::invalid_input);
+    EXPECT_FALSE(
+        std::get<mint::desktop::ModelUpdateRequest>(operation.request).api_key.has_value());
+    EXPECT_FALSE(std::filesystem::exists(state));
+}
+
+TEST_F(SharedModelSettings, SymlinkParentComponentsKeepTheSelectedStateDirectory) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const auto lexical = state_path(directory) / "lexical";
+    const auto physical = state_path(directory) / "physical";
+    std::filesystem::create_directories(lexical);
+    std::filesystem::create_directories(physical / "child");
+    std::error_code error;
+    std::filesystem::create_directory_symlink(physical / "child", lexical / "alias", error);
+    if (error) {
+        GTEST_SKIP() << "Directory symlinks are unavailable";
+    }
+    SharedModelSettingsRuntime runtime(lexical / "alias" / ".." / "state");
+    bool saved = false;
+    runtime.set_model_settings_callbacks({.saved = [&](auto) { saved = true; }});
+    runtime.update_model({.base_url = "https://fixture.example.test/v1", .model = "selected"});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return saved; }));
+    EXPECT_EQ(mint::ModelConfigService(physical / "state").inspect().config.model, "selected");
+    EXPECT_FALSE(std::filesystem::exists(lexical / "state"));
 }
 
 TEST_F(SharedModelSettings, EditingAnExplicitOverrideSavesSharedWithoutChangingTheOverride) {

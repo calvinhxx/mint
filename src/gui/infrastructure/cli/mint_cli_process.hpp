@@ -2,12 +2,12 @@
 
 #include "application/agent_runtime.hpp"
 #include "infrastructure/cli/mint_cli_command_builder.hpp"
+#include "infrastructure/cli/run_event_stream.hpp"
 
 #include <QByteArray>
 #include <QObject>
 #include <QProcess>
 #include <QProcessEnvironment>
-#include <QTimer>
 
 #include <optional>
 
@@ -41,23 +41,19 @@ class MintCliProcess final : public QObject, public mint::desktop::AgentRuntime 
     void handle_run_finished(int exit_code, QProcess::ExitStatus exit_status);
     void prepare_run();
     void launch_run(const std::filesystem::path& root, const std::vector<std::string>& arguments);
-    void tail_events();
-    void queue_event_read();
     void complete_run();
     bool write_interaction(std::string payload, mint::desktop::RuntimeOperation failure_operation);
     void emit_error(mint::desktop::RuntimeOperation operation, const QString& detail) const;
 
     std::filesystem::path executable_;
     std::filesystem::path project_directory_;
-    std::filesystem::path events_path_;
     std::filesystem::path cancel_file_;
     MintCliCommandBuilder command_builder_;
     mint::desktop::AgentRuntimeCallbacks callbacks_;
     QProcess run_process_;
-    QTimer event_timer_;
+    RunEventStream event_stream_;
     QByteArray standard_output_buffer_;
     QByteArray standard_error_buffer_;
-    QByteArray event_buffer_;
     QByteArray last_diagnostic_;
     std::optional<mint::desktop::TaskResult> final_result_;
     struct ProcessExit {
@@ -66,12 +62,9 @@ class MintCliProcess final : public QObject, public mint::desktop::AgentRuntime 
     };
     std::optional<ProcessExit> pending_exit_;
     std::string final_error_;
-    qint64 event_offset_ = 0;
     bool awaiting_approval_ = false;
     bool run_active_ = false;
-    bool event_read_pending_ = false;
-    bool event_read_queued_ = false;
-    std::size_t event_generation_ = 0;
+    std::size_t callbacks_generation_ = 0;
     std::size_t status_generation_ = 0;
     std::size_t load_generation_ = 0;
 };

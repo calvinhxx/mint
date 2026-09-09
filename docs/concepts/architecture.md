@@ -68,9 +68,6 @@ src/gui/
 
 目录边界也是 CMake target 和自动化测试边界。
 
-`ports` 只有公共头文件，因此直接由 `src/core/CMakeLists.txt` 声明为
-`mint::ports` 接口目标，不保留没有实现文件的 `src/core/ports` 目录。
-
 ```mermaid
 flowchart LR
     cli["src/cli"] --> core["src/core"]
@@ -82,33 +79,11 @@ flowchart LR
     adapters --> cliProcess["mint CLI process"]
 ```
 
-桌面界面不链接或复制 Agent Loop，也不解析 JSON。`TaskWorkspaceController` 通过 `MintCliProcess` 维护任务状态；`ModelSettingsController` 通过异步共享配置适配器维护公开的模型信息，不再单独管理配置文件或向 CLI 注入密钥：
+桌面运行状态由 `TaskRun` 保存，`TaskWorkspaceController` 负责导航和当前视图。切换工作区不会改变运行任务、审批归属或执行权限。CLI 适配器通过 `RunEventStream` 分批读取事件，进程结束后先排空日志，再发布结果。
 
-控制器分别保存执行任务快照与当前浏览会话。运行事件只更新所属任务，切换工作区不改变执行权限或审批归属。CLI 适配器在后台分批读取、解析事件日志，界面模型增量接收；进程结束后先排空尾日志，再发布结构化终态。可恢复的非零退出码仍是任务结果；进程崩溃与缺失结果会提供独立错误说明。
+模型配置只有一个持久化入口 `ModelConfigService`，内部按参数解析、凭据绑定和存储事务分开。CLI 直接调用服务；GUI 的适配器负责异步调度和外部修改通知，同步存储操作不持有界面对象。保存使用版本检查，正在运行的任务保留启动时的配置快照。覆盖与迁移规则见[模型配置](../reference/model-providers.md)。
 
-启动入口先确定本次设置目录，再读取其中的工作区目录和上次选中项。显式 `--root` 优先；未指定时仅恢复有效历史路径，不把 GUI 进程的当前目录当作项目。工作区目录不从其他 QSettings 组织或系统域回退读取；没有有效工作区时保留空导航状态，直到用户选择文件夹。
-
-```mermaid
-flowchart LR
-    user["用户"] --> gui["FluentQt views"]
-    gui --> controller["TaskWorkspaceController"]
-    controller --> port["AgentRuntime"]
-    gui --> modelSettings["ModelSettingsController"]
-    modelSettings --> modelPort["ModelSettingsRuntime"]
-    process["MintCliProcess"] --> port
-    settings["异步共享配置适配器"] --> modelPort
-    settings --> service["ModelConfigService"]
-    process --> protocol["CLI protocol adapter"]
-    protocol --> cli["mint CLI"]
-    cli --> agent["Agent Loop"]
-    cli --> service
-    cli --> state["任务状态与 events.jsonl"]
-    state --> protocol
-```
-
-`src/gui/app/gui_main.cpp` 是桌面组合根。语言、主题、工作区目录和任务置顶、归档状态仍交给 QSettings；模型配置不再属于 GUI 偏好。`core/infrastructure/settings/ModelConfigService` 是 GUI、CLI 唯一的模型文件读写入口，统一负责校验、旧配置迁移、私有文件权限、跨进程锁、版本冲突和原子提交。`model.json` 保存公开配置与不透明密钥引用，`credentials.json` 保存 endpoint/协议绑定的密钥。
-
-GUI 的设置适配器在后台线程调用同一个服务，并监听外部修改；未保存草稿不会静默覆盖新版本。保存未完成或旧配置迁移尚未解决时，控制器拒绝新的真实模型执行，浏览和正在运行的任务不受影响。CLI 的 `config` 命令直接调用服务，任务启动时只读取配置快照，不承担迁移。默认不发现或导入工作区中的 `config.json`；已有共享配置时，旧文件的替换导入必须明确指定并通过版本检查。GUI 升级保留原先明确选择的配置来源，成功导入或用户明确解决冲突后才清除旧指针，不会静默改用另一默认模型。显式 `--config` 是单次覆盖，不更新共享默认值；GUI 保存成功会清除该窗口的覆盖并采用共享配置。密钥不会进入 UI 状态、普通偏好、模型消息、工具子进程或命令参数。models.dev 目录仍未接入。
+工作区、主题等界面偏好保存在 QSettings，与模型配置和密钥分开。GUI 启动优先采用显式 `--root`，否则恢复有效的历史选择；没有有效目录时显示空导航。
 
 `tests/cmake` 中的架构契约会检查依赖方向、终端输出边界和模块目录，防止实现重新堆回聚合文件夹。
 

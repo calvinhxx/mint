@@ -2,11 +2,14 @@
 #include "application/task_workspace_controller.hpp"
 #include "infrastructure/cli/mint_cli_command_builder.hpp"
 #include "infrastructure/cli/mint_cli_process.hpp"
+#include "infrastructure/cli/run_event_stream.hpp"
 #include "infrastructure/settings/shared_model_settings_runtime.hpp"
 
 #include "mint/domain/model.hpp"
 #include "mint/infrastructure/model_config_service.hpp"
 
+#include <QCoreApplication>
+#include <QDeadlineTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonDocument>
@@ -15,6 +18,7 @@
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QThread>
 #include <QThreadPool>
 #include <QTimer>
 
@@ -23,6 +27,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -159,6 +164,349 @@ TEST(DesktopProcess, LongEventHistoryYieldsToTheUiAndDrainsBeforeTheTerminalResu
     EXPECT_GT(heartbeat_ticks, first_batch_tick + 1);
     EXPECT_EQ(last_sequence, 8193U);
 }
+
+TEST(DesktopProcess, EventStreamPreservesLongRecordsAndDrainsTheUnterminatedTail) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    QFile file(workspace.filePath(QStringLiteral("events.jsonl")));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    for (int sequence = 1; sequence <= 128; ++sequence) {
+        ASSERT_GT(file.write("{\"seq\":" + QByteArray::number(sequence) +
+                             ",\"type\":\"tool_completed\"}\n"),
+                  0);
+    }
+    const QByteArray evidence(3 * 64 * 1024 + 17, 'x');
+    const auto long_record = QByteArray("{\"seq\":129,\"type\":\"tool_completed\",\"data\":") +
+                             "{\"unified_diff\":\"" + evidence + "\"}}\n";
+    ASSERT_EQ(file.write(long_record), long_record.size());
+    ASSERT_GT(file.write("malformed record\n\n"), 0);
+    ASSERT_GT(file.write("{\"seq\":130,\"type\":\"task_finished\","
+                         "\"data\":{\"status\":\"completed\"}}"),
+              0);
+    file.close();
+
+    std::vector<mint::desktop::RunEvent> received;
+    std::size_t maximum_batch = 0;
+    int heartbeat_ticks = 0;
+    int first_batch_tick = 0;
+    int drained = 0;
+    QTimer heartbeat;
+    QObject::connect(&heartbeat, &QTimer::timeout, [&] { ++heartbeat_ticks; });
+    heartbeat.start(0);
+    mint::infrastructure::desktop::RunEventStream stream(
+        [&](std::vector<mint::desktop::RunEvent> events) {
+            EXPECT_EQ(drained, 0);
+            if (received.empty()) {
+                first_batch_tick = heartbeat_ticks;
+            }
+            maximum_batch = std::max(maximum_batch, events.size());
+            received.insert(received.end(), std::make_move_iterator(events.begin()),
+                            std::make_move_iterator(events.end()));
+        },
+        [&] { ++drained; });
+    stream.open(path_from_qstring(file.fileName()));
+    stream.drain();
+    ASSERT_TRUE(QTest::qWaitFor([&] { return drained != 0; }, 10'000));
+    ASSERT_EQ(received.size(), 130U);
+    for (std::size_t index = 0; index < received.size(); ++index) {
+        EXPECT_EQ(received[index].sequence, index + 1);
+    }
+    EXPECT_EQ(received[128].evidence, evidence.toStdString());
+    EXPECT_EQ(received.back().status, "completed");
+    EXPECT_LE(maximum_batch, 128U);
+    EXPECT_GT(heartbeat_ticks, first_batch_tick + 1);
+    EXPECT_EQ(drained, 1);
+}
+
+TEST(DesktopProcess, EventStreamReopeningDiscardsAnOutstandingReadAndItsPartialRecord) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    QFile previous(workspace.filePath(QStringLiteral("previous.jsonl")));
+    ASSERT_TRUE(previous.open(QIODevice::WriteOnly));
+    ASSERT_GT(previous.write("{\"seq\":1,\"type\":\"tool_completed\"}\n{\"seq\":2"), 0);
+    previous.close();
+    QFile current(workspace.filePath(QStringLiteral("current.jsonl")));
+    ASSERT_TRUE(current.open(QIODevice::WriteOnly));
+    ASSERT_GT(current.write("{\"seq\":101,\"type\":\"tool_completed\"}"), 0);
+    current.close();
+
+    std::vector<std::size_t> sequences;
+    int drained = 0;
+    mint::infrastructure::desktop::RunEventStream stream(
+        [&](std::vector<mint::desktop::RunEvent> events) {
+            for (const auto& event : events) {
+                sequences.push_back(event.sequence);
+            }
+        },
+        [&] { ++drained; });
+    stream.open(path_from_qstring(previous.fileName()));
+    stream.open(path_from_qstring(current.fileName()));
+    stream.drain();
+    ASSERT_TRUE(QTest::qWaitFor([&] { return drained != 0; }));
+    QThreadPool::globalInstance()->waitForDone();
+    QCoreApplication::processEvents();
+    EXPECT_EQ(sequences, (std::vector<std::size_t>{101}));
+    EXPECT_EQ(drained, 1);
+}
+
+TEST(DesktopProcess, FirstEventBatchCanResetTheStreamAndSuppressItsRemainingDrain) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    QFile file(workspace.filePath(QStringLiteral("events.jsonl")));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    for (int sequence = 1; sequence <= 257; ++sequence) {
+        ASSERT_GT(file.write("{\"seq\":" + QByteArray::number(sequence) +
+                             ",\"type\":\"tool_completed\"}\n"),
+                  0);
+    }
+    file.close();
+
+    std::size_t received = 0;
+    int drained = 0;
+    mint::infrastructure::desktop::RunEventStream stream(
+        [&](std::vector<mint::desktop::RunEvent> events) {
+            received += events.size();
+            stream.reset();
+        },
+        [&] { ++drained; });
+    stream.open(path_from_qstring(file.fileName()));
+    stream.drain();
+    ASSERT_TRUE(QTest::qWaitFor([&] { return received != 0; }));
+    QThreadPool::globalInstance()->waitForDone();
+    QCoreApplication::processEvents();
+    EXPECT_EQ(received, 128U);
+    EXPECT_EQ(drained, 0);
+}
+
+TEST(DesktopProcess, FirstEventCallbackCanClearSubscriptionsWithoutDeliveringTheRestOfTheBatch) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    MintCliProcess process(std::filesystem::path(MINT_TEST_PROCESS_FIXTURE_PATH));
+    std::size_t received = 0;
+    process.set_callbacks({.event_received = [&](mint::desktop::RunEvent) {
+        ++received;
+        process.set_callbacks({});
+    }});
+    process.start_task({.root = path_from_qstring(workspace.path()), .question = "long_events"});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return !process.running(); }, 15'000));
+    EXPECT_EQ(received, 1U);
+}
+
+TEST(DesktopProcess, RebindingFromTheFirstEventDoesNotGiveTheOldBatchToTheNewSubscriber) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    MintCliProcess process(std::filesystem::path(MINT_TEST_PROCESS_FIXTURE_PATH));
+    int initial_calls = 0;
+    std::vector<std::size_t> later_sequences;
+    bool finished = false;
+    process.set_callbacks({.event_received = [&](mint::desktop::RunEvent event) {
+        ++initial_calls;
+        EXPECT_EQ(event.sequence, 1U);
+        process.set_callbacks({
+            .event_received =
+                [&](mint::desktop::RunEvent later) { later_sequences.push_back(later.sequence); },
+            .run_finished = [&](mint::desktop::TaskResult) { finished = true; },
+        });
+    }});
+    process.start_task({.root = path_from_qstring(workspace.path()), .question = "long_events"});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return finished; }, 15'000));
+    EXPECT_EQ(initial_calls, 1);
+    ASSERT_FALSE(later_sequences.empty());
+    EXPECT_GT(later_sequences.front(), 2U);
+    EXPECT_EQ(later_sequences.back(), 8193U);
+}
+
+class DesktopProcessSynchronousEventDestruction : public testing::TestWithParam<bool> {};
+
+TEST_P(DesktopProcessSynchronousEventDestruction, FirstCallbackCanDestroyTheRuntime) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    auto process =
+        std::make_unique<MintCliProcess>(std::filesystem::path(MINT_TEST_PROCESS_FIXTURE_PATH));
+    const QPointer<MintCliProcess> lifetime(process.get());
+    std::size_t received = 0;
+    mint::desktop::AgentRuntimeCallbacks callbacks;
+    if (GetParam()) {
+        callbacks.events_received = [&](std::vector<mint::desktop::RunEvent> events) {
+            received += events.size();
+            process.reset();
+        };
+    } else {
+        callbacks.event_received = [&](mint::desktop::RunEvent) {
+            ++received;
+            process.reset();
+        };
+    }
+    process->set_callbacks(std::move(callbacks));
+    process->start_task({.root = path_from_qstring(workspace.path()), .question = "long_events"});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return lifetime.isNull(); }, 15'000));
+    QThreadPool::globalInstance()->waitForDone();
+    QCoreApplication::processEvents();
+    EXPECT_GT(received, 0U);
+    EXPECT_LE(received, GetParam() ? 128U : 1U);
+}
+
+INSTANTIATE_TEST_SUITE_P(BatchAndSingleEvent, DesktopProcessSynchronousEventDestruction,
+                         testing::Bool());
+
+class DesktopProcessSynchronousInteractionDestruction : public testing::TestWithParam<const char*> {
+};
+
+TEST_P(DesktopProcessSynchronousInteractionDestruction, TaskReadyCanDestroyTheRuntime) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    auto process =
+        std::make_unique<MintCliProcess>(std::filesystem::path(MINT_TEST_PROCESS_FIXTURE_PATH));
+    const QPointer<MintCliProcess> lifetime(process.get());
+    int ready_calls = 0;
+    int later_callbacks = 0;
+    process->set_callbacks({
+        .task_ready =
+            [&](std::string id) {
+                EXPECT_EQ(id, "fixture-task");
+                ++ready_calls;
+                process.reset();
+            },
+        .approval_requested = [&](mint::desktop::ApprovalRequest) { ++later_callbacks; },
+        .run_finished = [&](mint::desktop::TaskResult) { ++later_callbacks; },
+        .error = [&](RuntimeFailure) { ++later_callbacks; },
+    });
+    process->start_task({.root = path_from_qstring(workspace.path()), .question = GetParam()});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return lifetime.isNull(); }));
+    QCoreApplication::processEvents();
+    EXPECT_EQ(ready_calls, 1);
+    EXPECT_EQ(later_callbacks, 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(BufferedAndUnterminated, DesktopProcessSynchronousInteractionDestruction,
+                         testing::Values("multiple_interactions", "unterminated_interaction"));
+
+TEST(DesktopProcess, ExitedChildDeliversBufferedInteractionsBeforeCompletionOrCallbackDestruction) {
+    for (const bool destroy_on_approval : {false, true}) {
+        SCOPED_TRACE(destroy_on_approval);
+        QTemporaryDir workspace;
+        ASSERT_TRUE(workspace.isValid());
+        auto process =
+            std::make_unique<MintCliProcess>(std::filesystem::path(MINT_TEST_PROCESS_FIXTURE_PATH));
+        const QPointer<MintCliProcess> lifetime(process.get());
+        std::vector<std::string> delivered;
+        bool finished = false;
+        process->set_callbacks({
+            .task_ready =
+                [&](std::string id) {
+                    EXPECT_EQ(id, "fixture-task");
+                    delivered.push_back("ready");
+                },
+            .approval_requested =
+                [&](mint::desktop::ApprovalRequest request) {
+                    EXPECT_EQ(request.program, "fixture");
+                    delivered.push_back("approval");
+                    if (destroy_on_approval) {
+                        process.reset();
+                    }
+                },
+            .run_finished =
+                [&](mint::desktop::TaskResult result) {
+                    EXPECT_EQ(result.status, "completed");
+                    delivered.push_back("finished");
+                    finished = true;
+                },
+            .error = [&](RuntimeFailure failure) { ADD_FAILURE() << failure.detail; },
+        });
+        process->start_task(
+            {.root = path_from_qstring(workspace.path()), .question = "exited_interactions"});
+
+        // EN: Let the child flush and exit while the UI has not handled any process notification.
+        // ZH-CN: 暂不处理界面事件，让子进程先写完输出并退出，使交互与退出通知同时积压。
+        const auto marker = workspace.filePath(QStringLiteral("fixture-exit-ready"));
+        const QDeadlineTimer deadline(5'000);
+        while (!QFile::exists(marker) && !deadline.hasExpired()) {
+            QThread::msleep(1);
+        }
+        ASSERT_TRUE(QFile::exists(marker));
+        QThread::msleep(20);
+        EXPECT_TRUE(delivered.empty());
+        ASSERT_TRUE(QTest::qWaitFor([&] { return lifetime.isNull() || finished; }));
+        QCoreApplication::processEvents();
+        EXPECT_EQ(delivered, destroy_on_approval
+                                 ? (std::vector<std::string>{"ready", "approval"})
+                                 : (std::vector<std::string>{"ready", "approval", "finished"}));
+        EXPECT_EQ(lifetime.isNull(), destroy_on_approval);
+    }
+}
+
+TEST(DesktopProcess, TerminalCallbackCanDestroyTheRuntime) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    auto process =
+        std::make_unique<MintCliProcess>(std::filesystem::path(MINT_TEST_PROCESS_FIXTURE_PATH));
+    const QPointer<MintCliProcess> lifetime(process.get());
+    int finished_calls = 0;
+    process->set_callbacks({.run_finished = [&](mint::desktop::TaskResult result) {
+        EXPECT_EQ(result.status, "completed");
+        ++finished_calls;
+        process.reset();
+    }});
+    process->start_task({.root = path_from_qstring(workspace.path()), .question = "completed"});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return lifetime.isNull(); }));
+    QCoreApplication::processEvents();
+    EXPECT_EQ(finished_calls, 1);
+}
+
+TEST(DesktopProcess, FailedRunStartCallbackCanDestroyTheRuntime) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    auto process = std::make_unique<MintCliProcess>(
+        path_from_qstring(workspace.filePath(QStringLiteral("missing-mint"))));
+    const QPointer<MintCliProcess> lifetime(process.get());
+    int error_calls = 0;
+    process->set_callbacks({.error = [&](RuntimeFailure failure) {
+        EXPECT_EQ(failure.operation, RuntimeOperation::task_run);
+        EXPECT_FALSE(process->running());
+        ++error_calls;
+        process.reset();
+    }});
+    process->start_task({.root = path_from_qstring(workspace.path()), .question = "Never started"});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return lifetime.isNull(); }));
+    QCoreApplication::processEvents();
+    EXPECT_EQ(error_calls, 1);
+}
+
+class DesktopProcessSynchronousQueryDestruction : public testing::TestWithParam<bool> {};
+
+TEST_P(DesktopProcessSynchronousQueryDestruction, QueryCompletionCanDestroyTheRuntime) {
+    QTemporaryDir workspace;
+    ASSERT_TRUE(workspace.isValid());
+    const auto executable =
+        GetParam() ? path_from_qstring(workspace.filePath(QStringLiteral("missing-mint")))
+                   : std::filesystem::path(MINT_TEST_PROCESS_FIXTURE_PATH);
+    auto process = std::make_unique<MintCliProcess>(executable);
+    const QPointer<MintCliProcess> lifetime(process.get());
+    int loaded_calls = 0;
+    int error_calls = 0;
+    process->set_callbacks({
+        .tasks_loaded =
+            [&](std::vector<TaskSummary> tasks, std::filesystem::path) {
+                EXPECT_TRUE(tasks.empty());
+                ++loaded_calls;
+                process.reset();
+            },
+        .error =
+            [&](RuntimeFailure failure) {
+                EXPECT_EQ(failure.operation, RuntimeOperation::task_history);
+                ++error_calls;
+                process.reset();
+            },
+    });
+    process->refresh_tasks(path_from_qstring(workspace.path()), "en");
+    ASSERT_TRUE(QTest::qWaitFor([&] { return lifetime.isNull(); }));
+    QCoreApplication::processEvents();
+    EXPECT_EQ(loaded_calls, GetParam() ? 0 : 1);
+    EXPECT_EQ(error_calls, GetParam() ? 1 : 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(FinishedAndFailedToStart, DesktopProcessSynchronousQueryDestruction,
+                         testing::Bool());
 
 TEST(DesktopProcess, ANewRunCannotReceiveQueuedFramesFromThePreviousRun) {
     QTemporaryDir workspace;

@@ -101,7 +101,7 @@ void verify_file(std::FILE* stream, bool require_private) {
         private_path::secure_open_file({}, stream);
     }
 #else
-    struct stat info{};
+    struct stat info = {};
     if (::fstat(::fileno(stream), &info) != 0 || !S_ISREG(info.st_mode) || info.st_nlink != 1 ||
         (require_private &&
          (info.st_uid != ::geteuid() || (info.st_mode & (S_IRWXG | S_IRWXO)) != 0))) {
@@ -197,8 +197,17 @@ void write_private_file(std::FILE* stream, std::string_view text) {
 
 } // namespace
 
+void scrub_memory(char* value, std::size_t bytes) noexcept {
+    // EN: Volatile writes keep owned secret erasure observable under optimization.
+    // ZH-CN: 使用 volatile 写入，避免优化器省略持有密钥的擦除操作。
+    volatile char* cursor = value;
+    while (bytes-- != 0) {
+        *cursor++ = '\0';
+    }
+}
+
 void scrub(std::string& value) noexcept {
-    std::fill(value.begin(), value.end(), '\0');
+    scrub_memory(value.data(), value.size());
 }
 
 void scrub(Json& document) noexcept {
@@ -261,21 +270,28 @@ std::optional<Document> read_document(const std::filesystem::path& path, bool re
         file_error();
     }
     verify_file(stream.get(), require_private);
+    if (std::setvbuf(stream.get(), nullptr, _IONBF, 0) != 0) {
+        file_error();
+    }
     std::string source;
-    struct Erase {
-        std::string& source;
-        ~Erase() {
-            scrub(source);
-        }
-    } erase{source};
+    const SecretGuard erase(source);
+    // EN: The bounded reserve avoids leaving secret fragments in reallocated buffers.
+    // ZH-CN: 按文件上限预留空间，避免扩容释放的缓冲区残留密钥片段。
+    source.reserve(max_document_bytes);
     std::array<char, 8192> buffer{};
+    struct EraseBuffer {
+        std::array<char, 8192>& value;
+        ~EraseBuffer() {
+            scrub_memory(value.data(), value.size());
+        }
+    } erase_buffer{buffer};
     for (;;) {
         const auto bytes = std::fread(buffer.data(), 1, buffer.size(), stream.get());
         if (source.size() + bytes > max_document_bytes) {
             document_error();
         }
         source.append(buffer.data(), bytes);
-        std::fill(buffer.begin(), buffer.end(), '\0');
+        scrub_memory(buffer.data(), buffer.size());
         if (bytes < buffer.size()) {
             if (std::ferror(stream.get()) != 0) {
                 file_error();
@@ -283,11 +299,12 @@ std::optional<Document> read_document(const std::filesystem::path& path, bool re
             break;
         }
     }
-    auto document = Json::parse(source, nullptr, false);
-    if (document.is_discarded() || !document.is_object()) {
+    Document document{Json::parse(source, nullptr, false), {}};
+    if (!document.value.is_object()) {
         document_error();
     }
-    return Document{std::move(document), revision_for(source)};
+    document.revision = revision_for(source);
+    return document;
 }
 
 std::string unique_reference() {
@@ -327,17 +344,13 @@ void write_document(const std::filesystem::path& path, const Json& document) {
     }
     remove.created = true;
     private_path::secure_open_file(temporary, stream.get());
-    std::string source = document.dump(2) + '\n';
-    struct Erase {
-        std::string& source;
-        ~Erase() {
-            scrub(source);
-        }
-    } erase{source};
-    if (source.size() > max_document_bytes) {
+    auto source = document.dump(2);
+    const SecretGuard erase(source);
+    if (source.size() >= max_document_bytes) {
         document_error();
     }
     write_private_file(stream.get(), source);
+    write_private_file(stream.get(), "\n");
     flush_file(stream.get());
     stream.reset();
     (void)checked_path(destination);

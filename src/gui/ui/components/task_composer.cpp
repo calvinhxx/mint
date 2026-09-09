@@ -68,6 +68,14 @@ TaskComposer::TaskComposer(QWidget* parent) : QWidget(parent) {
     retranslate();
 }
 
+TaskComposer::~TaskComposer() {
+    // EN: QWidget can change child focus before QObject disconnects these callbacks.
+    // ZH-CN: QWidget 销毁子控件时可能改变焦点，此时 QObject 尚未断开这些回调。
+    QObject::disconnect(qApp, nullptr, this, nullptr);
+    QObject::disconnect(input_, nullptr, this, nullptr);
+    QObject::disconnect(action_, nullptr, this, nullptr);
+}
+
 void TaskComposer::set_running(bool running) {
     running_ = running;
     input_->setEnabled(workspace_available_ && !running);
@@ -89,8 +97,9 @@ void TaskComposer::set_workspace_available(bool available) {
 }
 
 void TaskComposer::set_model_unavailable_reason(QString reason) {
-    if (model_unavailable_reason_ == reason)
+    if (model_unavailable_reason_ == reason) {
         return;
+    }
     model_unavailable_reason_ = std::move(reason);
     retranslate();
 }

@@ -294,7 +294,6 @@ ModelProviderConfig parse_model_provider_config(const Json& document,
     config.adapter = optional_adapter(document, config_path);
     config.provider = optional_provider(document, config_path);
     config.api_url = optional_endpoint(document, config_path);
-    config.api_key = optional_string(document, "api_key", config_path);
     config.api_key_env = optional_string(document, "api_key_env", config_path);
     config.model = required_string(document, "model", config_path);
     constexpr auto max_long = std::numeric_limits<long>::max();
@@ -336,6 +335,21 @@ ModelProviderConfig parse_model_provider_config(const Json& document,
     config.stream = optional_boolean(document, "stream", config.stream, config_path);
     config.capabilities = optional_capabilities(document, config.adapter, config_path);
     config.response_limits = optional_response_limits(document, config_path);
+    // EN: Copy the key only after ordinary fields validate, and erase it if later checks fail.
+    // ZH-CN: 普通字段校验通过后才复制密钥，后续检查失败时擦除该副本。
+    struct EraseKeyOnFailure {
+        std::string& value;
+        bool released = false;
+        ~EraseKeyOnFailure() {
+            if (!released) {
+                volatile char* bytes = value.data();
+                for (std::size_t index = 0; index < value.size(); ++index) {
+                    bytes[index] = '\0';
+                }
+            }
+        }
+    } erase_key{config.api_key};
+    config.api_key = optional_string(document, "api_key", config_path);
     try {
         model_detail::normalize_model_provider_endpoint(config);
         model_detail::validate_model_provider_credentials(config);
@@ -345,6 +359,7 @@ ModelProviderConfig parse_model_provider_config(const Json& document,
             message(Message::model_config_invalid, {arg(Placeholder::path, config_path.string()),
                                                     arg(Placeholder::error, error.what())}));
     }
+    erase_key.released = true;
     return config;
 }
 

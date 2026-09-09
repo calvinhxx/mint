@@ -2,6 +2,7 @@ add_library(mint_gui_application STATIC
     model_settings_controller.cpp
     preferences/preferences_controller.cpp
     task_organization.cpp
+    task_run.cpp
     task_workspace_controller.cpp
     workspaces/workspace_catalog.cpp
 )

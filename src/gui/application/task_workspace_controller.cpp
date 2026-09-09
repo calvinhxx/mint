@@ -41,15 +41,6 @@ void preserve_organization_aliases(const WorkspaceOptions& options) {
     }
 }
 
-void append_retained_events(std::vector<RunEvent>& target, const std::vector<RunEvent>& events) {
-    const auto count = std::min(events.size(), maximum_retained_run_events);
-    const auto removed = target.size() + count > maximum_retained_run_events
-                             ? target.size() + count - maximum_retained_run_events
-                             : 0;
-    target.erase(target.begin(), target.begin() + static_cast<std::ptrdiff_t>(removed));
-    target.insert(target.end(), events.end() - static_cast<std::ptrdiff_t>(count), events.end());
-}
-
 } // namespace
 
 const TaskSummary* TaskWorkspaceState::current_task() const noexcept {
@@ -179,8 +170,9 @@ void TaskWorkspaceController::set_config(std::filesystem::path config) {
 
 void TaskWorkspaceController::set_model_execution_available(bool available) {
     const auto allowed = options_.demo || available;
-    if (state_.model_execution_available == allowed)
+    if (state_.model_execution_available == allowed) {
         return;
+    }
     // EN: Model selection gates only new execution; active requests keep their startup snapshot.
     // ZH-CN: 模型选择仅限制新执行，现有请求保留启动快照。
     state_.model_execution_available = allowed;
@@ -253,12 +245,12 @@ bool TaskWorkspaceController::select_task(std::size_t index) {
 }
 
 bool TaskWorkspaceController::select_task(std::string_view task_id) {
-    const auto index = find_task(std::string(task_id));
+    const auto index = find_task(task_id);
     return index.has_value() && select_task(*index);
 }
 
 bool TaskWorkspaceController::toggle_task_pin(std::string_view task_id) {
-    if (!find_task(std::string(task_id)).has_value() || !task_organizer_.toggle_pin(task_id)) {
+    if (!find_task(task_id).has_value() || !task_organizer_.toggle_pin(task_id)) {
         return false;
     }
     sync_task_organization();
@@ -269,7 +261,7 @@ bool TaskWorkspaceController::toggle_task_pin(std::string_view task_id) {
 bool TaskWorkspaceController::archive_task(std::string_view task_id) {
     if ((state_.running && state_.root == state_.running_root &&
          task_id == state_.running_task_id) ||
-        !find_task(std::string(task_id)).has_value() || !task_organizer_.archive(task_id)) {
+        !find_task(task_id).has_value() || !task_organizer_.archive(task_id)) {
         return false;
     }
     const auto archived_current_task = std::string_view(state_.task_id) == task_id;
@@ -283,7 +275,7 @@ bool TaskWorkspaceController::archive_task(std::string_view task_id) {
 }
 
 bool TaskWorkspaceController::unarchive_task(std::string_view task_id) {
-    if (!find_task(std::string(task_id)).has_value() || !task_organizer_.unarchive(task_id)) {
+    if (!find_task(task_id).has_value() || !task_organizer_.unarchive(task_id)) {
         return false;
     }
     const auto unarchived_current_task = std::string_view(state_.task_id) == task_id;
@@ -311,28 +303,20 @@ bool TaskWorkspaceController::start(std::string question) {
         question.empty()) {
         return false;
     }
-    if (state_.showing_archived_tasks) {
-        state_.showing_archived_tasks = false;
+    RunRequest request{.root = state_.root,
+                       .config = options_.config,
+                       .question = std::move(question),
+                       .language = options_.language,
+                       .demo = options_.demo};
+    const auto was_showing_archived_tasks = std::exchange(state_.showing_archived_tasks, false);
+    state_.loading_tasks = false;
+    run_.emplace(request.root, std::string{}, request.question);
+    show_run();
+    if (was_showing_archived_tasks) {
         notify(WorkspaceChange::tasks);
     }
-    state_.selected_task.reset();
-    state_.task_id.clear();
-    state_.title = question;
-    state_.status = "running";
-    state_.loading_tasks = false;
-    state_.loading_history = false;
-    clear_content();
-    run_ = RunSnapshot{.root = state_.root, .title = question};
-    viewing_run_ = true;
-    keep_empty_selection_ = false;
-    state_.running = true;
-    sync_run_state();
     notify(WorkspaceChange::selection);
-    runtime_.start_task({.root = state_.root,
-                         .config = options_.config,
-                         .question = std::move(question),
-                         .language = options_.language,
-                         .demo = options_.demo});
+    runtime_.start_task(std::move(request));
     return true;
 }
 
@@ -340,26 +324,15 @@ bool TaskWorkspaceController::resume() {
     if (!state_.can_resume()) {
         return false;
     }
-    state_.status = "running";
-    state_.error.clear();
-    state_.approval.reset();
-    state_.result.reset();
-    run_ = RunSnapshot{.root = state_.root,
-                       .task_id = state_.task_id,
-                       .title = state_.title,
-                       .events = state_.events};
-    for (const auto& event : run_->events) {
-        run_->last_event_sequence = std::max(run_->last_event_sequence, event.sequence);
-    }
-    viewing_run_ = true;
-    state_.running = true;
-    sync_run_state();
-    update_run_summary();
-    notify(WorkspaceChange::run_state);
-    runtime_.resume_task({.root = state_.root,
+    ResumeRequest request{.root = state_.root,
                           .config = options_.config,
                           .task_id = state_.task_id,
-                          .language = options_.language});
+                          .language = options_.language};
+    run_.emplace(request.root, request.task_id, state_.title, std::move(state_.events));
+    show_run();
+    update_run_summary();
+    notify(WorkspaceChange::run_state);
+    runtime_.resume_task(std::move(request));
     return true;
 }
 
@@ -370,12 +343,10 @@ void TaskWorkspaceController::resolve_approval(bool approved) {
     if (!runtime_.resolve_approval(approved)) {
         return;
     }
-    state_.approval.reset();
-    state_.status = "running";
-    state_.error.clear();
-    run_->approval.reset();
-    run_->status = state_.status;
-    run_->error.clear();
+    run_->resolve_approval();
+    state_.approval = run_->approval;
+    state_.status = run_->status;
+    state_.error = run_->error;
     sync_run_state();
     update_run_summary();
     notify(WorkspaceChange::approval);
@@ -404,8 +375,7 @@ void TaskWorkspaceController::bind_runtime() {
                  if (!state_.running || !run_.has_value()) {
                      return;
                  }
-                 run_->task_id = std::move(id);
-                 run_->status = "running";
+                 run_->ready(std::move(id));
                  update_run_summary();
                  if (viewing_run_) {
                      state_.task_id = run_->task_id;
@@ -418,7 +388,12 @@ void TaskWorkspaceController::bind_runtime() {
                      refresh();
                  }
              },
-         .event_received = [this](RunEvent event) { accept_event(std::move(event)); },
+         .event_received =
+             [this](RunEvent event) {
+                 std::vector<RunEvent> events;
+                 events.push_back(std::move(event));
+                 accept_events(std::move(events));
+             },
          .events_received =
              [this](std::vector<RunEvent> events) { accept_events(std::move(events)); },
          .approval_requested =
@@ -426,8 +401,7 @@ void TaskWorkspaceController::bind_runtime() {
                  if (!state_.running || !run_.has_value()) {
                      return;
                  }
-                 run_->approval = std::move(request);
-                 run_->status = "waiting";
+                 run_->request_approval(std::move(request));
                  sync_run_state();
                  update_run_summary();
                  if (viewing_run_) {
@@ -469,10 +443,11 @@ void TaskWorkspaceController::clear_selection() {
 }
 
 void TaskWorkspaceController::sync_run_state() {
-    state_.running_root = state_.running && run_.has_value() ? run_->root : std::filesystem::path{};
-    state_.running_task_id = state_.running && run_.has_value() ? run_->task_id : std::string{};
-    state_.running_title = state_.running && run_.has_value() ? run_->title : std::string{};
-    state_.running_status = state_.running && run_.has_value() ? run_->status : std::string{};
+    state_.running = run_.has_value() && run_->running();
+    state_.running_root = state_.running ? run_->root : std::filesystem::path{};
+    state_.running_task_id = state_.running ? run_->task_id : std::string{};
+    state_.running_title = state_.running ? run_->title : std::string{};
+    state_.running_status = state_.running ? run_->status : std::string{};
     state_.selected_task_running = state_.running && viewing_run_;
 }
 
@@ -509,9 +484,7 @@ void TaskWorkspaceController::update_run_summary() {
     task.question = run_->title;
     task.status = run_->status;
     task.completed = run_->status == "completed";
-    task.resumable =
-        !state_.running &&
-        (run_->status == "max_turns" || run_->status == "cancelled" || run_->status == "timed_out");
+    task.resumable = run_->resumable();
 }
 
 void TaskWorkspaceController::sync_task_organization() {
@@ -548,7 +521,7 @@ void TaskWorkspaceController::update_current_workspace_task_counts() {
 
 void TaskWorkspaceController::select_visible_task(std::string_view preferred_task_id) {
     if (!preferred_task_id.empty()) {
-        const auto preferred = find_task(std::string(preferred_task_id));
+        const auto preferred = find_task(preferred_task_id);
         if (preferred.has_value() && is_task_visible(state_.tasks[*preferred])) {
             (void)select_task(*preferred);
             return;
@@ -598,42 +571,22 @@ void TaskWorkspaceController::accept_history(TaskHistory history) {
     notify(WorkspaceChange::content);
 }
 
-void TaskWorkspaceController::accept_event(RunEvent event) {
-    accept_events({std::move(event)});
-}
-
 void TaskWorkspaceController::accept_events(std::vector<RunEvent> events) {
     if (events.empty() || !state_.running || !run_.has_value()) {
         return;
     }
-    // EN: Resumed processes tail the existing log before new records; retain each sequence once.
-    // ZH-CN: 恢复进程会先回放旧日志，再产生新记录；每个序号只保留一次。
-    std::erase_if(events, [this](const RunEvent& event) {
-        if (event.sequence == 0) {
-            return false;
-        }
-        if (event.sequence <= run_->last_event_sequence) {
-            return true;
-        }
-        run_->last_event_sequence = event.sequence;
-        return false;
-    });
-    if (events.empty()) {
+    const auto appended = run_->append_events(std::move(events));
+    if (appended.empty()) {
         return;
     }
-    const auto finished = std::find_if(events.rbegin(), events.rend(), [](const RunEvent& event) {
-        return event.kind == RunEventKind::task_finished;
-    });
-    if (finished != events.rend()) {
-        run_->status = finished->status;
+    if (state_.running_status != run_->status) {
         sync_run_state();
     }
-    append_retained_events(run_->events, events);
     if (!viewing_run_) {
         return;
     }
     state_.status = run_->status;
-    append_retained_events(state_.events, events);
+    append_retained_events(state_.events, appended);
     notify(WorkspaceChange::event_appended);
 }
 
@@ -641,13 +594,7 @@ void TaskWorkspaceController::accept_result(TaskResult result) {
     if (!state_.running || !run_.has_value()) {
         return;
     }
-    if (!result.status.empty()) {
-        run_->status = result.status;
-    }
-    run_->result = std::move(result);
-    run_->approval.reset();
-    run_->error.clear();
-    state_.running = false;
+    run_->finish(std::move(result));
     sync_run_state();
     update_run_summary();
     if (viewing_run_) {
@@ -680,23 +627,21 @@ void TaskWorkspaceController::accept_error(RuntimeFailure failure) {
     if (!state_.running || !run_.has_value()) {
         return;
     }
-    run_->error = std::move(failure.detail);
-    if (failure.operation == RuntimeOperation::task_run) {
-        run_->status = "failed";
-        run_->approval.reset();
-        state_.running = false;
+    const auto operation = failure.operation;
+    run_->fail(std::move(failure));
+    if (operation == RuntimeOperation::task_run) {
         sync_run_state();
         update_run_summary();
     }
     if (viewing_run_) {
         show_run();
         notify(WorkspaceChange::error);
-    } else if (failure.operation == RuntimeOperation::task_run) {
+    } else if (operation == RuntimeOperation::task_run) {
         notify(WorkspaceChange::run_state);
     }
 }
 
-std::optional<std::size_t> TaskWorkspaceController::find_task(const std::string& id) const {
+std::optional<std::size_t> TaskWorkspaceController::find_task(std::string_view id) const {
     if (id.empty()) {
         return std::nullopt;
     }
@@ -716,7 +661,6 @@ bool TaskWorkspaceController::is_task_visible(const TaskSummary& task) const {
 void TaskWorkspaceController::switch_to_root(std::filesystem::path root, TaskOrganizer organizer) {
     selections_[state_.root.generic_string()] = {
         .task_id = state_.task_id, .new_task = keep_empty_selection_, .viewing_run = viewing_run_};
-    const auto running = state_.running;
     const auto model_execution_available = state_.model_execution_available;
     task_organizer_ = std::move(organizer);
     options_.root = std::move(root);
@@ -724,7 +668,6 @@ void TaskWorkspaceController::switch_to_root(std::filesystem::path root, TaskOrg
                                 .workspace_roots = workspace_catalog_.state().roots,
                                 .workspace_task_counts = workspace_catalog_.state().task_counts,
                                 .model_execution_available = model_execution_available};
-    state_.running = running;
     viewing_run_ = false;
     keep_empty_selection_ = false;
     const auto bookmark = selections_.find(state_.root.generic_string());

@@ -113,10 +113,65 @@ TEST_F(ModelConfigServiceTest, NewStateDirectoryAcceptsATrailingSeparatorAndStay
     EXPECT_EQ(service.inspect().revision, saved.revision);
     EXPECT_EQ(service.load_runtime().model, "test-model");
 #if !defined(_WIN32)
-    struct stat info{};
+    struct stat info = {};
     ASSERT_EQ(::stat(state.c_str(), &info), 0);
     EXPECT_EQ(info.st_mode & 0777, 0700);
 #endif
+}
+
+TEST_F(ModelConfigServiceTest, ParentComponentsResolveAfterSymlinksWithoutChangingTheTarget) {
+    const auto lexical = temporary.path() / "lexical";
+    const auto physical = temporary.path() / "physical";
+    std::filesystem::create_directories(lexical);
+    std::filesystem::create_directories(physical / "child");
+    std::error_code error;
+    std::filesystem::create_directory_symlink(physical / "child", lexical / "alias", error);
+    if (error) {
+        GTEST_SKIP() << "Directory symlinks are unavailable";
+    }
+    ModelConfigService selected(lexical / "alias" / ".." / "state");
+    auto change = request();
+    change.api_key = "synthetic-path-key";
+    (void)selected.update(change);
+    EXPECT_TRUE(std::filesystem::exists(physical / "state" / "model.json"));
+    EXPECT_FALSE(std::filesystem::exists(lexical / "state"));
+    EXPECT_EQ(ModelConfigService(physical / "state").load_runtime().api_key, "synthetic-path-key");
+
+    std::filesystem::create_directory_symlink(physical / "state", lexical / "linked-state", error);
+    ASSERT_FALSE(error);
+    ModelConfigService linked_leaf(lexical / "linked-state");
+    expect_error(ModelConfigErrorCode::unavailable, [&] { (void)linked_leaf.load_runtime(); });
+}
+
+TEST_F(ModelConfigServiceTest, EmptyAndEnvironmentProfilesDoNotReadUnreferencedCredentials) {
+    const ScopedEnvironment environment("MINT_TEST_ISOLATED_ENV_KEY", "synthetic-environment-key");
+    (void)service.inspect();
+    write_text(service.credentials_path(), "unrelated invalid credential document");
+    make_private(service.credentials_path());
+    EXPECT_FALSE(service.inspect().configured);
+    write_text(service.config_path(),
+               Json{{"endpoint", "https://model.example/v1/chat/completions"},
+                    {"model", "environment-only"},
+                    {"api_key_env", "MINT_TEST_ISOLATED_ENV_KEY"}}
+                   .dump());
+    make_private(service.config_path());
+    const auto inspected = service.inspect();
+    EXPECT_TRUE(inspected.credential_available);
+    EXPECT_FALSE(inspected.saved_api_key);
+    EXPECT_TRUE(inspected.config.api_key.empty());
+    mint::ModelConfigSnapshot metadata;
+    EXPECT_EQ(service.load_runtime({}, &metadata).api_key_env, "MINT_TEST_ISOLATED_ENV_KEY");
+    EXPECT_EQ(metadata.revision, inspected.revision);
+    EXPECT_EQ(read_text(service.credentials_path()), "unrelated invalid credential document");
+}
+
+TEST_F(ModelConfigServiceTest, ReferencedCredentialsFailClosedWhenTheStoreIsInvalid) {
+    auto change = request();
+    change.api_key = "synthetic-referenced-key";
+    (void)service.update(change);
+    write_text(service.credentials_path(), "invalid referenced credential document");
+    expect_error(ModelConfigErrorCode::invalid_config, [&] { (void)service.inspect(); });
+    expect_error(ModelConfigErrorCode::invalid_config, [&] { (void)service.load_runtime(); });
 }
 
 TEST_F(ModelConfigServiceTest, SaveIsRedactedAndRuntimeHydratesPrivateKey) {
@@ -136,7 +191,7 @@ TEST_F(ModelConfigServiceTest, SaveIsRedactedAndRuntimeHydratesPrivateKey) {
     EXPECT_EQ(credentials.at("schema_version"), 1);
     EXPECT_EQ(credentials.at("credentials").size(), 1);
 #if !defined(_WIN32)
-    struct stat info{};
+    struct stat info = {};
     ASSERT_EQ(::stat(service.config_path().c_str(), &info), 0);
     EXPECT_EQ(info.st_mode & 0777, 0600);
     ASSERT_EQ(::stat(service.credentials_path().c_str(), &info), 0);
@@ -579,7 +634,7 @@ TEST_F(ModelConfigServiceTest, AtomicWritesUseOnePrivateStagingDirectory) {
     }
     EXPECT_EQ(service.load_runtime().api_key, "synthetic-staging-key");
 #if !defined(_WIN32)
-    struct stat info{};
+    struct stat info = {};
     ASSERT_EQ(::stat(staging.c_str(), &info), 0);
     EXPECT_EQ(info.st_mode & 0777, 0700);
 #endif
@@ -653,8 +708,9 @@ TEST_F(ModelConfigServiceTest, ConcurrentImportsCannotReplaceAnExistingConfigura
             (void)ModelConfigService(state).migrate_legacy(path);
             ++imported;
         } catch (const ModelConfigError& error) {
-            if (error.code() != ModelConfigErrorCode::conflict)
+            if (error.code() != ModelConfigErrorCode::conflict) {
                 throw;
+            }
             ++conflicts;
         }
     };
@@ -784,7 +840,9 @@ TEST_F(ModelConfigServiceTest, RejectsPublicStateAndCredentialFilePermissions) {
                                             std::filesystem::perms::others_read);
     expect_error(ModelConfigErrorCode::unavailable, [&] { (void)service.inspect(); });
     std::filesystem::permissions(state, std::filesystem::perms::owner_all);
-    write_text(service.credentials_path(), "{\"schema_version\":1,\"credentials\":{}}");
+    auto change = request();
+    change.api_key = "synthetic-private-credential";
+    (void)service.update(change);
     std::filesystem::permissions(service.credentials_path(),
                                  std::filesystem::perms::owner_read |
                                      std::filesystem::perms::owner_write |
