@@ -443,6 +443,22 @@ TEST(CommandRunnerTest, RefusesCommandWhenProtectedFileHasAdditionalHardLink) {
               "<workspace>");
 }
 
+TEST(CommandRunnerTest, RefusesWorkspaceHardLinksToUnscannedFiles) {
+    TemporaryDirectory temporary;
+    const auto workspace = temporary.path() / "workspace";
+    const auto outside = temporary.path() / "outside.txt";
+    write_text(workspace / "README.md", "visible\n");
+    write_text(outside, "private\n");
+    std::filesystem::create_hard_link(outside, workspace / "notes.txt");
+    const auto program = mint_test_executable_path().generic_string();
+    mint::ToolRegistry tools(workspace, command_options(program));
+    const auto result = run_helper(tools, "command-hardlink", program, {"write", "notes.txt"});
+    EXPECT_FALSE(result.at("ok").get<bool>());
+    EXPECT_EQ(result.at("status"), "workspace_tracking_failed");
+    EXPECT_FALSE(result.contains("exit_code"));
+    EXPECT_EQ(read_text(outside), "private\n");
+}
+
 TEST(CommandRunnerTest, AllowsCommandsWhenOptionalProtectedFilesDoNotExist) {
     TemporaryDirectory temporary;
     const auto workspace = temporary.path() / "workspace";
@@ -496,17 +512,12 @@ TEST(CommandRunnerTest, HardLinkAliasDoesNotInheritExactFileWriteScope) {
                                      command_options(program, true, {"src/allowed.txt"}));
     const auto result = run_helper(command_tools, "command-hardlink-outside-scope", program,
                                    {"write", "README.md"});
-    ASSERT_EQ(result.at("exit_code"), 0) << result.dump(2);
     EXPECT_FALSE(result.at("ok").get<bool>());
-    EXPECT_EQ(result.at("status"), "policy_violation");
-    EXPECT_TRUE(result.at("workspace_changed").get<bool>());
+    EXPECT_FALSE(result.contains("exit_code"));
+    EXPECT_EQ(result.at("status"), "workspace_tracking_failed");
     EXPECT_TRUE(command_tools.workspace_integrity_failed());
-    const auto violation = std::find_if(
-        result.at("changed_files").begin(), result.at("changed_files").end(),
-        [](const mint::Json& entry) {
-            return entry.at("path") == "README.md" && entry.at("status") == "policy_violation";
-        });
-    EXPECT_NE(violation, result.at("changed_files").end());
+    EXPECT_EQ(read_text(readme), "before\n");
+    EXPECT_EQ(read_text(allowed), "before\n");
 }
 
 TEST(CommandRunnerTest, FailsClosedForPermissionOnlyChanges) {

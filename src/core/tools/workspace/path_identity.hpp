@@ -26,4 +26,7 @@ namespace mint::tools::detail {
 [[nodiscard]] bool same_path_entry_identity(const std::filesystem::path& left,
                                             const std::filesystem::path& right);
 
+[[nodiscard]] bool is_entry_within(const std::filesystem::path& root,
+                                   const std::filesystem::path& candidate);
+
 } // namespace mint::tools::detail

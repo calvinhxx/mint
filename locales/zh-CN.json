@@ -139,6 +139,8 @@
     "validation.string": "{context} 字段 {field} 必须是字符串。",
     "validation.unknown_field": "{context} 包含未知字段：{field}。",
     "tools.call.arguments_object": "工具参数必须是 JSON 对象。",
+    "tools.call.cancelled": "任务已取消，工具未执行完成。",
+    "tools.call.timed_out": "已达到时间上限，工具未执行完成。",
     "tools.call.journal_disabled": "变更日志未启用；请由用户使用 --allow-write 显式授权。",
     "tools.call.unknown": "未知工具：{name}。",
     "tools.call.write_disabled": "写入能力未启用；请由用户使用 --allow-write 显式授权。",

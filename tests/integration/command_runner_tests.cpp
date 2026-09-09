@@ -744,9 +744,9 @@ TEST(CommandRunnerTest, EnforcesTaskPolicyAndRecipes) {
     MINT_EXPECT(disabled_budget.max_total_tokens == 0 &&
                     disabled_budget.fingerprint == omitted_budget.fingerprint,
                 "zero disables the task token budget without changing legacy policy identity");
-    expect_failure(
-        [] { (void)mint::parse_task_policy({{"schema_version", 1}, {"max_total_tokens", -1}}); },
-        "task policy rejects negative cumulative token budgets");
+    const mint::Json negative_budget_policy = {{"schema_version", 1}, {"max_total_tokens", -1}};
+    expect_failure([&] { (void)mint::parse_task_policy(negative_budget_policy); },
+                   "task policy rejects negative cumulative token budgets");
     expect_failure(
         [] {
             (void)mint::parse_task_policy(

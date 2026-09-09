@@ -19,9 +19,11 @@ foreach(source IN LISTS production_sources)
     file(READ "${source}" contents)
     string(REGEX MATCH "std::(cin|cout|cerr|clog|wcin|wcout|wcerr|wclog)" stream_usage
                  "${contents}")
-    string(REGEX MATCH "(printf|fprintf|puts|fputs|fwrite)[ \t\r\n]*\\(" stdio_usage
+    string(REGEX MATCH "(^|[^a-zA-Z0-9_])(printf|vprintf|puts|putchar)[ \t\r\n]*\\(" console_usage
                  "${contents}")
-    if(stream_usage OR stdio_usage)
+    string(REGEX MATCH "(fprintf|vfprintf|fputs|fwrite|fputc)[ \t\r\n]*\\([^;]*(stdout|stderr)" stdio_usage
+                 "${contents}")
+    if(stream_usage OR console_usage OR stdio_usage)
         file(RELATIVE_PATH relative "${SOURCE_DIR}" "${source}")
         list(APPEND violations "${relative}")
     endif()

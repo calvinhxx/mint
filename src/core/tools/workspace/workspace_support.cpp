@@ -58,19 +58,6 @@ bool aliases_ignored_directory(const std::filesystem::path& parent,
 
 } // namespace
 
-bool is_entry_within(const std::filesystem::path& root, const std::filesystem::path& candidate) {
-    const auto root_identity = path_entry_identity(root);
-    const auto candidate_identity = path_entry_identity(candidate);
-    auto root_part = root_identity.begin();
-    auto candidate_part = candidate_identity.begin();
-    for (; root_part != root_identity.end(); ++root_part, ++candidate_part) {
-        if (candidate_part == candidate_identity.end() || *root_part != *candidate_part) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool is_ignored_directory(const std::filesystem::path& path) {
     const auto name = path.filename().string();
     if (ignored_directory_names().contains(name) || name.starts_with("cmake-build-")) {
@@ -117,12 +104,11 @@ bool contains_text(std::string_view text, std::string_view query, bool case_sens
            text.end();
 }
 
-std::string shorten_line(std::string line) {
+std::string shorten_line(std::string_view line) {
     if (line.size() > contract::max_search_line_bytes) {
-        line.resize(contract::max_search_line_bytes);
-        line += "...";
+        return std::string(line.substr(0, contract::max_search_line_bytes)) + "...";
     }
-    return line;
+    return std::string(line);
 }
 
 } // namespace mint::tools::detail

@@ -5,6 +5,7 @@
 #include "mint/tools/tool_registry.hpp"
 
 #include "agent/agent_model_summary.hpp"
+#include "agent_test_models.hpp"
 #include "test_workspace.hpp"
 
 #include <cstddef>
@@ -19,20 +20,10 @@
 
 namespace {
 
+using mint::test::model_tool_reply;
 using mint::test::read_text;
 using mint::test::TemporaryDirectory;
 using mint::test::write_text;
-
-mint::ModelReply model_tool_reply(std::string id, std::string name, mint::Json arguments) {
-    mint::Json raw_call = {{"id", id},
-                           {"type", "function"},
-                           {"function", {{"name", name}, {"arguments", arguments.dump()}}}};
-    mint::ModelReply reply;
-    reply.assistant_message = {
-        {"role", "assistant"}, {"content", nullptr}, {"tool_calls", mint::Json::array({raw_call})}};
-    reply.tool_calls.push_back({std::move(id), std::move(name), std::move(arguments)});
-    return reply;
-}
 
 mint::ModelReply with_reported_usage(mint::ModelReply reply, std::size_t total_tokens) {
     reply.usage = {.available = true,

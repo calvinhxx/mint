@@ -40,6 +40,30 @@ std::optional<std::filesystem::path> absolute_normalized(const std::filesystem::
     return absolute.lexically_normal();
 }
 
+std::filesystem::path entry_location(const std::filesystem::path& path) {
+    const auto normalized = absolute_normalized(path);
+    if (!normalized.has_value()) {
+        return path.lexically_normal();
+    }
+    if (*normalized == normalized->root_path()) {
+        return *normalized;
+    }
+    std::error_code error;
+    const auto parent = std::filesystem::weakly_canonical(normalized->parent_path(), error);
+    return error || parent.empty() ? *normalized
+                                   : (parent / normalized->filename()).lexically_normal();
+}
+
+bool has_path_prefix(const std::filesystem::path& root, const std::filesystem::path& candidate) {
+    auto candidate_part = candidate.begin();
+    for (const auto& root_part : root) {
+        if (candidate_part == candidate.end() || root_part != *candidate_part++) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool same_existing_entry(const std::filesystem::path& left, const std::filesystem::path& right) {
 #if defined(_WIN32)
     constexpr DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
@@ -93,12 +117,11 @@ actual_entry_name(const std::filesystem::path& parent, const std::filesystem::pa
         if (entry->path().filename() == requested_name) {
             return requested_name;
         }
-        if (same_existing_entry(candidate, entry->path())) {
-            const auto entry_name = entry->path().filename();
-            if (!spelling_match.has_value() &&
-                ascii_case_equal(requested_name.string(), entry_name.string())) {
-                spelling_match = entry_name;
-            }
+        const auto entry_name = entry->path().filename();
+        if (!spelling_match.has_value() &&
+            ascii_case_equal(requested_name.string(), entry_name.string()) &&
+            same_existing_entry(candidate, entry->path())) {
+            spelling_match = entry_name;
         }
     }
     return error ? std::nullopt : spelling_match;
@@ -120,21 +143,12 @@ std::filesystem::path spelled_path(const std::filesystem::path& normalized) {
 } // namespace
 
 std::filesystem::path path_entry_identity(const std::filesystem::path& path) {
-    const auto normalized = absolute_normalized(path);
-    if (!normalized.has_value()) {
-        return path.lexically_normal();
+    const auto location = entry_location(path);
+    if (location == location.root_path()) {
+        return location;
     }
-    if (*normalized == normalized->root_path()) {
-        return *normalized;
-    }
-
-    std::error_code error;
-    auto parent = std::filesystem::weakly_canonical(normalized->parent_path(), error);
-    if (error || parent.empty()) {
-        parent = normalized->parent_path();
-    }
-    parent = spelled_path(parent.lexically_normal());
-    const auto name = normalized->filename();
+    const auto parent = spelled_path(location.parent_path());
+    const auto name = location.filename();
     const auto candidate = parent / name;
     if (const auto actual = actual_entry_name(parent, candidate, name)) {
         return (parent / *actual).lexically_normal();
@@ -159,12 +173,43 @@ bool same_path_identity(const std::filesystem::path& left, const std::filesystem
     if (error) {
         return path_entry_identity(left) == path_entry_identity(right);
     }
-    return path_entry_identity(resolved_left) == path_entry_identity(resolved_right);
+    return same_path_entry_identity(resolved_left, resolved_right);
 }
 
 bool same_path_entry_identity(const std::filesystem::path& left,
                               const std::filesystem::path& right) {
-    return path_entry_identity(left) == path_entry_identity(right);
+    const auto left_location = entry_location(left);
+    const auto right_location = entry_location(right);
+    if (left_location == right_location) {
+        return true;
+    }
+    if (!ascii_case_equal(left_location.generic_string(), right_location.generic_string())) {
+        return false;
+    }
+    return path_entry_identity(left_location) == path_entry_identity(right_location);
+}
+
+bool is_entry_within(const std::filesystem::path& root, const std::filesystem::path& candidate) {
+    const auto root_location = entry_location(root);
+    const auto candidate_location = entry_location(candidate);
+    auto candidate_part = candidate_location.begin();
+    bool needs_spelling = false;
+    for (const auto& root_part : root_location) {
+        if (candidate_part == candidate_location.end()) {
+            return false;
+        }
+        if (root_part != *candidate_part) {
+            if (!ascii_case_equal(root_part.generic_string(), candidate_part->generic_string())) {
+                return false;
+            }
+            needs_spelling = true;
+        }
+        ++candidate_part;
+    }
+    // EN: Only case aliases need directory enumeration; ordinary paths use component comparisons.
+    // ZH-CN: 只有大小写别名需要枚举目录，普通路径直接按组件比较。
+    return !needs_spelling || has_path_prefix(path_entry_identity(root_location),
+                                              path_entry_identity(candidate_location));
 }
 
 } // namespace mint::tools::detail

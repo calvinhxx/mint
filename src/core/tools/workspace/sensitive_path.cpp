@@ -1,5 +1,6 @@
 #include "sensitive_path.hpp"
 
+#include "file_support.hpp"
 #include "workspace_support.hpp"
 
 #include <algorithm>
@@ -133,7 +134,7 @@ SensitivePathScan scan_sensitive_paths(const std::filesystem::path& root, std::s
             iterator.increment(error);
             continue;
         }
-        if (is_sensitive_path(root, path)) {
+        if (is_sensitive_path(root, path) || has_multiple_hard_links(path)) {
             result.paths.push_back(path);
             if (directory) {
                 iterator.disable_recursion_pending();

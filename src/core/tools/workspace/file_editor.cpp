@@ -9,7 +9,6 @@
 #include "workspace_support.hpp"
 
 #include <fstream>
-#include <iterator>
 #include <stdexcept>
 #include <string>
 
@@ -131,9 +130,11 @@ Json ToolRegistry::apply_patch(const Json& arguments) const {
         return error_result(
             message(Message::tools_patch_open_failed, {arg(Placeholder::path, requested)}));
     }
-    std::string original((std::istreambuf_iterator<char>(input_stream)),
-                         std::istreambuf_iterator<char>());
-    if (!input_stream.eof() && input_stream.fail()) {
+    std::string original(static_cast<std::size_t>(size) + 1, '\0');
+    input_stream.read(original.data(), static_cast<std::streamsize>(original.size()));
+    original.resize(static_cast<std::size_t>(input_stream.gcount()));
+    if (input_stream.bad() || (!input_stream.eof() && input_stream.fail()) ||
+        original.size() > size) {
         return error_result(
             message(Message::tools_patch_read_failed, {arg(Placeholder::path, requested)}));
     }

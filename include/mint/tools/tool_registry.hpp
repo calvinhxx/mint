@@ -92,6 +92,7 @@ class ToolRegistry final : public AgentTools {
     [[nodiscard]] bool is_protected(const std::filesystem::path& path) const;
     [[nodiscard]] bool is_snapshot_entry_protected(const std::filesystem::path& path) const;
     [[nodiscard]] bool is_write_allowed(const std::filesystem::path& path) const;
+    void check_task_control() const;
     [[nodiscard]] Json list_files(const Json& arguments) const;
     [[nodiscard]] Json read_file(const Json& arguments) const;
     [[nodiscard]] Json search_text(const Json& arguments) const;

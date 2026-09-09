@@ -3,8 +3,9 @@
 #include "mint/localization/localization.hpp"
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
-#include <fstream>
+#include <cstdio>
 #include <stdexcept>
 #include <system_error>
 
@@ -40,22 +41,47 @@ void remove_if_present(const std::filesystem::path& path) noexcept {
     std::filesystem::remove(path, ignored);
 }
 
-void write_complete_file(const std::filesystem::path& path, std::string_view content) {
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    if (!output) {
-        throw std::runtime_error(message(Message::tools_file_support_temp_file_failed));
+std::filesystem::path write_temporary_file(const std::filesystem::path& target,
+                                           std::string_view content) {
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        const auto path = unique_sibling_path(target, "tmp");
+#if defined(_WIN32)
+        auto* output = ::_wfopen(path.c_str(), L"wbx");
+#else
+        auto* output = std::fopen(path.c_str(), "wbx");
+#endif
+        if (output == nullptr) {
+            if (errno == EEXIST) {
+                continue;
+            }
+            throw std::runtime_error(message(Message::tools_file_support_temp_file_failed));
+        }
+        // EN: Exclusive creation owns this entry; a failed open must never remove another file.
+        // ZH-CN: 独占创建成功后才拥有此目录项，打开失败时不能删除其他文件。
+        const auto written = std::fwrite(content.data(), 1, content.size(), output);
+        const auto closed = std::fclose(output);
+        if (written != content.size() || closed != 0) {
+            remove_if_present(path);
+            throw std::runtime_error(message(Message::tools_file_support_temp_write_failed));
+        }
+        return path;
     }
-    output.write(content.data(), static_cast<std::streamsize>(content.size()));
-    output.close();
-    if (!output) {
-        throw std::runtime_error(message(Message::tools_file_support_temp_write_failed));
-    }
+    throw std::runtime_error(message(Message::tools_file_support_temp_path_failed));
 }
 
 } // namespace
 
 bool contains_nul(std::string_view data) {
     return data.find('\0') != std::string_view::npos;
+}
+
+bool has_multiple_hard_links(const std::filesystem::path& path) {
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error) {
+        return false;
+    }
+    const auto links = std::filesystem::hard_link_count(path, error);
+    return error || links > 1;
 }
 
 bool is_valid_utf8(std::string_view data) {
@@ -108,13 +134,7 @@ std::string display_path(const std::filesystem::path& root, const std::filesyste
 
 void replace_file_safely(const std::filesystem::path& target, std::string_view content,
                          bool target_exists) {
-    const auto temporary = unique_sibling_path(target, "tmp");
-    try {
-        write_complete_file(temporary, content);
-    } catch (...) {
-        remove_if_present(temporary);
-        throw;
-    }
+    const auto temporary = write_temporary_file(target, content);
 
     if (target_exists) {
         std::error_code permission_error;

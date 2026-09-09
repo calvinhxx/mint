@@ -139,6 +139,8 @@
     "validation.string": "{context} field {field} must be a string.",
     "validation.unknown_field": "{context} contains unknown field: {field}.",
     "tools.call.arguments_object": "Tool arguments must be a JSON object.",
+    "tools.call.cancelled": "Task cancelled; the tool did not complete.",
+    "tools.call.timed_out": "Time limit reached; the tool did not complete.",
     "tools.call.journal_disabled": "The change journal is disabled; the user must explicitly authorize writes with --allow-write.",
     "tools.call.unknown": "Unknown tool: {name}.",
     "tools.call.write_disabled": "Write capability is disabled; the user must explicitly authorize it with --allow-write.",
