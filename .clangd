@@ -1,2 +1,2 @@
 CompileFlags:
-  CompilationDatabase: build/vcpkg-dev
+  CompilationDatabase: build/dev

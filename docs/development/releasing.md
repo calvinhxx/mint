@@ -7,13 +7,13 @@
 ## 本机候选包
 
 ```bash
-cmake --preset vcpkg-release
-cmake --build --preset vcpkg-release
-cpack --config build/vcpkg-release/CPackConfig.cmake
-cmake -DMINT_BUILD_DIR=build/vcpkg-release -P cmake/VerifyPackage.cmake
+cmake --preset release
+cmake --build --preset release
+cpack --config build/release/CPackConfig.cmake
+cmake -DMINT_BUILD_DIR=build/release -P cmake/VerifyPackage.cmake
 ```
 
-归档和 SHA-256 位于 `build/vcpkg-release/packages`。验收会运行 `mint --version` 和中英文帮助，检查 provider、locale、双语 README、文档树与许可证，并执行无密钥配置检查。
+归档和 SHA-256 位于 `build/release/packages`。验收会运行 `mint --version` 和中英文帮助，检查 provider、locale、双语 README、文档树与许可证，并执行无密钥配置检查。
 
 ## 六平台验证
 
@@ -31,10 +31,10 @@ gh workflow run release.yml --ref main
 正式版本只要求一个 provider 同时通过握手和修复 fixture。先复制对应模板到工作区外或 `config.json`，将 `max_retries` 设为 `0`，再运行：
 
 ```bash
-./build/vcpkg-release/mint provider test --config config.json
+./build/release/mint provider test --config config.json
 
 python3 scripts/fixture-regression.py \
-  --mint build/vcpkg-release/mint \
+  --mint build/release/mint \
   --config config.json \
   --fixture tests/fixtures/broken_cpp_project \
   --live \

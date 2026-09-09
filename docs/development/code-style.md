@@ -49,7 +49,7 @@ Doxygen 注释使用相同标记：
 
 ~~~bash
 python3 tests/scripts/comment_language_tests.py .
-ctest --preset vcpkg-dev -R comment_language_contract
+ctest --preset dev -R comment_language_contract
 ~~~
 
 提交前还应运行格式检查和相关测试，完整命令见[构建与测试](testing.md)。

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,11 +25,15 @@ def load_script(filename: str) -> ModuleType:
 
 
 matrix_selector = load_script("select-build-matrix.py")
+matrix_validator = load_script("validate-build-matrix.py")
 whitespace_check = load_script("check-committed-whitespace.py")
 asset_verifier = load_script("verify-release-assets.py")
 
 
 class BuildMatrixTests(unittest.TestCase):
+    def test_matrix_and_shared_presets_are_consistent(self) -> None:
+        self.assertEqual(matrix_validator.validate(), [])
+
     def test_tiers_select_expected_lanes(self) -> None:
         document = matrix_selector.load_matrix(matrix_selector.DEFAULT_MATRIX)
         fast = matrix_selector.select_tier(document, "fast")["include"]
@@ -39,6 +44,57 @@ class BuildMatrixTests(unittest.TestCase):
         self.assertEqual(len(full), 6)
         self.assertEqual(len(release), 6)
         self.assertEqual(len(asset_verifier.expected_assets(document, "1.2.3")), 12)
+
+    def test_workflow_uses_shared_profiles_and_matrix_parameters(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "_native-build.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("cmake --preset dev", workflow)
+        self.assertIn("cmake --preset release", workflow)
+        self.assertIn("matrix.triplet", workflow)
+        self.assertIn("matrix.build_jobs", workflow)
+        self.assertNotIn("matrix.preset", workflow)
+        self.assertNotIn("matrix.release_preset", workflow)
+
+    def test_all_workflows_reference_existing_shared_presets(self) -> None:
+        document = matrix_validator.load_json(ROOT / "CMakePresets.json")
+        names = {
+            kind: matrix_validator.public_names(
+                matrix_validator.named_entries(document, f"{kind}Presets")
+            )
+            for kind in ("configure", "build", "test")
+        }
+        preset_command = re.compile(
+            r"\b(cmake|ctest)[ \t]+([^\r\n]*?)--preset(?:[ \t]+|=)"
+            r"(?:\"([^\"]+)\"|'([^']+)'|([^\s]+))"
+        )
+        workflows = ROOT / ".github" / "workflows"
+        for path in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
+            content = re.sub(r"[\\`]\r?\n[ \t]*", " ", path.read_text(encoding="utf-8"))
+            references = list(preset_command.finditer(content))
+            self.assertEqual(
+                len(references), len(re.findall(r"--preset(?:\s+|=)", content)), path.name
+            )
+            for match in references:
+                executable, arguments, quoted, single_quoted, unquoted = match.groups()
+                kind = "test" if executable == "ctest" else (
+                    "build" if "--build" in arguments.split() else "configure"
+                )
+                preset = quoted or single_quoted or unquoted
+                with self.subTest(workflow=path.name, kind=kind, preset=preset):
+                    self.assertIn(preset, names[kind])
+
+    def test_release_workflow_uses_a_separate_sanitizer_build(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "cmake --preset dev -B build/sanitize -DMINT_ENABLE_SANITIZERS=ON", workflow
+        )
+        self.assertIn("cmake --build build/sanitize --parallel 4", workflow)
+        self.assertIn(
+            "ctest --test-dir build/sanitize --output-on-failure --parallel 4", workflow
+        )
 
     def test_unknown_tier_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown build tier"):

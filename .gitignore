@@ -1,7 +1,11 @@
 /build/
+/.deps/
+/CMakeUserPresets.json
 /vcpkg_installed/
 /cmake-build-*/
 /.cache/
+/.fluentqt/
+/.impeccable/
 __pycache__/
 *.py[cod]
 .qtcreator/

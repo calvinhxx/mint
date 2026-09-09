@@ -102,7 +102,7 @@ MODEL_FIELDS = {
     "response_header_max_request_tokens",
     "request_token_estimate_bytes_per_token",
 }
-OPTIONAL_MODEL_FIELDS = {"cache_hit_rate"}
+OPTIONAL_MODEL_FIELDS = {"cache_hit_rate", "cache_usage_reports"}
 PROVIDER_PROFILE_FIELDS = {
     "id",
     "status",
@@ -158,7 +158,7 @@ USAGE_FIELDS = {
     "total_tokens",
     "cached_tokens",
 }
-OPTIONAL_USAGE_FIELDS = {"cache_hit_rate"}
+OPTIONAL_USAGE_FIELDS = {"cache_hit_rate", "cache_usage_reports"}
 CHECK_FIELDS = {"function_call", "arguments_round_trip", "tool_result_continuation"}
 BOOLEAN_CAPABILITY_FIELDS = CAPABILITY_FIELDS - {"token_limit_parameter"}
 ACCEPTANCE_COUNTER_FIELDS = {
@@ -183,7 +183,7 @@ PROVIDER_NAMES = {
 ADAPTER_NAMES = {"chat_completions", "responses", "anthropic_messages"}
 PROFILE_SOURCES = {"config", "endpoint", "compatibility_default"}
 TOKEN_LIMIT_PARAMETERS = {"max_completion_tokens", "max_tokens", "max_output_tokens"}
-REQUEST_LIMIT_SOURCES = {"automatic", "config", "response_header"}
+REQUEST_LIMIT_SOURCES = {"automatic", "model_profile", "config", "response_header"}
 ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 
 
@@ -259,13 +259,27 @@ def _optional_positive_integer(value: object, label: str) -> int | None:
     return _positive_integer(value, label)
 
 
-def _validate_cache_hit_rate(document: Mapping[str, object], label: str) -> None:
-    if "cache_hit_rate" not in document:
+def _validate_cache_hit_rate(
+    document: Mapping[str, object], label: str, total_calls: object = None
+) -> None:
+    if "cache_hit_rate" not in document and "cache_usage_reports" not in document:
         return
     prompt_tokens = _non_negative_integer(document.get("prompt_tokens"), f"{label} prompt tokens")
     cached_tokens = _non_negative_integer(document.get("cached_tokens"), f"{label} cached tokens")
     _require(cached_tokens <= prompt_tokens, f"{label} cached tokens exceed prompt tokens")
     rate = document.get("cache_hit_rate")
+    if "cache_usage_reports" in document:
+        reports = _non_negative_integer(document.get("cache_usage_reports"), f"{label} cache reports")
+        calls = _non_negative_integer(
+            total_calls if total_calls is not None else document.get("calls"), f"{label} calls"
+        )
+        usage_reports = _non_negative_integer(
+            document.get("usage_reports", document.get("reported_requests")), f"{label} usage reports"
+        )
+        _require(reports <= usage_reports <= calls, f"{label} cache coverage is inconsistent")
+        if reports == 0 or reports != calls:
+            _require(rate is None, f"{label} cache hit rate must be null without complete cache reports")
+            return
     if prompt_tokens == 0:
         _require(rate is None, f"{label} cache hit rate must be null without prompt tokens")
         return
@@ -616,7 +630,7 @@ def _validate_provider(
         _allowed_fields(usage, USAGE_FIELDS | OPTIONAL_USAGE_FIELDS, f"{label} usage")
         for field in USAGE_FIELDS:
             _non_negative_integer(usage.get(field), f"{label} usage {field}")
-        _validate_cache_hit_rate(usage, f"{label} usage")
+        _validate_cache_hit_rate(usage, f"{label} usage", acceptance.get("requests"))
         _require(
             usage.get("reported_requests") <= acceptance.get("requests")
             and usage.get("cached_tokens") <= usage.get("prompt_tokens"),

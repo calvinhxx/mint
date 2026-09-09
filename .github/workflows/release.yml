@@ -52,13 +52,13 @@ jobs:
           runner-arch: ARM64
 
       - name: Configure sanitizer build
-        run: cmake --preset vcpkg-sanitize
+        run: cmake --preset dev -B build/sanitize -DMINT_ENABLE_SANITIZERS=ON
 
       - name: Build sanitizer tests
-        run: cmake --build --preset vcpkg-sanitize
+        run: cmake --build build/sanitize --parallel 4
 
       - name: Run sanitizer tests
-        run: ctest --preset vcpkg-sanitize
+        run: ctest --test-dir build/sanitize --output-on-failure --parallel 4
 
   release-assets:
     name: Validate release assets

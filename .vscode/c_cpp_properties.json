@@ -3,7 +3,7 @@
     {
       "name": "Mint",
       "compileCommands": [
-        "${workspaceFolder}/build/vcpkg-dev/compile_commands.json"
+        "${workspaceFolder}/build/dev/compile_commands.json"
       ]
     }
   ],

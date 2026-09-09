@@ -67,38 +67,38 @@ jobs:
           system-packages: ${{ join(matrix.system_packages, ' ') }}
 
       - name: Configure tests
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset dev -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
 
       - name: Build tests
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: cmake --build --preset dev --parallel ${{ matrix.build_jobs }}
 
       - name: Test
-        run: ctest --preset ${{ matrix.preset }}
+        run: ctest --preset dev --parallel ${{ matrix.build_jobs }}
 
       - name: Check formatting
         if: matrix.id == 'linux-x64'
-        run: cmake --build --preset ${{ matrix.preset }} --target format-check
+        run: cmake --build --preset dev --target format-check --parallel ${{ matrix.build_jobs }}
 
       - name: Configure release package
         if: inputs.packages
-        run: cmake --preset ${{ matrix.release_preset }}
+        run: cmake --preset release -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
 
       - name: Build release package
         if: inputs.packages
-        run: cmake --build --preset ${{ matrix.release_preset }}
+        run: cmake --build --preset release --parallel ${{ matrix.build_jobs }}
 
       - name: Create and verify release package
         if: inputs.packages
         run: |
-          cpack --config build/${{ matrix.release_preset }}/CPackConfig.cmake
-          cmake -DMINT_BUILD_DIR=build/${{ matrix.release_preset }} -P cmake/VerifyPackage.cmake
+          cpack --config build/release/CPackConfig.cmake
+          cmake -DMINT_BUILD_DIR=build/release -P cmake/VerifyPackage.cmake
 
       - name: Upload release package
         if: inputs.packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mint-${{ matrix.id }}
-          path: build/${{ matrix.release_preset }}/packages/mint-*
+          path: build/release/packages/mint-*
           if-no-files-found: error
           compression-level: 0
           retention-days: 7

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that CI lanes and public CMake presets describe the same native builds."""
+"""Validate the native CI matrix and its shared CMake build profiles."""
 
 from __future__ import annotations
 
@@ -20,29 +20,29 @@ REQUIRED_FIELDS = {
     "arch",
     "runner",
     "runner_arch",
-    "preset",
-    "release_preset",
+    "triplet",
+    "build_jobs",
     "tiers",
     "system_packages",
 }
 ALLOWED_TIERS = {"fast", "full", "release"}
 EXPECTED = {
-    ("windows", "x64"): ("Windows", "x64-windows", "X64", "windows-2022", []),
-    ("windows", "arm64"): ("Windows", "arm64-windows", "ARM64", "windows-11-arm", []),
-    ("macos", "x64"): ("Darwin", "x64-osx", "X64", "macos-15-intel", []),
-    ("macos", "arm64"): ("Darwin", "arm64-osx", "ARM64", "macos-15", []),
+    ("windows", "x64"): ("x64-windows", "X64", "windows-2022", 1, []),
+    ("windows", "arm64"): ("arm64-windows", "ARM64", "windows-11-arm", 1, []),
+    ("macos", "x64"): ("x64-osx", "X64", "macos-15-intel", 4, []),
+    ("macos", "arm64"): ("arm64-osx", "ARM64", "macos-15", 4, []),
     ("linux", "x64"): (
-        "Linux",
         "x64-linux",
         "X64",
         "ubuntu-24.04",
+        4,
         ["bubblewrap", "clang-format"],
     ),
     ("linux", "arm64"): (
-        "Linux",
         "arm64-linux",
         "ARM64",
         "ubuntu-24.04-arm",
+        4,
         ["bubblewrap"],
     ),
 }
@@ -67,6 +67,10 @@ def named_entries(document: dict[str, Any], key: str) -> dict[str, dict[str, Any
         for entry in entries
         if isinstance(entry, dict) and isinstance(entry.get("name"), str)
     }
+
+
+def public_names(presets: dict[str, dict[str, Any]]) -> set[str]:
+    return {name for name, preset in presets.items() if preset.get("hidden") is not True}
 
 
 def resolved_cache(
@@ -98,6 +102,57 @@ def resolved_cache(
     return cache
 
 
+def validate_presets(
+    configure_presets: dict[str, dict[str, Any]],
+    build_presets: dict[str, dict[str, Any]],
+    test_presets: dict[str, dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    expected_public = {
+        "configure": ({"dev", "release"}, configure_presets),
+        "build": ({"dev", "release"}, build_presets),
+        "test": ({"dev"}, test_presets),
+    }
+    for kind, (expected, presets) in expected_public.items():
+        actual = public_names(presets)
+        if actual != expected:
+            errors.append(
+                f"public {kind} presets must be exactly: {', '.join(sorted(expected))}"
+            )
+
+    for name in ("dev", "release"):
+        build = build_presets.get(name)
+        if build is None or build.get("configurePreset") != name:
+            errors.append(f"matching build preset is missing for {name!r}")
+
+    dev_test = test_presets.get("dev")
+    if dev_test is None or dev_test.get("configurePreset") != "dev":
+        errors.append("matching test preset is missing for 'dev'")
+    if "release" in test_presets:
+        errors.append("release must not have a test preset")
+
+    if "dev" in configure_presets:
+        cache = resolved_cache("dev", configure_presets)
+        if cache.get("CMAKE_BUILD_TYPE") != "Debug":
+            errors.append("dev preset must use Debug")
+        if cache.get("BUILD_TESTING") is not True:
+            errors.append("dev preset must enable BUILD_TESTING")
+        if cache.get("VCPKG_MANIFEST_FEATURES") != "tests":
+            errors.append("dev preset must install the tests feature")
+
+    if "release" in configure_presets:
+        cache = resolved_cache("release", configure_presets)
+        if cache.get("CMAKE_BUILD_TYPE") != "Release":
+            errors.append("release preset must use Release")
+        if cache.get("BUILD_TESTING") is not False:
+            errors.append("release preset must disable BUILD_TESTING")
+        if cache.get("MINT_ENABLE_DEVELOPER_TOOLS") is not False:
+            errors.append("release preset must disable developer tools")
+        if cache.get("VCPKG_MANIFEST_FEATURES"):
+            errors.append("release preset must not install test features")
+    return errors
+
+
 def validate() -> list[str]:
     matrix_document = load_json(MATRIX_PATH)
     presets_document = load_json(PRESETS_PATH)
@@ -113,8 +168,9 @@ def validate() -> list[str]:
     configure_presets = named_entries(presets_document, "configurePresets")
     build_presets = named_entries(presets_document, "buildPresets")
     test_presets = named_entries(presets_document, "testPresets")
-    seen: set[tuple[str, str]] = set()
+    errors.extend(validate_presets(configure_presets, build_presets, test_presets))
 
+    seen: set[tuple[str, str]] = set()
     for index, scenario in enumerate(scenarios):
         if not isinstance(scenario, dict):
             errors.append(f"matrix.include[{index}] must be an object")
@@ -129,10 +185,19 @@ def validate() -> list[str]:
             )
         if missing:
             continue
-        string_fields = REQUIRED_FIELDS - {"system_packages", "tiers"}
-        if any(not isinstance(scenario[field], str) or not scenario[field] for field in string_fields):
+
+        string_fields = REQUIRED_FIELDS - {"build_jobs", "system_packages", "tiers"}
+        if any(
+            not isinstance(scenario[field], str) or not scenario[field]
+            for field in string_fields
+        ):
             errors.append(f"matrix.include[{index}] string fields must be non-empty")
             continue
+        build_jobs = scenario["build_jobs"]
+        if type(build_jobs) is not int or build_jobs < 1:
+            errors.append(f"matrix.include[{index}].build_jobs must be a positive integer")
+            continue
+
         tiers = scenario["tiers"]
         if (
             not isinstance(tiers, list)
@@ -156,7 +221,7 @@ def validate() -> list[str]:
         arch = scenario["arch"]
         key = (platform, arch)
         context = scenario["id"]
-        if scenario["id"] != f"{platform}-{arch}":
+        if context != f"{platform}-{arch}":
             errors.append(f"{context}: id must match platform-arch")
         if key in seen:
             errors.append(f"{context}: duplicate platform and architecture")
@@ -166,67 +231,17 @@ def validate() -> list[str]:
         if expected is None:
             errors.append(f"{context}: unsupported platform or architecture")
             continue
-        host_system, triplet, runner_arch, runner, system_packages = expected
+        triplet, runner_arch, runner, build_jobs, system_packages = expected
+        if scenario["triplet"] != triplet:
+            errors.append(f"{context}: triplet must be {triplet}")
         if scenario["runner_arch"] != runner_arch:
             errors.append(f"{context}: runner_arch must be {runner_arch}")
         if scenario["runner"] != runner:
             errors.append(f"{context}: runner must be {runner}")
+        if scenario["build_jobs"] != build_jobs:
+            errors.append(f"{context}: build_jobs must be {build_jobs}")
         if scenario["system_packages"] != system_packages:
             errors.append(f"{context}: system_packages must be {system_packages}")
-
-        preset_name = scenario["preset"]
-        preset = configure_presets.get(preset_name)
-        if preset is None:
-            errors.append(f"{context}: configure preset {preset_name!r} does not exist")
-            continue
-        condition = preset.get("condition")
-        if not isinstance(condition, dict) or condition.get("rhs") != host_system:
-            errors.append(f"{context}: configure preset must target host {host_system}")
-        cache = resolved_cache(preset_name, configure_presets)
-        if cache.get("VCPKG_TARGET_TRIPLET") != triplet:
-            errors.append(f"{context}: configure preset must use triplet {triplet}")
-        if cache.get("CMAKE_BUILD_TYPE") != "Debug":
-            errors.append(f"{context}: configure preset must use Debug")
-        if cache.get("BUILD_TESTING") is not True or cache.get("MINT_BUILD_TESTS") is not True:
-            errors.append(f"{context}: configure preset must enable tests")
-        if cache.get("VCPKG_MANIFEST_FEATURES") != "tests":
-            errors.append(f"{context}: configure preset must install the tests feature")
-
-        for kind, entries in (("build", build_presets), ("test", test_presets)):
-            entry = entries.get(preset_name)
-            if entry is None or entry.get("configurePreset") != preset_name:
-                errors.append(f"{context}: matching {kind} preset is missing")
-
-        release_name = scenario["release_preset"]
-        if release_name == preset_name:
-            errors.append(f"{context}: release preset must be separate from the test preset")
-            continue
-        release_preset = configure_presets.get(release_name)
-        if release_preset is None:
-            errors.append(f"{context}: release preset {release_name!r} does not exist")
-            continue
-        release_condition = release_preset.get("condition")
-        if not isinstance(release_condition, dict) or release_condition.get("rhs") != host_system:
-            errors.append(f"{context}: release preset must target host {host_system}")
-        release_cache = resolved_cache(release_name, configure_presets)
-        if release_cache.get("VCPKG_TARGET_TRIPLET") != triplet:
-            errors.append(f"{context}: release preset must use triplet {triplet}")
-        if release_cache.get("CMAKE_BUILD_TYPE") != "Release":
-            errors.append(f"{context}: release preset must use Release")
-        if release_cache.get("BUILD_TESTING") is not False:
-            errors.append(f"{context}: release preset must disable BUILD_TESTING")
-        if release_cache.get("MINT_BUILD_TESTS") is not False:
-            errors.append(f"{context}: release preset must disable MINT_BUILD_TESTS")
-        if release_cache.get("MINT_ENABLE_DEVELOPER_TOOLS") is not False:
-            errors.append(f"{context}: release preset must disable developer tools")
-        if release_cache.get("VCPKG_MANIFEST_FEATURES"):
-            errors.append(f"{context}: release preset must not install test features")
-
-        release_build = build_presets.get(release_name)
-        if release_build is None or release_build.get("configurePreset") != release_name:
-            errors.append(f"{context}: matching release build preset is missing")
-        if release_name in test_presets:
-            errors.append(f"{context}: release preset must not have a test preset")
 
     missing_scenarios = EXPECTED.keys() - seen
     extra_scenarios = seen - EXPECTED.keys()
@@ -264,7 +279,7 @@ def main() -> int:
         for error in errors:
             print(f"{MATRIX_PATH}: {error}", file=sys.stderr)
         return 1
-    print(f"Validated {len(EXPECTED)} native build scenarios.")
+    print(f"Validated {len(EXPECTED)} native build scenarios with shared presets.")
     return 0
 
 

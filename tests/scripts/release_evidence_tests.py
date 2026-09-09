@@ -553,5 +553,24 @@ class ReleaseEvidenceTests(unittest.TestCase):
             )
 
 
+    def test_cache_report_coverage_keeps_missing_statistics_unknown(self) -> None:
+        usage = {
+            "prompt_tokens": 100,
+            "cached_tokens": 0,
+            "reported_requests": 1,
+            "cache_usage_reports": 0,
+            "cache_hit_rate": None,
+        }
+        release_evidence._validate_cache_hit_rate(usage, "usage", 2)
+        usage["cache_usage_reports"] = 1
+        release_evidence._validate_cache_hit_rate(usage, "usage", 2)
+        usage["cache_hit_rate"] = 0.0
+        with self.assertRaisesRegex(release_evidence.EvidenceError, "complete cache reports"):
+            release_evidence._validate_cache_hit_rate(usage, "usage", 2)
+        usage["reported_requests"] = 2
+        usage["cache_usage_reports"] = 2
+        release_evidence._validate_cache_hit_rate(usage, "usage", 2)
+
+
 if __name__ == "__main__":
     unittest.main()
