@@ -31,6 +31,17 @@ asset_verifier = load_script("verify-release-assets.py")
 
 
 class BuildMatrixTests(unittest.TestCase):
+    def native_workflow_steps(self) -> tuple[str, dict[str, str]]:
+        workflow = (ROOT / ".github" / "workflows" / "_native-build.yml").read_text(
+            encoding="utf-8"
+        )
+        native_job = workflow.split("\n  native-build:\n", 1)[1]
+        steps = {}
+        for entry in native_job.split("\n      - name: ")[1:]:
+            name, _, content = entry.partition("\n")
+            steps[name] = content
+        return workflow, steps
+
     def test_matrix_and_shared_presets_are_consistent(self) -> None:
         self.assertEqual(matrix_validator.validate(), [])
 
@@ -95,6 +106,57 @@ class BuildMatrixTests(unittest.TestCase):
         self.assertIn(
             "ctest --test-dir build/sanitize --output-on-failure --parallel 4", workflow
         )
+
+    def test_gui_gate_is_limited_to_the_fast_linux_lane_after_cli_validation(self) -> None:
+        workflow, steps = self.native_workflow_steps()
+        gui_steps = [
+            "Set up Python for Qt",
+            "Install Qt for desktop tests",
+            "Configure desktop tests",
+            "Build desktop tests",
+            "Test desktop offscreen",
+        ]
+        previous = workflow.index("      - name: Check formatting\n")
+        for name in gui_steps:
+            with self.subTest(step=name):
+                self.assertIn(name, steps)
+                self.assertIn("if: inputs.tier == 'fast' && matrix.id == 'linux-x64'", steps[name])
+                self.assertNotIn("continue-on-error", steps[name])
+                position = workflow.index(f"      - name: {name}\n")
+                self.assertGreater(position, previous)
+                previous = position
+        self.assertLess(previous, workflow.index("      - name: Configure release package\n"))
+
+        document = matrix_validator.load_json(ROOT / "CMakePresets.json")
+        presets = matrix_validator.named_entries(document, "configurePresets")
+        for name in ("dev", "release"):
+            self.assertIs(matrix_validator.resolved_cache(name, presets)["MINT_BUILD_GUI"], False)
+
+    def test_gui_gate_builds_the_app_and_both_desktop_suites_in_its_own_directory(self) -> None:
+        _, steps = self.native_workflow_steps()
+        configure = steps["Configure desktop tests"]
+        self.assertIn("cmake --preset dev -B build/gui", configure)
+        self.assertIn("-DMINT_BUILD_GUI=ON", configure)
+        self.assertIn("-DCMAKE_PREFIX_PATH=\"$QT_ROOT_DIR\"", configure)
+        build = steps["Build desktop tests"]
+        self.assertIn("cmake --build build/gui", build)
+        self.assertIn("--target mint_gui mint_desktop_tests mint_desktop_custom_model_tests", build)
+        test = steps["Test desktop offscreen"]
+        self.assertIn("QT_QPA_PLATFORM: offscreen", test)
+        self.assertIn("ctest --test-dir build/gui", test)
+        self.assertIn("--output-on-failure", test)
+        self.assertIn("--no-tests=error", test)
+        self.assertIn("-L desktop", test)
+
+    def test_gui_qt_installation_pins_the_executable_action_and_required_archives(self) -> None:
+        _, steps = self.native_workflow_steps()
+        install = steps["Install Qt for desktop tests"]
+        self.assertRegex(install, r"uses: jurplel/install-qt-action/action@[0-9a-f]{40}\b")
+        self.assertRegex(install, r"version: '[0-9]+\.[0-9]+\.[0-9]+'")
+        self.assertIn("arch: linux_gcc_64", install)
+        self.assertIn("archives: qtbase qtsvg icu", install)
+        self.assertIn("cache: true", install)
+        self.assertIn("install-deps: true", install)
 
     def test_unknown_tier_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown build tier"):

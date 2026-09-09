@@ -30,20 +30,15 @@ cmake --build --preset dev --target mint
 cmake --build --preset dev --clean-first
 ```
 
-GUI 的首次依赖准备见[桌面界面](../getting-started/quickstart.md#桌面界面)。README 的 GUI 命令使用 Release 配置，不含测试；桌面开发另用 `dev` 和独立目录，并安装 Python 3.10+ 及 Qt Test 模块：
+GUI 的 Qt、FluentQt 和平台要求见[桌面界面](../getting-started/quickstart.md#桌面界面)。README 使用不含测试的 Release 配置；桌面开发另用 `dev` 和独立目录，并安装 Python 3.10+ 及 Qt Test 模块：
 
 ```bash
 cmake --preset dev -B build/gui-tests \
   -DMINT_BUILD_GUI=ON \
   -DCMAKE_PREFIX_PATH="/path/to/Qt/6.x/kit"
-cmake --build build/gui-tests --parallel 4
+cmake --build build/gui-tests --target mint_gui mint_desktop_tests mint_desktop_custom_model_tests --parallel 4
 ctest --test-dir build/gui-tests --output-on-failure -L desktop
 ```
-
-macOS 上使用预编译 FluentQt 时，两边需要兼容的 deployment target；必要时在配置命令末尾追加
-`-DMINT_MACOS_DEPLOYMENT_TARGET=<FluentQt target>`。
-
-默认自动获取 FluentQt v1.8.1 并编译；本地源码可用 `MINT_FLUENTQT_SOURCE_DIR` 指定。使用已安装 SDK 时需显式开启 `MINT_USE_SYSTEM_FLUENTQT` 并设置 `FluentQt_DIR`；修改其源码后先重新构建并安装 SDK，再重新配置 Mint。
 
 Sanitizer 同样是开发配置的临时开关：
 
@@ -81,14 +76,15 @@ ctest --preset dev -L architecture
 | `release` | 版本和发布证据脚本 |
 | `desktop` | 桌面控制器、类型化协议、视图模型和 CLI 进程适配 |
 
-测试源码按 `unit`、`integration`、`contract` 和 `support` 组织。架构契约还会阻止 CLI、tools 和 infrastructure 的实现重新堆回聚合目录。
+测试源码按 `unit`、`integration`、`contract`、`desktop` 和 `support` 组织。Agent 的上下文、写入验证、会话恢复和 Token 预算分别放在 `agent_context_tests.cpp`、`agent_verification_tests.cpp`、`agent_session_tests.cpp`、`agent_token_budget_tests.cpp`；桌面按模型、工作区、会话画布和设置交互归组。专用 fake 留在所属场景，只有复用夹具才共享；文件拆分不改变 CTest 名称和标签。架构契约继续检查模块目录和依赖方向。
 
-GUI 是可选目标。按前文配置 Qt 和桌面构建后，可单独验证桌面链路和原生渲染：
+## 桌面交互与截图
+
+完成前文桌面构建后，用离线 demo 导出固定尺寸截图：
 
 ```bash
-cmake --build build/gui-tests --target mint_gui mint_desktop_tests mint_desktop_custom_model_tests --parallel 4
-ctest --test-dir build/gui-tests --output-on-failure -L desktop
 ./build/gui-tests/mint-gui --root . --demo \
+  --state-dir /path/to/test-state \
   --window-size 1440x900 --screenshot /tmp/mint-gui.png
 ```
 
@@ -111,6 +107,10 @@ QT_SCALE_FACTOR=2 ./build/gui-tests/tests/mint_desktop_tests --gtest_filter='Des
 | Linux | `x64-linux` | `arm64-linux` |
 
 本地和 CI 都使用 `dev`、`release`。CI 只从 `.github/build-matrix.json` 传入 triplet 和并行度；ARM64 构建在 ARM64 主机运行。
+
+每次 PR 和主分支推送的 `fast` 流程还会在 Linux x64 的 CLI 检查后，用独立的 `build/gui` 构建 GUI 和两个桌面测试目标，并通过 `QT_QPA_PLATFORM=offscreen` 运行全部 `desktop` 标签测试；未发现测试也会失败。该步骤使用固定的 Qt 6.8.3，仅下载并缓存[官方仓库](https://download.qt.io/online/qtsdkrepository/linux_x64/desktop/qt6_683/qt6_683/qt.qt6.683.linux_gcc_64/)中的 `qtbase`、`qtsvg`、`icu` 档案。安装入口固定到 [install-qt-action v4.3.1](https://github.com/jurplel/install-qt-action/releases/tag/v4.3.1) 的提交。
+
+默认 presets、`full` 和 `release` 矩阵仍只构建 CLI。Linux 离屏门禁覆盖桌面代码的编译和自动化行为；其他系统的桌面构建、原生光标和窗口交互仍需各平台验收。
 
 ## 如何理解结果
 

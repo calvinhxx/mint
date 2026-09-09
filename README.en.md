@@ -6,7 +6,7 @@
 
 mint is a lightweight local AI agent. The model chooses the next step; mint reads, searches, changes, and verifies files on your machine.
 
-The model has no direct shell or filesystem access. Writes are disabled by default, project commands must be registered by the user, and changed code must pass a real build or test before a task can complete.
+The model has no direct shell or filesystem access. Writes are disabled by default, and project commands must be registered by the user. When the verification gate is enabled, changed code must pass a real build or test before a task can complete.
 
 > [!NOTE]
 > Prebuilt packages are not published yet; build from source for now. The CLI is the stable entry point. A FluentQt desktop preview is available from source but is not included in release packages. Multi-agent orchestration is out of scope.

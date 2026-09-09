@@ -79,6 +79,53 @@ jobs:
         if: matrix.id == 'linux-x64'
         run: cmake --build --preset dev --target format-check --parallel ${{ matrix.build_jobs }}
 
+      - name: Set up Python for Qt
+        if: inputs.tier == 'fast' && matrix.id == 'linux-x64'
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.12'
+
+      # EN: Pin the executable action; its wrapper dispatches through a moving v4 tag.
+      # ZH-CN: 固定实际安装入口；上游包装层通过会移动的 v4 标签转发。
+      - name: Install Qt for desktop tests
+        if: inputs.tier == 'fast' && matrix.id == 'linux-x64'
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: '6.8.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          archives: qtbase qtsvg icu
+          aqtversion: '==3.3.0'
+          install-deps: true
+          cache: true
+          cache-key-prefix: mint-desktop-qt
+
+      - name: Configure desktop tests
+        if: inputs.tier == 'fast' && matrix.id == 'linux-x64'
+        shell: bash
+        run: |
+          cmake --preset dev -B build/gui -DMINT_BUILD_GUI=ON \
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+
+      - name: Build desktop tests
+        if: inputs.tier == 'fast' && matrix.id == 'linux-x64'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          cmake --build build/gui
+          --target mint_gui mint_desktop_tests mint_desktop_custom_model_tests
+          --parallel ${{ matrix.build_jobs }}
+
+      - name: Test desktop offscreen
+        if: inputs.tier == 'fast' && matrix.id == 'linux-x64'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          ctest --test-dir build/gui --output-on-failure --no-tests=error
+          -L desktop --parallel ${{ matrix.build_jobs }}
+
       - name: Configure release package
         if: inputs.packages
         run: cmake --preset release -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}

@@ -31,6 +31,8 @@ cmake --build --preset release
 
 程序位于 `build/release/mint`，Windows 下为 `mint.exe`。Linux 上运行项目命令还需要 Bubblewrap，例如 Ubuntu / Debian 使用 `sudo apt-get install bubblewrap`。
 
+依赖版本固定在 `vcpkg.json`。复用旧 vcpkg 时，若提示找不到基线或依赖版本，先在 vcpkg 目录执行 `git pull --ff-only` 并重新运行 bootstrap；也可使用新克隆的 vcpkg。更换 `VCPKG_ROOT` 后，配置时加 `--fresh`。
+
 ## 离线试用
 
 ```bash
