@@ -4,12 +4,14 @@ add_library(mint_cli STATIC
     agent/agent_command_io.cpp
     agent/agent_event_router.cpp
     command_line.cpp
+    config/model_config_command.cpp
     project/project_commands.cpp
     provider/provider_acceptance.cpp
     provider/provider_command.cpp
     support/console.cpp
     support/diagnostic_logging.cpp
 )
+add_library(mint::cli ALIAS mint_cli)
 
 mint_configure_target(mint_cli)
 target_include_directories(mint_cli PRIVATE
@@ -22,6 +24,7 @@ target_link_libraries(mint_cli
         mint::logging
         mint::localization
         mint::model
+        mint::model_settings
         mint::persistence
         mint::project
         mint::runtime

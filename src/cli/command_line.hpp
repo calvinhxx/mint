@@ -12,8 +12,9 @@ namespace mint::cli {
 
 class Console;
 
-enum class CommandMode { none, exec, init, run, resume, status, provider };
+enum class CommandMode { none, exec, init, run, resume, status, provider, config };
 enum class ProviderCommandAction { inspect, test };
+enum class ConfigCommandAction { show, set, import };
 
 struct CommandLine {
     CommandMode mode = CommandMode::none;
@@ -34,7 +35,11 @@ struct CommandLine {
     bool config_specified = false;
     bool root_specified = false;
     ProviderCommandAction provider_action = ProviderCommandAction::inspect;
-    std::filesystem::path config = "config.json";
+    ConfigCommandAction config_action = ConfigCommandAction::show;
+    bool stdin_json = false;
+    bool config_replace = false;
+    std::string config_expected_revision;
+    std::filesystem::path config;
     std::filesystem::path policy;
     std::filesystem::path root = std::filesystem::current_path();
     std::filesystem::path state_dir;
@@ -43,6 +48,7 @@ struct CommandLine {
     std::filesystem::path events_jsonl;
     std::filesystem::path session;
     std::string task_id;
+    std::string api_key_env_override;
     std::vector<std::filesystem::path> allowed_write_paths;
     std::vector<std::filesystem::path> command_read_paths;
     std::vector<std::string> allowed_programs;

@@ -1,7 +1,7 @@
 #include "agent_command_internal.hpp"
 #include "provider/provider_credentials.hpp"
 
-#include "mint/infrastructure/config.hpp"
+#include "mint/infrastructure/model_config_service.hpp"
 #include "mint/localization/localization.hpp"
 #include "mint/runtime/terminal_text.hpp"
 
@@ -271,7 +271,12 @@ std::unique_ptr<ModelClient> create_model(const CommandLine& command_line,
         return std::make_unique<DemoModelClient>();
     }
 
-    auto config = load_model_provider_config(command_line.config);
+    ModelConfigService model_settings(command_line.state_dir);
+    auto config = model_settings.load_runtime(
+        command_line.config_specified ? command_line.config : std::filesystem::path{});
+    const auto config_path =
+        command_line.config_specified ? command_line.config : model_settings.config_path();
+    provider_detail::apply_api_key_environment_override(config, command_line.api_key_env_override);
     const auto profile = resolve_model_provider_profile(config);
     config.task_control = task_control;
     const auto stream_printer = std::make_shared<ModelStreamPrinter>(console);
@@ -293,28 +298,27 @@ std::unique_ptr<ModelClient> create_model(const CommandLine& command_line,
     }
     if (!command_line.json_output) {
         if (config.api_key.empty() && config.api_key_env.empty()) {
-            console.write_line(
-                message(Message::cli_provider_empty_key_notice,
-                        {arg(Placeholder::path,
-                             escape_terminal_field(command_line.config.generic_string()))}));
+            console.write_line(message(
+                Message::cli_provider_empty_key_notice,
+                {arg(Placeholder::path, escape_terminal_field(config_path.generic_string()))}));
         } else if (!config.api_key_env.empty()) {
             console.write_line(
                 message(Message::cli_provider_authentication_environment,
                         {arg(Placeholder::name, escape_terminal_field(config.api_key_env))}));
-        } else {
+        } else if (command_line.config_specified) {
             console.write_line(
                 message(Message::cli_provider_warning,
                         {arg(Placeholder::message,
                              escape_terminal_field(
                                  provider_detail::inline_api_key_deprecation_message()))}));
         }
-        console.write_line(message(
-            Message::cli_provider_configuration,
-            {arg(Placeholder::path, escape_terminal_field(command_line.config.generic_string())),
-             arg(Placeholder::provider, model_provider_name(profile.provider)),
-             arg(Placeholder::adapter, model_adapter_name(profile.adapter)),
-             arg(Placeholder::model, escape_terminal_field(config.model)),
-             arg(Placeholder::stream, config.stream ? "stream" : "non-stream")}));
+        console.write_line(
+            message(Message::cli_provider_configuration,
+                    {arg(Placeholder::path, escape_terminal_field(config_path.generic_string())),
+                     arg(Placeholder::provider, model_provider_name(profile.provider)),
+                     arg(Placeholder::adapter, model_adapter_name(profile.adapter)),
+                     arg(Placeholder::model, escape_terminal_field(config.model)),
+                     arg(Placeholder::stream, config.stream ? "stream" : "non-stream")}));
     }
     return std::make_unique<ModelProviderClient>(std::move(config));
 }

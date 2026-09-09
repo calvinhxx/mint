@@ -23,6 +23,7 @@ target_link_libraries(mint_core INTERFACE
     mint::filesystem
     mint::logging
     mint::model
+    mint::model_settings
     mint::persistence
     mint::project
     mint::runtime

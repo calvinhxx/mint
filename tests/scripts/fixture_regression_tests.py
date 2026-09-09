@@ -100,6 +100,7 @@ def completed_agent_result() -> dict:
             "completion_tokens": 20,
             "total_tokens": 120,
             "cached_tokens": 0,
+            "cache_usage_reports": 4,
             "cache_hit_rate": 0.0,
             "streamed_calls": 0,
             "stream_events": 0,
@@ -234,6 +235,16 @@ class FixtureRegressionTests(unittest.TestCase):
             fixture_regression.FixtureRegressionError, "invalid effective request limits"
         ):
             fixture_regression.effective_agent_limits(agent)
+
+    def test_model_profile_budget_survives_inspection_and_runtime_reporting(self) -> None:
+        inspection = json.loads(json.dumps(GROQ_INSPECTION))
+        inspection["limits"]["max_request_tokens"] = 1_000_000
+        inspection["limits"]["max_request_tokens_source"] = "model_profile"
+        limits = fixture_regression.fixture_limits(inspection)
+        self.assertEqual(limits["max_request_tokens_source"], "model_profile")
+        self.assertEqual(limits["max_context_bytes"], 24576)
+        effective = fixture_regression.effective_agent_limits({"model": limits})
+        self.assertEqual(effective["max_request_tokens"], 1_000_000)
 
     def test_macos_sandbox_preflight_fails_before_provider_work(self) -> None:
         failure = fixture_regression.CommandResult(

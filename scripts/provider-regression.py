@@ -69,6 +69,7 @@ SAFE_REPORT_SCHEMA = {
             "completion_tokens": None,
             "total_tokens": None,
             "cached_tokens": None,
+            "cache_usage_reports": None,
             "cache_hit_rate": None,
         },
         "checks": {

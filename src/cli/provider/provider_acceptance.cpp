@@ -53,6 +53,7 @@ struct AcceptanceMetrics {
     std::size_t completion_tokens = 0;
     std::size_t total_tokens = 0;
     std::size_t cached_tokens = 0;
+    std::size_t cache_usage_requests = 0;
     long long duration_ms = 0;
     std::string reported_provider;
     std::string reported_adapter;
@@ -84,6 +85,8 @@ struct AcceptanceMetrics {
             completion_tokens += reply.usage.completion_tokens;
             total_tokens += reply.usage.total_tokens;
             cached_tokens += reply.usage.cached_tokens;
+            cache_usage_requests +=
+                reply.usage.cache_usage_available || reply.usage.cached_tokens != 0 ? 1 : 0;
         }
     }
 
@@ -106,7 +109,11 @@ struct AcceptanceMetrics {
               {"completion_tokens", completion_tokens},
               {"total_tokens", total_tokens},
               {"cached_tokens", cached_tokens},
-              {"cache_hit_rate", model_usage::cache_hit_rate_json(cached_tokens, prompt_tokens)}}},
+              {"cache_usage_reports", cache_usage_requests},
+              {"cache_hit_rate",
+               cache_usage_requests != 0 && cache_usage_requests == requests
+                   ? model_usage::cache_hit_rate_json(cached_tokens, prompt_tokens)
+                   : Json(nullptr)}}},
             {"checks",
              {{"function_call", true},
               {"arguments_round_trip", true},

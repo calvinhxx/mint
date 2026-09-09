@@ -35,6 +35,7 @@ class Console final {
     void flush_error();
 
     [[nodiscard]] std::ostream& output_stream() noexcept;
+    [[nodiscard]] std::istream& input_stream() noexcept;
 
   private:
     std::istream& input_;

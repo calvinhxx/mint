@@ -316,6 +316,45 @@ void verify_directory(const std::filesystem::path& path, std::string_view descri
     }
 }
 
+bool create_private_directory(const std::filesystem::path& path, std::error_code& error) {
+    // EN: Publish the directory with its final permissions, so concurrent first use
+    //     cannot observe an intermediate public directory before chmod / ACL setup.
+    // ZH-CN: 创建时即设置最终权限，避免并发首次使用看到 chmod / ACL 设置前的公开目录。
+#if defined(_WIN32)
+    const auto user = current_user_sid();
+    const auto system = local_system_sid();
+    struct PrivateAcl {
+        PACL value;
+        ~PrivateAcl() {
+            (void)LocalFree(value);
+        }
+    } acl{private_acl(true, user, system)};
+    SECURITY_DESCRIPTOR descriptor{};
+    if (!InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) ||
+        !SetSecurityDescriptorOwner(&descriptor, const_cast<unsigned char*>(user.data()), FALSE) ||
+        !SetSecurityDescriptorDacl(&descriptor, TRUE, acl.value, FALSE) ||
+        !SetSecurityDescriptorControl(&descriptor, SE_DACL_PROTECTED, SE_DACL_PROTECTED)) {
+        throw permission_error(message(Message::filesystem_private_windows_acl_create_failed));
+    }
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), &descriptor, FALSE};
+    if (::CreateDirectoryW(path.c_str(), &attributes)) {
+        return true;
+    }
+    const auto result = ::GetLastError();
+    if (result != ERROR_ALREADY_EXISTS) {
+        error = std::error_code(static_cast<int>(result), std::system_category());
+    }
+#else
+    if (::mkdir(path.c_str(), S_IRWXU) == 0) {
+        return true;
+    }
+    if (errno != EEXIST) {
+        error = std::error_code(errno, std::generic_category());
+    }
+#endif
+    return false;
+}
+
 } // namespace
 
 void ensure_directory(const std::filesystem::path& path, std::string_view description,
@@ -323,15 +362,26 @@ void ensure_directory(const std::filesystem::path& path, std::string_view descri
     if (path.empty() || description.empty()) {
         throw std::invalid_argument(message(Message::filesystem_private_directory_argument_empty));
     }
-    reject_symlink(path, description);
+    // EN: A trailing separator gives parent_path() the same directory as the leaf.
+    //     Strip only empty final components, without changing symlink / '..' semantics.
+    // ZH-CN: 尾分隔符会使 parent_path() 指向叶目录本身；只去掉末尾空组件，
+    //        不改变符号链接或 '..' 的路径语义。
+    auto directory = path;
+    while (!directory.has_filename() && directory.has_relative_path()) {
+        directory = directory.parent_path();
+    }
+    reject_symlink(directory, description);
     std::error_code error;
-    const auto created = std::filesystem::create_directories(path, error);
+    if (!directory.parent_path().empty()) {
+        std::filesystem::create_directories(directory.parent_path(), error);
+    }
+    const auto created = !error && create_private_directory(directory, error);
     if (error) {
         throw permission_error(message(Message::filesystem_private_create_failed,
                                        {arg(Placeholder::description, description)}));
     }
-    verify_directory(path, description);
-    secure_directory(path, created, description, existing_policy);
+    verify_directory(directory, description);
+    secure_directory(directory, created, description, existing_policy);
 }
 
 bool create_directory(const std::filesystem::path& path, std::string_view description) {

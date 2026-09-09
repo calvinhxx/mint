@@ -1,12 +1,27 @@
 #include "agent_command_internal.hpp"
 
 #include "mint/infrastructure/change_transaction_store.hpp"
+#include "mint/infrastructure/model_config_service.hpp"
 #include "mint/localization/localization.hpp"
+#include "mint/runtime/path.hpp"
 
 #include <stdexcept>
 #include <utility>
 
 namespace mint::cli::command_detail {
+
+namespace {
+
+std::optional<std::filesystem::path>
+local_credentials_path(const std::filesystem::path& state_directory) noexcept {
+    try {
+        return mint_model_credentials_file(state_directory);
+    } catch (const std::runtime_error&) {
+        return std::nullopt;
+    }
+}
+
+} // namespace
 
 using localization::Message;
 using localization::message;
@@ -89,7 +104,40 @@ void validate_execution_options(const CommandLine& command_line, bool has_comman
 }
 
 void validate_runtime_paths(const CommandLine& command_line) {
-    const auto config = normalized_path(command_line.config);
+    std::filesystem::path model_config;
+    std::filesystem::path model_credentials;
+    try {
+        const ModelConfigService model_settings(command_line.state_dir);
+        model_config = model_settings.config_path();
+        model_credentials = model_settings.credentials_path();
+    } catch (const ModelConfigError&) {
+        // EN: Demo and explicit configuration files need no shared model store.
+        // ZH-CN: 离线演示和显式配置文件不依赖共享模型存储。
+        if (!command_line.demo && !command_line.config_specified) {
+            throw;
+        }
+        model_config.clear();
+        model_credentials.clear();
+    }
+    if (!model_config.empty()) {
+        const auto model_directory = model_config.parent_path();
+        for (const auto& artifact :
+             {command_line.policy, command_line.session, command_line.events_jsonl}) {
+            if (artifact.empty()) {
+                continue;
+            }
+            const auto path = normalized_path(artifact);
+            if (path == normalized_path(model_config) ||
+                path == normalized_path(model_credentials) ||
+                path == normalized_path(model_directory / "model.lock") ||
+                is_path_within(normalized_path(model_directory / ".model-staging"), path)) {
+                throw std::invalid_argument(message(Message::cli_runtime_model_settings_conflict));
+            }
+        }
+    }
+    const auto config = command_line.config_specified ? normalized_path(command_line.config)
+                        : !model_config.empty()       ? normalized_path(model_config)
+                                                      : std::filesystem::path{};
     const auto policy = command_line.policy.empty() ? std::filesystem::path{}
                                                     : normalized_path(command_line.policy);
     const auto session = command_line.session.empty() ? std::filesystem::path{}
@@ -141,7 +189,18 @@ std::vector<std::filesystem::path>
 protected_paths(const CommandLine& command_line, const std::optional<TaskPolicy>& task_policy,
                 const RuntimeFiles& files, const std::optional<ProjectStore>& project_store,
                 const std::optional<ManagedTaskPaths>& managed_task) {
-    std::vector<std::filesystem::path> paths = {command_line.config};
+    std::vector<std::filesystem::path> paths;
+    if (command_line.config_specified && !command_line.config.empty()) {
+        paths.push_back(command_line.config);
+    }
+    if (const auto credentials = local_credentials_path(command_line.state_dir)) {
+        // EN: Protect model storage entries without denying their workspace or state parent.
+        // ZH-CN: 保护模型存储条目，不将其所在的工作区或状态父目录整体拒绝。
+        paths.push_back(*credentials);
+        paths.push_back(credentials->parent_path() / "model.json");
+        paths.push_back(credentials->parent_path() / "model.lock");
+        paths.push_back(credentials->parent_path() / ".model-staging");
+    }
     if (task_policy.has_value()) {
         paths.push_back(task_policy->source_path);
     }

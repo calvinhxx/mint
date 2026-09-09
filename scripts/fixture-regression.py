@@ -281,7 +281,7 @@ def fixture_limits(inspection: Mapping[str, object]) -> dict[str, object]:
         or safety_margin < 0
         or estimate_bytes_per_token is None
         or not 1 <= estimate_bytes_per_token <= 8
-        or request_limit_source not in {"automatic", "config"}
+        or request_limit_source not in {"automatic", "model_profile", "config"}
     ):
         raise FixtureRegressionError(
             "provider_inspection", "provider inspection reported invalid request limits"
@@ -346,6 +346,7 @@ def safe_agent_report(
             "completion_tokens",
             "total_tokens",
             "cached_tokens",
+            "cache_usage_reports",
             "streamed_calls",
             "stream_events",
             "streamed_bytes",
@@ -522,7 +523,7 @@ def effective_agent_limits(agent: Mapping[str, object]) -> dict[str, object]:
     if (
         maximum is None
         or maximum <= 0
-        or source not in {"automatic", "config", "response_header"}
+        or source not in {"automatic", "model_profile", "config", "response_header"}
         or (learned_value is not None and (learned is None or learned <= 0))
         or estimate is None
         or not 1 <= estimate <= 8

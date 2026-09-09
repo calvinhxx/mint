@@ -280,6 +280,11 @@ ModelProviderConfig load_model_provider_config(const std::filesystem::path& conf
             {arg(Placeholder::path, config_path.string()), arg(Placeholder::error, error.what())}));
     }
 
+    return parse_model_provider_config(document, config_path);
+}
+
+ModelProviderConfig parse_model_provider_config(const Json& document,
+                                                const std::filesystem::path& config_path) {
     if (!document.is_object()) {
         throw std::runtime_error(message(Message::model_config_root_object,
                                          {arg(Placeholder::path, config_path.string())}));

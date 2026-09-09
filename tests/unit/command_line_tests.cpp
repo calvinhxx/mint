@@ -30,6 +30,18 @@ TEST(CommandLineTest, AcceptsManagedJsonInteractionMode) {
     EXPECT_EQ(command.question, "检查项目");
 }
 
+TEST(CommandLineTest, AcceptsApiKeyEnvironmentWithoutPuttingTheKeyInArguments) {
+    const auto command =
+        parse({"mint", "run", "--api-key-env", "MINT_GUI_SESSION_API_KEY", "Inspect"});
+
+    EXPECT_EQ(command.api_key_env_override, "MINT_GUI_SESSION_API_KEY");
+    EXPECT_EQ(command.question, "Inspect");
+    EXPECT_THROW((void)parse({"mint", "run", "--api-key-env", "invalid-name", "Inspect"}),
+                 std::invalid_argument);
+    EXPECT_THROW((void)parse({"mint", "provider", "--api-key-env", "MODEL_API_KEY"}),
+                 std::invalid_argument);
+}
+
 TEST(CommandLineTest, InteractionModeRequiresMachineOutput) {
     EXPECT_THROW((void)parse({"mint", "run", "--interaction-jsonl", "检查项目"}),
                  std::invalid_argument);

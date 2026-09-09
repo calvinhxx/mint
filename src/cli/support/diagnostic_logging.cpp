@@ -37,6 +37,8 @@ std::string_view command_mode_name(CommandMode mode) noexcept {
         return "status";
     case CommandMode::provider:
         return "provider";
+    case CommandMode::config:
+        return "config";
     }
     return "unknown";
 }

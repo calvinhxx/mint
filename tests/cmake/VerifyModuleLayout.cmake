@@ -17,6 +17,13 @@ set(required_directories
     src/core/tools/changes
     src/core/tools/registry
     src/core/tools/workspace
+    src/gui/application/preferences
+    src/gui/infrastructure/cli
+    src/gui/infrastructure/settings
+    src/gui/ui/components
+    src/gui/ui/models
+    src/gui/ui/pages
+    src/gui/ui/shell
 )
 foreach(directory IN LISTS required_directories)
     if(NOT IS_DIRECTORY "${SOURCE_DIR}/${directory}")

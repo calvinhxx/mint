@@ -28,6 +28,10 @@ std::ostream& Console::output_stream() noexcept {
     return output_;
 }
 
+std::istream& Console::input_stream() noexcept {
+    return input_;
+}
+
 Console system_console() noexcept {
     return {std::cin, std::cout, std::cerr};
 }

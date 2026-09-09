@@ -27,6 +27,9 @@ function(mint_add_gtest target)
 
     add_executable("${target}" ${test_SOURCES})
     mint_configure_target("${target}")
+    set_target_properties("${target}" PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests"
+    )
 
     if(test_GTEST_MAIN)
         set(gtest_target GTest::gtest_main)

@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/mint/branding">
+    <file alias="mint-arctic-fox-mark.svg">branding/mint-arctic-fox-mark.svg</file>
+    <file alias="mint-arctic-fox-tile.svg">branding/mint-arctic-fox-tile.svg</file>
+  </qresource>
+</RCC>

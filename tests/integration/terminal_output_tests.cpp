@@ -120,6 +120,7 @@ TEST(TerminalOutputTest, StreamingCliEscapesEachUntrustedDelta) {
     mint::cli::CommandLine command_line;
     command_line.config = config;
     command_line.config_specified = true;
+    command_line.state_dir = temporary.path() / "state";
     command_line.root = workspace;
     command_line.root_specified = true;
     command_line.question = "return one answer";

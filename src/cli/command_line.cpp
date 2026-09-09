@@ -3,6 +3,7 @@
 
 #include "mint/localization/localization.hpp"
 
+#include <cctype>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
@@ -64,6 +65,9 @@ std::optional<CommandMode> parse_mode(const std::string& argument) {
     if (argument == "provider") {
         return CommandMode::provider;
     }
+    if (argument == "config") {
+        return CommandMode::config;
+    }
     return std::nullopt;
 }
 
@@ -78,6 +82,89 @@ std::filesystem::path utf8_path(std::string_view argument) {
 #else
     return std::filesystem::path(argument);
 #endif
+}
+
+bool valid_environment_name(std::string_view value) {
+    if (value.empty() ||
+        (value.front() != '_' && std::isalpha(static_cast<unsigned char>(value.front())) == 0)) {
+        return false;
+    }
+    for (const auto character : value.substr(1)) {
+        if (character != '_' && std::isalnum(static_cast<unsigned char>(character)) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void parse_config_options(CommandLine& result, int begin, int argc, char** argv) {
+    if (begin < argc && std::string_view(argv[begin]) == "show") {
+        ++begin;
+    } else if (begin < argc && std::string_view(argv[begin]) == "set") {
+        result.config_action = ConfigCommandAction::set;
+        ++begin;
+    } else if (begin < argc && std::string_view(argv[begin]) == "import") {
+        result.config_action = ConfigCommandAction::import;
+        ++begin;
+    }
+    for (int index = begin; index < argc; ++index) {
+        const std::string_view argument = argv[index];
+        if (argument == "--json") {
+            result.json_output = true;
+        } else if (argument == "--stdin-json") {
+            result.stdin_json = true;
+        } else if (argument == "--replace") {
+            if (result.config_replace) {
+                throw std::invalid_argument(text(Message::cli_config_options));
+            }
+            result.config_replace = true;
+        } else if (argument == "--expected-revision") {
+            if (++index >= argc || !result.config_expected_revision.empty() ||
+                std::string_view(argv[index]).empty() ||
+                std::string_view(argv[index]).starts_with("--")) {
+                throw std::invalid_argument(text(Message::cli_config_options));
+            }
+            result.config_expected_revision = argv[index];
+        } else if (argument == "--help" || argument == "-h") {
+            result.help = true;
+        } else if (argument == "--state-dir" || argument == "--config" || argument == "--lang" ||
+                   argument == "--log-level" || argument == "--log-file-level" ||
+                   argument == "--log-dir") {
+            if (++index >= argc) {
+                throw std::invalid_argument(text(Message::cli_config_options));
+            }
+            if (argument == "--state-dir") {
+                result.state_dir = utf8_path(argv[index]);
+            } else if (argument == "--config") {
+                if (std::string_view(argv[index]).empty()) {
+                    missing_value("--config", text(Message::cli_value_json_path));
+                }
+                result.config = utf8_path(argv[index]);
+                result.config_specified = true;
+            } else if (argument == "--lang") {
+                result.language = argv[index];
+            } else if (argument == "--log-level") {
+                result.log_level = argv[index];
+            } else if (argument == "--log-file-level") {
+                result.log_file_level = argv[index];
+            } else {
+                result.log_dir = utf8_path(argv[index]);
+            }
+        } else {
+            // EN: Never echo unknown arguments: a caller may have pasted a credential.
+            // ZH-CN: 不回显未知参数，避免调用者误粘贴的密钥出现在输出中。
+            throw std::invalid_argument(text(Message::cli_config_options));
+        }
+    }
+    if (!result.help &&
+        ((result.config_action == ConfigCommandAction::set &&
+          (!result.stdin_json || result.config_specified)) ||
+         (result.config_action != ConfigCommandAction::set && result.stdin_json) ||
+         (result.config_action == ConfigCommandAction::import && !result.config_specified) ||
+         (result.config_replace != !result.config_expected_revision.empty()) ||
+         (result.config_action != ConfigCommandAction::import && result.config_replace))) {
+        throw std::invalid_argument(text(Message::cli_config_options));
+    }
 }
 
 } // namespace
@@ -154,6 +241,10 @@ CommandLine parse_arguments(int argc, char** argv) {
     if (result.mode == CommandMode::resume) {
         result.resume_session = true;
     }
+    if (result.mode == CommandMode::config) {
+        parse_config_options(result, begin, argc, argv);
+        return result;
+    }
     if (result.mode == CommandMode::provider && begin < argc &&
         std::string(argv[begin]) == "test") {
         result.provider_action = ProviderCommandAction::test;
@@ -214,11 +305,20 @@ CommandLine parse_arguments(int argc, char** argv) {
             }
             result.language = argv[index];
         } else if (argument == "--config") {
-            if (++index >= argc) {
+            if (++index >= argc || std::string_view(argv[index]).empty()) {
                 missing_value("--config", text(Message::cli_value_json_path));
             }
             result.config = utf8_path(argv[index]);
             result.config_specified = true;
+        } else if (argument == "--api-key-env") {
+            if (++index >= argc) {
+                missing_value("--api-key-env", text(Message::cli_value_environment_name));
+            }
+            result.api_key_env_override = argv[index];
+            if (!valid_environment_name(result.api_key_env_override)) {
+                throw std::invalid_argument(
+                    text(Message::model_credentials_environment_name_invalid));
+            }
         } else if (argument == "--log-level") {
             if (++index >= argc) {
                 missing_value("--log-level", text(Message::cli_value_log_level));
@@ -327,16 +427,17 @@ CommandLine parse_arguments(int argc, char** argv) {
     }
 
     if (result.mode == CommandMode::exec) {
-        if (!result.state_dir.empty() || !result.task_id.empty() || !result.cancel_file.empty() ||
-            result.force || result.interaction_jsonl) {
+        if (!result.task_id.empty() || !result.cancel_file.empty() || result.force ||
+            result.interaction_jsonl) {
             throw std::invalid_argument(text(Message::cli_error_exec_managed_options));
         }
     } else if (result.mode == CommandMode::provider) {
         if (!result.question.empty() || result.demo || result.force || result.resume_session ||
             result.retry_inflight || result.approve_each_command || result.approve_each_changeset ||
             result.policy_conflict || !result.policy.empty() || !result.session.empty() ||
-            !result.events_jsonl.empty() || !result.state_dir.empty() || !result.task_id.empty() ||
-            result.root_specified || result.interaction_jsonl || !result.cancel_file.empty()) {
+            !result.events_jsonl.empty() || !result.task_id.empty() || result.root_specified ||
+            result.interaction_jsonl || !result.cancel_file.empty() ||
+            !result.api_key_env_override.empty()) {
             throw std::invalid_argument(text(Message::cli_error_provider_options));
         }
     } else {
@@ -362,7 +463,7 @@ CommandLine parse_arguments(int argc, char** argv) {
         if ((result.mode == CommandMode::init || result.mode == CommandMode::status) &&
             (result.demo || result.retry_inflight || result.approve_each_command ||
              result.approve_each_changeset || result.config_specified || result.interaction_jsonl ||
-             !result.cancel_file.empty())) {
+             !result.cancel_file.empty() || !result.api_key_env_override.empty())) {
             throw std::invalid_argument(text(Message::cli_error_init_status_options));
         }
     }

@@ -474,9 +474,11 @@ void ToolRegistry::restore_workspace_change_state(const Json& state) {
 }
 
 bool ToolRegistry::is_protected(const std::filesystem::path& path) const {
-    return std::any_of(
-        protected_paths_.begin(), protected_paths_.end(),
-        [&](const auto& protected_path) { return same_path_identity(protected_path, path); });
+    return std::any_of(protected_paths_.begin(), protected_paths_.end(),
+                       [&](const auto& protected_path) {
+                           return same_path_identity(protected_path, path) ||
+                                  is_entry_within(protected_path, path);
+                       });
 }
 
 bool ToolRegistry::is_snapshot_entry_protected(const std::filesystem::path& path) const {

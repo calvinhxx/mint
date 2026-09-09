@@ -105,3 +105,15 @@ target_link_libraries(mint_persistence
         mint::localization
         mint::runtime
 )
+
+add_library(mint_model_settings STATIC
+    settings/model_config_service.cpp
+    settings/model_settings_files.cpp
+)
+add_library(mint::model_settings ALIAS mint_model_settings)
+mint_configure_target(mint_model_settings)
+target_include_directories(mint_model_settings PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(mint_model_settings
+    PUBLIC mint::model
+    PRIVATE mint::filesystem mint::persistence
+)

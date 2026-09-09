@@ -1,5 +1,6 @@
 #include "agent/agent_command.hpp"
 #include "command_line.hpp"
+#include "config/model_config_command.hpp"
 #include "provider/provider_command.hpp"
 #include "support/console.hpp"
 #include "support/diagnostic_logging.hpp"
@@ -61,6 +62,9 @@ int run(int argc, char** argv) {
 
         (void)mint::cli::configure_diagnostic_logging(command_line, console);
 
+        if (command_line.mode == mint::cli::CommandMode::config) {
+            return finish(mint::cli::run_model_config_command(command_line, console));
+        }
         if (command_line.mode == mint::cli::CommandMode::provider) {
             return finish(mint::cli::run_provider_command(command_line, console));
         }

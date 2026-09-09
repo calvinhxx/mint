@@ -3,7 +3,7 @@
 #include "provider_acceptance.hpp"
 #include "provider_credentials.hpp"
 
-#include "mint/infrastructure/config.hpp"
+#include "mint/infrastructure/model_config_service.hpp"
 #include "mint/infrastructure/model_provider_client.hpp"
 #include "mint/localization/localization.hpp"
 #include "mint/runtime/terminal_text.hpp"
@@ -29,13 +29,19 @@ std::string public_endpoint(std::string endpoint) {
 Json request_limits(const ModelProviderConfig& config,
                     const ModelRequestLimits* effective_limits = nullptr) {
     const auto automatic = config.max_request_tokens == 0;
-    const auto maximum = effective_limits == nullptr
-                             ? (automatic ? model_provider_defaults::automatic_max_request_tokens
-                                          : static_cast<std::size_t>(config.max_request_tokens))
-                             : effective_limits->max_request_tokens;
+    const auto model_context = resolve_model_provider_profile(config).model_context_tokens;
+    const auto maximum =
+        effective_limits == nullptr
+            ? (automatic
+                   ? (model_context != 0 ? model_context
+                                         : model_provider_defaults::automatic_max_request_tokens)
+                   : static_cast<std::size_t>(config.max_request_tokens))
+            : effective_limits->max_request_tokens;
     const auto source =
         effective_limits == nullptr
-            ? (automatic ? std::string_view{"automatic"} : std::string_view{"config"})
+            ? (automatic ? (model_context != 0 ? std::string_view{"model_profile"}
+                                               : std::string_view{"automatic"})
+                         : std::string_view{"config"})
             : model_request_limit_source_name(effective_limits->max_request_tokens_source);
     const auto learned = effective_limits == nullptr
                              ? std::size_t{0}
@@ -50,26 +56,32 @@ Json request_limits(const ModelProviderConfig& config,
         {"max_attempts_per_request", config.max_retries + 1}};
 }
 
-Json provider_report(const CommandLine& command_line, const ModelProviderConfig& config,
+Json provider_report(const ModelConfigSnapshot& snapshot, const ModelProviderConfig& config,
                      const ModelProviderProfile& profile) {
     auto report = model_provider_profile_to_json(profile);
     report["schema_version"] = 1;
     report["operation"] = "inspect";
-    report["config"] = normalized_path(command_line.config).generic_string();
+    report["config"] = snapshot.path.generic_string();
+    report["revision"] = snapshot.revision;
     report["endpoint"] = public_endpoint(config.api_url);
     report["model"] = config.model;
     report["stream"] = config.stream;
     report["limits"] = request_limits(config);
-    if (!config.api_key_env.empty()) {
+    if (snapshot.saved_api_key && !snapshot.is_override) {
+        report["authentication"] = "local_store";
+        report["api_key_env"] = nullptr;
+        report["credential_warning"] = nullptr;
+    } else if (!config.api_key_env.empty()) {
         report["authentication"] = "environment";
         report["api_key_env"] = config.api_key_env;
         report["credential_warning"] = nullptr;
     } else {
-        report["authentication"] = config.api_key.empty() ? "none" : "inline_api_key";
+        report["authentication"] = snapshot.credential_available ? "inline_api_key" : "none";
         report["api_key_env"] = nullptr;
         report["credential_warning"] =
-            config.api_key.empty() ? Json(nullptr)
-                                   : Json(provider_detail::inline_api_key_deprecation_message());
+            snapshot.credential_available
+                ? Json(provider_detail::inline_api_key_deprecation_message())
+                : Json(nullptr);
     }
     return report;
 }
@@ -160,9 +172,23 @@ void print_acceptance(const Json& report, Console& console) {
 } // namespace
 
 int run_provider_command(const CommandLine& command_line, Console& console) {
-    auto config = load_model_provider_config(command_line.config);
+    ModelConfigService service(command_line.state_dir);
+    const auto override_path =
+        command_line.config_specified ? command_line.config : std::filesystem::path{};
+    ModelConfigSnapshot snapshot;
+    ModelProviderConfig config;
+    if (command_line.provider_action == ProviderCommandAction::test) {
+        config = service.load_runtime(override_path, &snapshot);
+    } else {
+        snapshot = service.inspect(override_path);
+        config = snapshot.config;
+    }
+    if (!snapshot.configured) {
+        throw ModelConfigError(ModelConfigErrorCode::invalid_config,
+                               message(Message::cli_config_unconfigured));
+    }
     const auto profile = resolve_model_provider_profile(config);
-    auto report = provider_report(command_line, config, profile);
+    auto report = provider_report(snapshot, snapshot.config, profile);
 
     if (command_line.provider_action == ProviderCommandAction::test) {
         constexpr long acceptance_max_completion_tokens = 1024;

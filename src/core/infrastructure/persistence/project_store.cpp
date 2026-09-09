@@ -316,6 +316,13 @@ std::filesystem::path default_mint_state_directory() {
 #endif
 }
 
+std::filesystem::path mint_model_credentials_file(std::filesystem::path state_directory) {
+    if (state_directory.empty()) {
+        state_directory = default_mint_state_directory();
+    }
+    return state_directory / "credentials.json";
+}
+
 Json managed_task_summary_to_json(const ManagedTaskSummary& summary) {
     return {{"id", summary.id},
             {"question", summary.question},
