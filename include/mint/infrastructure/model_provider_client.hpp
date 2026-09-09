@@ -48,6 +48,9 @@ struct ModelProviderProfile {
     ModelAdapter adapter = ModelAdapter::chat_completions;
     ModelProviderSource source = ModelProviderSource::compatibility_default;
     ModelProviderCapabilities capabilities{};
+    // EN: Verified model window, independent of token-rate headers. Zero means unknown.
+    // ZH-CN: 经核验的模型上下文窗口，与 token 速率响应头分离；零表示未知。
+    std::size_t model_context_tokens = 0;
 };
 
 [[nodiscard]] std::string_view model_adapter_name(ModelAdapter adapter) noexcept;
@@ -67,10 +70,9 @@ inline constexpr long max_request_tokens = 0;
 inline constexpr long request_token_safety_margin = 256;
 inline constexpr long request_token_estimate_bytes_per_token =
     static_cast<long>(model_token_estimation::serialized_bytes_per_token);
-// EN: Used until a provider advertises its own token-rate ceiling. Keeping the first request
-//     modest makes unknown OpenAI-compatible endpoints predictable.
-// ZH-CN: 在供应商返回自身 token 速率上限前使用该值。控制首次请求规模，可让未知的
-//        OpenAI 兼容端点保持可预测。
+// EN: Compatibility fallback for endpoints/models without a verified context profile. Explicit
+//     configuration and rate headers remain separate limits, not inferred model windows.
+// ZH-CN: 未知端点或型号使用兼容回退；显式配置与速率响应头是独立限制，不推断为模型窗口。
 inline constexpr std::size_t automatic_max_request_tokens = 8'000;
 
 } // namespace model_provider_defaults

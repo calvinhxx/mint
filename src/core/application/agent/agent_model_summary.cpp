@@ -52,6 +52,7 @@ Json model_usage_json(const ModelUsage& usage) {
             {"completion_tokens", usage.completion_tokens},
             {"total_tokens", usage.total_tokens},
             {"cached_tokens", usage.cached_tokens},
+            {"cache_usage_available", usage.cache_usage_available || usage.cached_tokens != 0},
             {"cache_hit_rate", model_usage::cache_hit_rate_json(usage)}};
 }
 
@@ -114,6 +115,9 @@ void record_model_call(ModelSummary& summary, const ModelReply& reply) {
         saturating_add(summary.completion_tokens, reply.usage.completion_tokens);
         saturating_add(summary.total_tokens, reply.usage.total_tokens);
         saturating_add(summary.cached_tokens, reply.usage.cached_tokens);
+        if (reply.usage.cache_usage_available || reply.usage.cached_tokens != 0) {
+            ++summary.cache_usage_reports;
+        }
     }
 }
 
@@ -139,9 +143,12 @@ Json model_summary_to_json(const ModelSummary& summary) {
         {"completion_tokens", summary.completion_tokens},
         {"total_tokens", summary.total_tokens},
         {"cached_tokens", summary.cached_tokens},
+        {"cache_usage_reports", summary.cache_usage_reports},
         {"token_budget", token_budget_to_json(summary)},
         {"cache_hit_rate",
-         model_usage::cache_hit_rate_json(summary.cached_tokens, summary.prompt_tokens)},
+         summary.cache_usage_reports != 0 && summary.cache_usage_reports == summary.calls
+             ? model_usage::cache_hit_rate_json(summary.cached_tokens, summary.prompt_tokens)
+             : Json(nullptr)},
         {"streamed_calls", summary.streamed_calls},
         {"stream_events", summary.stream_events},
         {"streamed_bytes", summary.streamed_bytes},
@@ -192,6 +199,7 @@ ModelSummary model_summary_from_json(const Json& value) {
         }
         return value.at(field).get<std::size_t>();
     };
+    summary.cache_usage_reports = read_optional_size("cache_usage_reports");
     summary.streamed_calls = read_optional_size("streamed_calls");
     summary.stream_events = read_optional_size("stream_events");
     summary.streamed_bytes = read_optional_size("streamed_bytes");
@@ -262,7 +270,8 @@ ModelSummary model_summary_from_json(const Json& value) {
         }
     }
     if (summary.attempts < summary.calls || summary.retries > summary.attempts ||
-        summary.usage_reports > summary.calls || summary.duration_ms < 0 ||
+        summary.usage_reports > summary.calls ||
+        summary.cache_usage_reports > summary.usage_reports || summary.duration_ms < 0 ||
         summary.cached_tokens > summary.prompt_tokens || summary.streamed_calls > summary.calls) {
         throw std::invalid_argument(message(Message::agent_model_summary_count_mismatch));
     }
@@ -280,12 +289,11 @@ void print_model_usage(std::ostream& output, const ModelUsage& usage) {
     }
     output << message(Message::agent_output_token_input,
                       {arg(Placeholder::input, usage.prompt_tokens)});
-    if (usage.prompt_tokens != 0) {
+    if (const auto hit_rate = model_usage::cache_hit_rate(usage); hit_rate.has_value()) {
         output << message(
             Message::agent_output_token_cache,
             {arg(Placeholder::cached, usage.cached_tokens),
-             arg(Placeholder::hit_rate,
-                 static_cast<std::size_t>(*model_usage::cache_hit_rate(usage) * 100.0))});
+             arg(Placeholder::hit_rate, static_cast<std::size_t>(*hit_rate * 100.0))});
     }
     output << message(Message::agent_output_token_output,
                       {arg(Placeholder::output, usage.completion_tokens),

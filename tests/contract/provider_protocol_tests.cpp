@@ -1150,6 +1150,7 @@ TEST(ProviderCliContractTest, CompletesResponsesStreamingToolLoop) {
     command_line.json_output = true;
     command_line.config = config_path;
     command_line.config_specified = true;
+    command_line.state_dir = temporary.path() / "state";
     command_line.root = workspace;
     command_line.root_specified = true;
     command_line.question = "读取 README.md 后用一句话说明项目用途";
@@ -1260,6 +1261,7 @@ TEST(ProviderCliContractTest, RunsSanitizedLiveProviderAcceptance) {
     command_line.provider_action = mint::cli::ProviderCommandAction::test;
     command_line.config = config_path;
     command_line.config_specified = true;
+    command_line.state_dir = temporary.path() / "state";
     command_line.json_output = true;
     std::istringstream input;
     std::ostringstream output_stream;

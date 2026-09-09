@@ -22,6 +22,16 @@ std::size_t token_count(const Json& object, const char* field) {
     return value < 0 ? 0 : static_cast<std::size_t>(value);
 }
 
+bool parse_cached_tokens(ModelUsage& target, const Json& source, const char* field) {
+    if (!source.contains(field) || !source.at(field).is_number_integer() ||
+        source.at(field).get<long long>() < 0) {
+        return false;
+    }
+    target.cached_tokens = token_count(source, field);
+    target.cache_usage_available = true;
+    return true;
+}
+
 void parse_chat_usage(ModelReply& reply, const Json& response) {
     if (!response.contains("usage") || !response.at("usage").is_object()) {
         return;
@@ -35,13 +45,13 @@ void parse_chat_usage(ModelReply& reply, const Json& response) {
     reply.usage.completion_tokens = token_count(usage, "completion_tokens");
     reply.usage.total_tokens = token_count(usage, "total_tokens");
     if (usage.contains("prompt_tokens_details") && usage.at("prompt_tokens_details").is_object()) {
-        reply.usage.cached_tokens = token_count(usage.at("prompt_tokens_details"), "cached_tokens");
+        parse_cached_tokens(reply.usage, usage.at("prompt_tokens_details"), "cached_tokens");
     }
-    if (reply.usage.cached_tokens == 0) {
-        reply.usage.cached_tokens = token_count(usage, "cached_tokens");
+    if (!reply.usage.cache_usage_available) {
+        parse_cached_tokens(reply.usage, usage, "cached_tokens");
     }
-    if (reply.usage.cached_tokens == 0) {
-        reply.usage.cached_tokens = token_count(usage, "prompt_cache_hit_tokens");
+    if (!reply.usage.cache_usage_available) {
+        parse_cached_tokens(reply.usage, usage, "prompt_cache_hit_tokens");
     }
     if (reply.usage.prompt_tokens == 0 &&
         (usage.contains("prompt_cache_hit_tokens") || usage.contains("prompt_cache_miss_tokens"))) {
@@ -68,7 +78,7 @@ void parse_responses_usage(ModelReply& reply, const Json& response) {
         reply.usage.total_tokens = reply.usage.prompt_tokens + reply.usage.completion_tokens;
     }
     if (usage.contains("input_tokens_details") && usage.at("input_tokens_details").is_object()) {
-        reply.usage.cached_tokens = token_count(usage.at("input_tokens_details"), "cached_tokens");
+        parse_cached_tokens(reply.usage, usage.at("input_tokens_details"), "cached_tokens");
     }
     reply.usage.cached_tokens = std::min(reply.usage.cached_tokens, reply.usage.prompt_tokens);
 }
@@ -88,6 +98,9 @@ void parse_anthropic_usage(ModelReply& reply, const Json& response) {
     reply.usage.completion_tokens = token_count(usage, "output_tokens");
     reply.usage.total_tokens = reply.usage.prompt_tokens + reply.usage.completion_tokens;
     reply.usage.cached_tokens = std::min(cache_read, reply.usage.prompt_tokens);
+    reply.usage.cache_usage_available = usage.contains("cache_read_input_tokens") &&
+                                        usage.at("cache_read_input_tokens").is_number_integer() &&
+                                        usage.at("cache_read_input_tokens").get<long long>() >= 0;
 }
 
 std::size_t argument_bytes(const Json& arguments) {

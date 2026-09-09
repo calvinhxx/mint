@@ -95,7 +95,7 @@ ModelReply AgentRun::request_model(const Json& available_tools) {
     output_ << message(Message::agent_output_model_request, {arg(Placeholder::turn, turn)});
     const auto request_limits = model_.request_limits(available_tools);
     const auto context_limit = effective_context_limit(options_.max_context_bytes, request_limits);
-    const auto context = compact_context(conversation_.messages(), context_limit);
+    const auto context = context_window_.prepare(conversation_.messages(), context_limit);
     if (context.dropped_groups != 0 || context.payloads_compacted) {
         emit("context_compacted", {{"turn", turn},
                                    {"full_bytes", context.full_bytes},
@@ -104,6 +104,7 @@ ModelReply AgentRun::request_model(const Json& available_tools) {
                                    {"sent_estimated_tokens", context.sent_estimated_tokens()},
                                    {"dropped_groups", context.dropped_groups},
                                    {"payloads_compacted", context.payloads_compacted},
+                                   {"history_rebuilt", context.history_rebuilt},
                                    {"context_byte_limit", context_limit},
                                    {"max_request_tokens", request_limits.max_request_tokens}});
     }
@@ -111,6 +112,7 @@ ModelReply AgentRun::request_model(const Json& available_tools) {
                              {"message_count", context.messages.size()},
                              {"full_context_bytes", context.full_bytes},
                              {"sent_context_bytes", context.sent_bytes},
+                             {"reused_prefix_bytes", context.reused_prefix_bytes},
                              {"full_context_estimated_tokens", context.full_estimated_tokens()},
                              {"sent_context_estimated_tokens", context.sent_estimated_tokens()},
                              {"context_byte_limit", context_limit},

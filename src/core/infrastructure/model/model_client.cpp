@@ -91,11 +91,17 @@ ModelProviderClient::ModelProviderClient(ModelProviderConfig config) : config_(s
 
 ModelRequestLimits ModelProviderClient::request_limits(const Json& tools) const {
     const auto automatic = config_.max_request_tokens == 0;
-    auto maximum = automatic ? model_provider_defaults::automatic_max_request_tokens
-                             : static_cast<std::size_t>(config_.max_request_tokens);
-    auto source = automatic ? ModelRequestLimitSource::automatic : ModelRequestLimitSource::config;
+    const auto profile = resolve_model_provider_profile(config_);
+    const auto known_window = profile.model_context_tokens != 0;
+    auto maximum = automatic
+                       ? (known_window ? profile.model_context_tokens
+                                       : model_provider_defaults::automatic_max_request_tokens)
+                       : static_cast<std::size_t>(config_.max_request_tokens);
+    auto source = automatic ? (known_window ? ModelRequestLimitSource::model_profile
+                                            : ModelRequestLimitSource::automatic)
+                            : ModelRequestLimitSource::config;
     if (learned_max_request_tokens_ != 0) {
-        if (automatic || learned_max_request_tokens_ <= maximum) {
+        if ((automatic && !known_window) || learned_max_request_tokens_ <= maximum) {
             maximum = learned_max_request_tokens_;
             source = ModelRequestLimitSource::response_header;
         }

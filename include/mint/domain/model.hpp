@@ -50,6 +50,7 @@ struct ModelUsage {
     std::size_t completion_tokens = 0;
     std::size_t total_tokens = 0;
     std::size_t cached_tokens = 0;
+    bool cache_usage_available = false;
 };
 
 namespace model_usage {
@@ -71,6 +72,9 @@ namespace model_usage {
 }
 
 [[nodiscard]] constexpr std::optional<double> cache_hit_rate(const ModelUsage& usage) noexcept {
+    if (!usage.available || (!usage.cache_usage_available && usage.cached_tokens == 0)) {
+        return std::nullopt;
+    }
     return cache_hit_rate(usage.cached_tokens, usage.prompt_tokens);
 }
 
@@ -81,18 +85,21 @@ namespace model_usage {
 }
 
 [[nodiscard]] inline Json cache_hit_rate_json(const ModelUsage& usage) {
-    return cache_hit_rate_json(usage.cached_tokens, usage.prompt_tokens);
+    const auto rate = cache_hit_rate(usage);
+    return rate.has_value() ? Json(*rate) : Json(nullptr);
 }
 
 } // namespace model_usage
 
-enum class ModelRequestLimitSource { unknown, automatic, config, response_header };
+enum class ModelRequestLimitSource { unknown, automatic, model_profile, config, response_header };
 
 [[nodiscard]] constexpr std::string_view
 model_request_limit_source_name(ModelRequestLimitSource source) noexcept {
     switch (source) {
     case ModelRequestLimitSource::automatic:
         return "automatic";
+    case ModelRequestLimitSource::model_profile:
+        return "model_profile";
     case ModelRequestLimitSource::config:
         return "config";
     case ModelRequestLimitSource::response_header:

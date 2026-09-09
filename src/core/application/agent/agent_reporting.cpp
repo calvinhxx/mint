@@ -81,8 +81,11 @@ void print_final_state(std::ostream& output, const AgentResult& result) {
                            arg(Placeholder::retries, result.model.retries),
                            arg(Placeholder::duration_ms, result.model.duration_ms)});
         if (result.model.usage_reports != 0) {
-            const auto hit_rate =
-                model_usage::cache_hit_rate(result.model.cached_tokens, result.model.prompt_tokens);
+            const auto hit_rate = result.model.cache_usage_reports != 0 &&
+                                          result.model.cache_usage_reports == result.model.calls
+                                      ? model_usage::cache_hit_rate(result.model.cached_tokens,
+                                                                    result.model.prompt_tokens)
+                                      : std::nullopt;
             const auto hit_rate_text =
                 hit_rate.has_value()
                     ? std::to_string(static_cast<std::size_t>(*hit_rate * 100.0)) + "%"

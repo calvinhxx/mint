@@ -127,6 +127,7 @@ struct ParsedUrl {
     bool bracketed_host = false;
     std::string host;
     std::string path;
+    std::string port;
     bool has_query_or_fragment = false;
 };
 
@@ -295,6 +296,7 @@ ParsedUrl parse_http_url(std::string_view url) {
                      .bracketed_host = bracketed_host,
                      .host = lowercase_ascii(std::string(host)),
                      .path = std::move(path),
+                     .port = std::string(port),
                      .has_query_or_fragment =
                          url.find_first_of("?#", authority_begin) != std::string_view::npos};
     if (!parsed.uses_tls && !is_loopback_host(parsed)) {
@@ -447,6 +449,17 @@ ModelProviderProfile resolve_model_provider_profile(const ModelProviderConfig& c
     profile.capabilities =
         config.capabilities.value_or(default_capabilities(profile.provider, profile.adapter));
     validate_profile(config, profile);
+    // EN: Source verified 2026-09-08: https://api-docs.deepseek.com/quick_start/pricing/
+    //     Only exact documented models at the official TLS endpoint inherit the 1M window.
+    //     Compatible proxies, aliases and unknown models keep the conservative fallback.
+    // ZH-CN: 仅官方 HTTPS 端点的明确文档型号继承 1M 窗口；代理、别名、未知型号仍保守回退。
+    if (parsed_url.uses_tls && parsed_url.host == "api.deepseek.com" &&
+        (parsed_url.port.empty() || parsed_url.port == "443") &&
+        !parsed_url.has_query_or_fragment && config.adapter == ModelAdapter::chat_completions &&
+        (parsed_url.path == "/chat/completions" || parsed_url.path == "/v1/chat/completions") &&
+        (config.model == "deepseek-v4-flash" || config.model == "deepseek-v4-pro")) {
+        profile.model_context_tokens = 1'000'000;
+    }
     return profile;
 }
 
@@ -454,6 +467,9 @@ Json model_provider_profile_to_json(const ModelProviderProfile& profile) {
     return {{"provider", model_provider_name(profile.provider)},
             {"source", model_provider_source_name(profile.source)},
             {"adapter", model_adapter_name(profile.adapter)},
+            {"model_context_tokens", profile.model_context_tokens == 0
+                                         ? Json(nullptr)
+                                         : Json(profile.model_context_tokens)},
             {"capabilities",
              {{"function_tools", profile.capabilities.function_tools},
               {"streaming", profile.capabilities.streaming},

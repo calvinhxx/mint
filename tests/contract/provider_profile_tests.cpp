@@ -1,5 +1,7 @@
 #include "provider/provider_command.hpp"
+#include "provider/provider_credentials.hpp"
 
+#include "mint/domain/runtime_settings.hpp"
 #include "mint/infrastructure/config.hpp"
 #include "mint/infrastructure/model_provider_client.hpp"
 #include "model/model_protocol.hpp"
@@ -18,6 +20,16 @@
 #include <vector>
 
 namespace {
+
+TEST(ProviderCredentialsContractTest, EnvironmentOverrideReplacesInlineAuthentication) {
+    mint::ModelProviderConfig config;
+    config.api_key = "inline-secret";
+
+    mint::cli::provider_detail::apply_api_key_environment_override(config, "MODEL_API_KEY");
+
+    EXPECT_TRUE(config.api_key.empty());
+    EXPECT_EQ(config.api_key_env, "MODEL_API_KEY");
+}
 
 class TemporaryDirectory final {
   public:
@@ -439,6 +451,47 @@ TEST(ProviderRequestBudgetContractTest, UsesCompatibilityBudgetBeforeHeadersAreA
     EXPECT_EQ(explicit_limits.max_request_tokens_source, mint::ModelRequestLimitSource::config);
 }
 
+TEST(ProviderRequestBudgetContractTest, UsesVerifiedWindowOnlyForExactOfficialDeepSeekModels) {
+    for (const auto* model : {"deepseek-v4-flash", "deepseek-v4-pro"}) {
+        auto config = config_for("https://api.deepseek.com/chat/completions");
+        config.model = model;
+        // EN: GUI-managed configurations may retain a custom provider label for official URLs.
+        // ZH-CN: GUI 管理的官方 URL 配置可能仍保留 custom 供应商标签。
+        config.provider = mint::ModelProvider::custom;
+        mint::ModelProviderClient client(config);
+        const auto limits = client.request_limits(tools());
+        EXPECT_EQ(limits.max_request_tokens, 1'000'000U);
+        EXPECT_EQ(limits.max_request_tokens_source, mint::ModelRequestLimitSource::model_profile);
+        EXPECT_EQ(mint::model_request_limit_source_name(limits.max_request_tokens_source),
+                  "model_profile");
+        EXPECT_GT(limits.available_input_bytes(),
+                  mint::runtime_defaults::managed_max_context_bytes);
+
+        config.max_request_tokens = 16'384;
+        mint::ModelProviderClient explicit_client(config);
+        const auto explicit_limits = explicit_client.request_limits(tools());
+        EXPECT_EQ(explicit_limits.max_request_tokens, 16'384U);
+        EXPECT_EQ(explicit_limits.max_request_tokens_source, mint::ModelRequestLimitSource::config);
+    }
+    for (const auto* endpoint : {"https://gateway.example.test/v1/chat/completions",
+                                 "https://api.deepseek.com.evil.test/chat/completions",
+                                 "https://api.deepseek.com:8443/chat/completions",
+                                 "https://api.deepseek.com/chat/completions?proxy=1",
+                                 "https://api.deepseek.com/unknown"}) {
+        auto config = config_for(endpoint);
+        config.model = "deepseek-v4-flash";
+        config.provider = mint::ModelProvider::deepseek;
+        mint::ModelProviderClient client(config);
+        EXPECT_EQ(client.request_limits(tools()).max_request_tokens, 8000U);
+        EXPECT_EQ(client.request_limits(tools()).max_request_tokens_source,
+                  mint::ModelRequestLimitSource::automatic);
+    }
+    auto unknown = config_for("https://api.deepseek.com/chat/completions");
+    unknown.model = "deepseek-chat";
+    mint::ModelProviderClient unknown_client(unknown);
+    EXPECT_EQ(unknown_client.request_limits(tools()).max_request_tokens, 8000U);
+}
+
 TEST(ProviderConfigContractTest, LoadsCommittedProviderTemplatesWithoutSecrets) {
     struct ExpectedProfile {
         const char* file;
@@ -557,9 +610,12 @@ TEST(ProviderConfigContractTest, RejectsRemotePlaintextWithOrWithoutCredentials)
 }
 
 TEST(ProviderCliContractTest, ReportsCapabilitiesWithoutReadingOrPrintingApiKeys) {
+    TemporaryDirectory temporary;
     mint::cli::CommandLine command_line;
     command_line.mode = mint::cli::CommandMode::provider;
     command_line.config = fixed_config("groq-chat.json");
+    command_line.config_specified = true;
+    command_line.state_dir = temporary.path() / "state";
     command_line.json_output = true;
 
     std::istringstream input;
@@ -588,7 +644,6 @@ TEST(ProviderCliContractTest, ReportsCapabilitiesWithoutReadingOrPrintingApiKeys
     EXPECT_FALSE(report.at("capabilities").at("requires_tool_call_content"));
     EXPECT_FALSE(report.contains("api_key"));
 
-    TemporaryDirectory temporary;
     const auto inline_key_config = temporary.path() / "inline.json";
     write_json(inline_key_config,
                {{"provider", "custom"},
@@ -635,6 +690,8 @@ TEST(ProviderCliContractTest, HumanReportEscapesTerminalControls) {
     mint::cli::CommandLine command_line;
     command_line.mode = mint::cli::CommandMode::provider;
     command_line.config = config_path;
+    command_line.config_specified = true;
+    command_line.state_dir = temporary.path() / "state";
     std::istringstream input;
     std::ostringstream output;
     std::ostringstream error;

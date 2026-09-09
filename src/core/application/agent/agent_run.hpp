@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agent_context.hpp"
 #include "agent_conversation.hpp"
 
 #include "mint/application/agent.hpp"
@@ -48,6 +49,7 @@ class AgentRun final {
     std::string user_request_;
     std::string system_prompt_;
     Conversation conversation_;
+    ContextWindow context_window_;
     AgentResult result_;
     std::deque<ToolCall> pending_calls_;
     std::optional<ToolCall> in_flight_call_;

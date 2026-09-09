@@ -74,6 +74,7 @@ struct ModelSummary {
     std::size_t completion_tokens = 0;
     std::size_t total_tokens = 0;
     std::size_t cached_tokens = 0;
+    std::size_t cache_usage_reports = 0;
     std::size_t max_total_tokens = runtime_defaults::max_total_tokens;
     std::size_t streamed_calls = 0;
     std::size_t stream_events = 0;

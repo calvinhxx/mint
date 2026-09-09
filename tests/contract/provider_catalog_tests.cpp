@@ -94,6 +94,31 @@ TEST(MainstreamProviderChatProtocolTest, ReconstructsPromptTotalFromDeepSeekCach
     EXPECT_EQ(reply.usage.total_tokens, 108);
 }
 
+TEST(MainstreamProviderChatProtocolTest, DistinguishesMissingCacheUsageAndExplicitZero) {
+    mint::Json response = {
+        {"choices", mint::Json::array({{{"message", {{"role", "assistant"}, {"content", "ok"}}}}})},
+        {"usage", {{"prompt_tokens", 100}, {"completion_tokens", 8}, {"total_tokens", 108}}}};
+    const auto missing =
+        mint::detail::parse_provider_response(mint::ModelAdapter::chat_completions, response);
+    EXPECT_FALSE(missing.usage.cache_usage_available);
+    EXPECT_FALSE(mint::model_usage::cache_hit_rate(missing.usage).has_value());
+
+    response["usage"]["prompt_tokens_details"] = {{"cached_tokens", 0}};
+    response["usage"]["prompt_cache_hit_tokens"] = 50;
+    const auto explicit_zero =
+        mint::detail::parse_provider_response(mint::ModelAdapter::chat_completions, response);
+    EXPECT_TRUE(explicit_zero.usage.cache_usage_available);
+    EXPECT_EQ(explicit_zero.usage.cached_tokens, 0U);
+    ASSERT_TRUE(mint::model_usage::cache_hit_rate(explicit_zero.usage).has_value());
+    EXPECT_DOUBLE_EQ(*mint::model_usage::cache_hit_rate(explicit_zero.usage), 0.0);
+
+    response["usage"]["prompt_tokens_details"]["cached_tokens"] = nullptr;
+    const auto fallback =
+        mint::detail::parse_provider_response(mint::ModelAdapter::chat_completions, response);
+    EXPECT_TRUE(fallback.usage.cache_usage_available);
+    EXPECT_EQ(fallback.usage.cached_tokens, 50U);
+}
+
 TEST(MainstreamProviderAnthropicProtocolTest, MapsCanonicalRequestToMessagesApi) {
     const auto messages =
         mint::Json::array({{{"role", "system"}, {"content", "Keep changes small."}},
