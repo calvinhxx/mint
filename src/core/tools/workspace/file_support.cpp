@@ -1,9 +1,9 @@
 #include "file_support.hpp"
 
 #include "mint/localization/localization.hpp"
+#include "mint/platform/file.hpp"
 
 #include <atomic>
-#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <stdexcept>
@@ -45,13 +45,10 @@ std::filesystem::path write_temporary_file(const std::filesystem::path& target,
                                            std::string_view content) {
     for (int attempt = 0; attempt < 100; ++attempt) {
         const auto path = unique_sibling_path(target, "tmp");
-#if defined(_WIN32)
-        auto* output = ::_wfopen(path.c_str(), L"wbx");
-#else
-        auto* output = std::fopen(path.c_str(), "wbx");
-#endif
+        std::error_code error;
+        auto* output = platform::create_exclusive_file(path, error);
         if (output == nullptr) {
-            if (errno == EEXIST) {
+            if (error == std::errc::file_exists) {
                 continue;
             }
             throw std::runtime_error(message(Message::tools_file_support_temp_file_failed));

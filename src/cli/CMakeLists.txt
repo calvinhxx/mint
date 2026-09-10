@@ -27,11 +27,18 @@ target_link_libraries(mint_cli
         mint::model_settings
         mint::persistence
         mint::project
+        mint::platform
         mint::runtime
         mint::tools
 )
 
-add_executable(mint main.cpp)
+if(WIN32)
+    set(mint_entry_source platform/entry_windows.cpp)
+else()
+    set(mint_entry_source platform/entry_posix.cpp)
+endif()
+
+add_executable(mint main.cpp ${mint_entry_source})
 mint_configure_target(mint)
 target_include_directories(mint PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>

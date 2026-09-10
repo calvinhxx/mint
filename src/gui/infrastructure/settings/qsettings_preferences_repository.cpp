@@ -1,5 +1,7 @@
 #include "qsettings_preferences_repository.hpp"
 
+#include "support/qt_path.hpp"
+
 #include <QSettings>
 #include <QString>
 
@@ -31,15 +33,6 @@ QString qstring_theme_code(mint::desktop::ThemeMode theme) {
 
 std::optional<mint::desktop::ThemeMode> parse_theme(const QString& value) {
     return mint::desktop::theme_mode_from_code(value.toStdString());
-}
-
-std::filesystem::path path_from_qstring(const QString& path) {
-#if defined(_WIN32)
-    return std::filesystem::path(path.toStdWString());
-#else
-    const auto value = path.toUtf8();
-    return std::filesystem::path(value.constData());
-#endif
 }
 
 } // namespace
@@ -76,7 +69,7 @@ bool QSettingsPreferencesRepository::save(const mint::desktop::GuiPreferences& p
 }
 
 std::filesystem::path QSettingsPreferencesRepository::legacy_model_config() const {
-    return path_from_qstring(settings_->value(model_config_key).toString());
+    return mint::gui::path_from_qstring(settings_->value(model_config_key).toString());
 }
 
 bool QSettingsPreferencesRepository::clear_legacy_model_config(

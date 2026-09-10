@@ -2,6 +2,7 @@
 #include "support/console.hpp"
 
 #include "mint/localization/localization.hpp"
+#include "mint/platform/path.hpp"
 
 #include <cctype>
 #include <filesystem>
@@ -71,19 +72,6 @@ std::optional<CommandMode> parse_mode(const std::string& argument) {
     return std::nullopt;
 }
 
-std::filesystem::path utf8_path(std::string_view argument) {
-#if defined(_WIN32)
-    std::u8string encoded;
-    encoded.reserve(argument.size());
-    for (const unsigned char byte : argument) {
-        encoded.push_back(static_cast<char8_t>(byte));
-    }
-    return std::filesystem::path(encoded);
-#else
-    return std::filesystem::path(argument);
-#endif
-}
-
 bool valid_environment_name(std::string_view value) {
     if (value.empty() ||
         (value.front() != '_' && std::isalpha(static_cast<unsigned char>(value.front())) == 0)) {
@@ -134,12 +122,12 @@ void parse_config_options(CommandLine& result, int begin, int argc, char** argv)
                 throw std::invalid_argument(text(Message::cli_config_options));
             }
             if (argument == "--state-dir") {
-                result.state_dir = utf8_path(argv[index]);
+                result.state_dir = platform::path_from_utf8(argv[index]);
             } else if (argument == "--config") {
                 if (std::string_view(argv[index]).empty()) {
                     missing_value("--config", text(Message::cli_value_json_path));
                 }
-                result.config = utf8_path(argv[index]);
+                result.config = platform::path_from_utf8(argv[index]);
                 result.config_specified = true;
             } else if (argument == "--lang") {
                 result.language = argv[index];
@@ -148,7 +136,7 @@ void parse_config_options(CommandLine& result, int begin, int argc, char** argv)
             } else if (argument == "--log-file-level") {
                 result.log_file_level = argv[index];
             } else {
-                result.log_dir = utf8_path(argv[index]);
+                result.log_dir = platform::path_from_utf8(argv[index]);
             }
         } else {
             // EN: Never echo unknown arguments: a caller may have pasted a credential.
@@ -264,7 +252,7 @@ CommandLine parse_arguments(int argc, char** argv) {
             if (++index >= argc) {
                 missing_value("--allow-write-path", text(Message::cli_value_relative_path));
             }
-            result.allowed_write_paths.emplace_back(utf8_path(argv[index]));
+            result.allowed_write_paths.emplace_back(platform::path_from_utf8(argv[index]));
             result.policy_conflict = true;
         } else if (argument == "--allow-command") {
             if (++index >= argc) {
@@ -290,7 +278,7 @@ CommandLine parse_arguments(int argc, char** argv) {
             if (++index >= argc) {
                 missing_value("--cancel-file", text(Message::cli_value_file_path));
             }
-            result.cancel_file = utf8_path(argv[index]);
+            result.cancel_file = platform::path_from_utf8(argv[index]);
         } else if (argument == "--resume") {
             result.resume_session = true;
         } else if (argument == "--retry-inflight") {
@@ -308,7 +296,7 @@ CommandLine parse_arguments(int argc, char** argv) {
             if (++index >= argc || std::string_view(argv[index]).empty()) {
                 missing_value("--config", text(Message::cli_value_json_path));
             }
-            result.config = utf8_path(argv[index]);
+            result.config = platform::path_from_utf8(argv[index]);
             result.config_specified = true;
         } else if (argument == "--api-key-env") {
             if (++index >= argc) {
@@ -333,23 +321,23 @@ CommandLine parse_arguments(int argc, char** argv) {
             if (++index >= argc) {
                 missing_value("--log-dir", text(Message::cli_value_directory_path));
             }
-            result.log_dir = utf8_path(argv[index]);
+            result.log_dir = platform::path_from_utf8(argv[index]);
         } else if (argument == "--policy") {
             if (++index >= argc) {
                 missing_value("--policy", text(Message::cli_value_json_path));
             }
-            result.policy = utf8_path(argv[index]);
+            result.policy = platform::path_from_utf8(argv[index]);
         } else if (argument == "--root") {
             if (++index >= argc) {
                 missing_value("--root", text(Message::cli_value_path));
             }
-            result.root = utf8_path(argv[index]);
+            result.root = platform::path_from_utf8(argv[index]);
             result.root_specified = true;
         } else if (argument == "--state-dir") {
             if (++index >= argc) {
                 missing_value("--state-dir", text(Message::cli_value_path));
             }
-            result.state_dir = utf8_path(argv[index]);
+            result.state_dir = platform::path_from_utf8(argv[index]);
         } else if (argument == "--task") {
             if (++index >= argc) {
                 missing_value("--task", text(Message::cli_value_task_id));
@@ -359,12 +347,12 @@ CommandLine parse_arguments(int argc, char** argv) {
             if (++index >= argc) {
                 missing_value("--events-jsonl", text(Message::cli_value_file_path));
             }
-            result.events_jsonl = utf8_path(argv[index]);
+            result.events_jsonl = platform::path_from_utf8(argv[index]);
         } else if (argument == "--session") {
             if (++index >= argc) {
                 missing_value("--session", text(Message::cli_value_file_path));
             }
-            result.session = utf8_path(argv[index]);
+            result.session = platform::path_from_utf8(argv[index]);
         } else if (argument == "--max-turns") {
             if (++index >= argc) {
                 missing_value("--max-turns", text(Message::cli_value_number));

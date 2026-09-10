@@ -1,3 +1,4 @@
+add_subdirectory(support)
 add_subdirectory(application)
 add_subdirectory(infrastructure)
 add_subdirectory(ui)

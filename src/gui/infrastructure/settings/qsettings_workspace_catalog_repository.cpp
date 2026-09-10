@@ -1,5 +1,7 @@
 #include "qsettings_workspace_catalog_repository.hpp"
 
+#include "support/qt_path.hpp"
+
 #include <QSettings>
 #include <QStringList>
 
@@ -9,24 +11,6 @@ namespace {
 const auto workspace_roots_key = QStringLiteral("workspaces/v1/roots");
 const auto workspace_task_counts_key = QStringLiteral("workspaces/v1/task-counts");
 const auto last_active_root_key = QStringLiteral("workspaces/v1/last-active-root");
-
-QString qstring_from_path(const std::filesystem::path& path) {
-#if defined(_WIN32)
-    return QString::fromStdWString(path.wstring());
-#else
-    const auto value = path.native();
-    return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
-#endif
-}
-
-std::filesystem::path path_from_qstring(const QString& path) {
-#if defined(_WIN32)
-    return std::filesystem::path(path.toStdWString());
-#else
-    const auto value = path.toUtf8();
-    return std::filesystem::path(value.constData());
-#endif
-}
 
 } // namespace
 
@@ -50,11 +34,12 @@ QSettingsWorkspaceCatalogRepository::load() const {
         return std::nullopt;
     }
     mint::desktop::WorkspaceCatalogState catalog;
-    catalog.last_active_root = path_from_qstring(settings_->value(last_active_root_key).toString());
+    catalog.last_active_root =
+        mint::gui::path_from_qstring(settings_->value(last_active_root_key).toString());
     const auto roots = settings_->value(workspace_roots_key).toStringList();
     catalog.roots.reserve(static_cast<std::size_t>(roots.size()));
     for (const auto& root : roots) {
-        catalog.roots.push_back(path_from_qstring(root));
+        catalog.roots.push_back(mint::gui::path_from_qstring(root));
     }
     const auto stored_counts = settings_->value(workspace_task_counts_key).toList();
     catalog.task_counts.reserve(static_cast<std::size_t>(stored_counts.size()));
@@ -65,7 +50,8 @@ QSettingsWorkspaceCatalogRepository::load() const {
         const auto unarchived =
             fields.value(QStringLiteral("unarchived")).toULongLong(&unarchived_ok);
         const auto archived = fields.value(QStringLiteral("archived")).toULongLong(&archived_ok);
-        const auto root = path_from_qstring(fields.value(QStringLiteral("root")).toString());
+        const auto root =
+            mint::gui::path_from_qstring(fields.value(QStringLiteral("root")).toString());
         if (!root.empty() && unarchived_ok && archived_ok) {
             catalog.task_counts.push_back({.root = root,
                                            .unarchived = static_cast<std::size_t>(unarchived),
@@ -80,13 +66,13 @@ bool QSettingsWorkspaceCatalogRepository::save(
     QStringList roots;
     roots.reserve(static_cast<qsizetype>(catalog.roots.size()));
     for (const auto& root : catalog.roots) {
-        roots.push_back(qstring_from_path(root));
+        roots.push_back(mint::gui::qstring_from_path(root));
     }
     QVariantList stored_counts;
     stored_counts.reserve(static_cast<qsizetype>(catalog.task_counts.size()));
     for (const auto& counts : catalog.task_counts) {
         QVariantMap fields;
-        fields.insert(QStringLiteral("root"), qstring_from_path(counts.root));
+        fields.insert(QStringLiteral("root"), mint::gui::qstring_from_path(counts.root));
         fields.insert(QStringLiteral("unarchived"),
                       QVariant::fromValue<qulonglong>(counts.unarchived));
         fields.insert(QStringLiteral("archived"), QVariant::fromValue<qulonglong>(counts.archived));
@@ -94,7 +80,8 @@ bool QSettingsWorkspaceCatalogRepository::save(
     }
     settings_->setValue(workspace_roots_key, roots);
     settings_->setValue(workspace_task_counts_key, stored_counts);
-    settings_->setValue(last_active_root_key, qstring_from_path(catalog.last_active_root));
+    settings_->setValue(last_active_root_key,
+                        mint::gui::qstring_from_path(catalog.last_active_root));
     settings_->sync();
     return settings_->status() == QSettings::NoError;
 }

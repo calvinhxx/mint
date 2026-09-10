@@ -1,3 +1,4 @@
+add_subdirectory(platform)
 add_subdirectory(localization)
 add_subdirectory(domain)
 

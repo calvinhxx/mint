@@ -1,14 +1,10 @@
 #include "path_identity.hpp"
 
+#include "mint/platform/file.hpp"
+
 #include <optional>
 #include <string_view>
 #include <system_error>
-
-#if defined(_WIN32)
-#include <windows.h>
-#elif defined(__unix__) || defined(__APPLE__)
-#include <sys/stat.h>
-#endif
 
 namespace mint::tools::detail {
 namespace {
@@ -64,44 +60,6 @@ bool has_path_prefix(const std::filesystem::path& root, const std::filesystem::p
     return true;
 }
 
-bool same_existing_entry(const std::filesystem::path& left, const std::filesystem::path& right) {
-#if defined(_WIN32)
-    constexpr DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-    constexpr DWORD flags = FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT;
-    const auto open = [&](const std::filesystem::path& path) {
-        return ::CreateFileW(path.c_str(), 0, sharing, nullptr, OPEN_EXISTING, flags, nullptr);
-    };
-    const HANDLE left_handle = open(left);
-    if (left_handle == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    const HANDLE right_handle = open(right);
-    if (right_handle == INVALID_HANDLE_VALUE) {
-        ::CloseHandle(left_handle);
-        return false;
-    }
-    BY_HANDLE_FILE_INFORMATION left_info{};
-    BY_HANDLE_FILE_INFORMATION right_info{};
-    const bool equal = ::GetFileInformationByHandle(left_handle, &left_info) != FALSE &&
-                       ::GetFileInformationByHandle(right_handle, &right_info) != FALSE &&
-                       left_info.dwVolumeSerialNumber == right_info.dwVolumeSerialNumber &&
-                       left_info.nFileIndexHigh == right_info.nFileIndexHigh &&
-                       left_info.nFileIndexLow == right_info.nFileIndexLow;
-    ::CloseHandle(right_handle);
-    ::CloseHandle(left_handle);
-    return equal;
-#elif defined(__unix__) || defined(__APPLE__)
-    struct stat left_status = {};
-    struct stat right_status = {};
-    return ::lstat(left.c_str(), &left_status) == 0 && ::lstat(right.c_str(), &right_status) == 0 &&
-           left_status.st_dev == right_status.st_dev && left_status.st_ino == right_status.st_ino;
-#else
-    std::error_code error;
-    const bool equal = std::filesystem::equivalent(left, right, error);
-    return !error && equal;
-#endif
-}
-
 std::optional<std::filesystem::path>
 actual_entry_name(const std::filesystem::path& parent, const std::filesystem::path& candidate,
                   const std::filesystem::path& requested_name) {
@@ -120,7 +78,7 @@ actual_entry_name(const std::filesystem::path& parent, const std::filesystem::pa
         const auto entry_name = entry->path().filename();
         if (!spelling_match.has_value() &&
             ascii_case_equal(requested_name.string(), entry_name.string()) &&
-            same_existing_entry(candidate, entry->path())) {
+            platform::same_existing_entry(candidate, entry->path())) {
             spelling_match = entry_name;
         }
     }

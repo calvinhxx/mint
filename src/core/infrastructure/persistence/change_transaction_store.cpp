@@ -2,23 +2,15 @@
 
 #include "mint/infrastructure/session_store.hpp"
 #include "mint/localization/localization.hpp"
+#include "mint/platform/file.hpp"
 
 #include "filesystem/output_path.hpp"
 
-#include <cerrno>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
-
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <fcntl.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
 
 namespace mint {
 namespace {
@@ -37,26 +29,7 @@ std::filesystem::path checked_transaction_path(std::filesystem::path path) {
 } // namespace
 
 struct ChangeTransactionStore::LockState {
-#if defined(_WIN32)
-    HANDLE handle = INVALID_HANDLE_VALUE;
-    OVERLAPPED overlapped{};
-
-    ~LockState() {
-        if (handle != INVALID_HANDLE_VALUE) {
-            (void)::UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &overlapped);
-            (void)::CloseHandle(handle);
-        }
-    }
-#else
-    int descriptor = -1;
-
-    ~LockState() {
-        if (descriptor >= 0) {
-            (void)::flock(descriptor, LOCK_UN);
-            (void)::close(descriptor);
-        }
-    }
-#endif
+    std::unique_ptr<std::FILE, decltype(&std::fclose)> stream{nullptr, &std::fclose};
 };
 
 std::unique_ptr<ChangeTransactionStore::LockState>
@@ -65,44 +38,17 @@ ChangeTransactionStore::acquire_lock(const std::filesystem::path& transaction_pa
     const auto path = infrastructure_detail::validated_output_path(
         change_transaction_lock_path(transaction_path), message(Message::label_changeset_lock),
         infrastructure_detail::HardLinkPolicy::reject);
-#if defined(_WIN32)
-    state->handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                                  FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
-                                  FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (state->handle == INVALID_HANDLE_VALUE) {
-        throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(),
-                                message(Message::persistence_transaction_open_lock_failed));
+    std::error_code error;
+    state->stream.reset(platform::open_lock_file(path, error));
+    if (!state->stream) {
+        throw std::system_error(error, message(Message::persistence_transaction_open_lock_failed));
     }
-    if (!::LockFileEx(state->handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0,
-                      MAXDWORD, MAXDWORD, &state->overlapped)) {
-        const auto error = ::GetLastError();
-        if (error == ERROR_LOCK_VIOLATION) {
+    if (!platform::try_lock_file(state->stream.get(), error)) {
+        if (!error) {
             throw std::runtime_error(message(Message::persistence_transaction_locked));
         }
-        throw std::system_error(static_cast<int>(error), std::system_category(),
-                                message(Message::persistence_transaction_lock_failed));
+        throw std::system_error(error, message(Message::persistence_transaction_lock_failed));
     }
-#else
-    int flags = O_CREAT | O_RDWR;
-#if defined(O_CLOEXEC)
-    flags |= O_CLOEXEC;
-#endif
-#if defined(O_NOFOLLOW)
-    flags |= O_NOFOLLOW;
-#endif
-    state->descriptor = ::open(path.c_str(), flags, S_IRUSR | S_IWUSR);
-    if (state->descriptor < 0) {
-        throw std::system_error(errno, std::generic_category(),
-                                message(Message::persistence_transaction_open_lock_failed));
-    }
-    if (::flock(state->descriptor, LOCK_EX | LOCK_NB) != 0) {
-        if (errno == EWOULDBLOCK || errno == EAGAIN) {
-            throw std::runtime_error(message(Message::persistence_transaction_locked));
-        }
-        throw std::system_error(errno, std::generic_category(),
-                                message(Message::persistence_transaction_lock_failed));
-    }
-#endif
     return state;
 }
 

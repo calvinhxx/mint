@@ -25,3 +25,11 @@ mint_add_gtest(mint_model_config_tests
     TEST_PREFIX "unit."
     LABELS unit model-config
 )
+
+mint_add_gtest(mint_platform_tests
+    GTEST_MAIN
+    SOURCES platform_tests.cpp platform_file_tests.cpp
+    LIBRARIES mint::platform
+    TEST_PREFIX "unit."
+    LABELS unit platform
+)

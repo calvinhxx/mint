@@ -1,6 +1,11 @@
+#include "infrastructure/cli/mint_cli_command_builder.hpp"
 #include "infrastructure/cli/mint_cli_protocol.hpp"
 
+#include "mint/domain/model.hpp"
+
 #include <gtest/gtest.h>
+
+#include <algorithm>
 
 namespace {
 
@@ -8,6 +13,33 @@ using mint::desktop::ApprovalKind;
 using mint::desktop::RunEventKind;
 using mint::infrastructure::desktop::InteractionKind;
 using mint::infrastructure::desktop::MintCliProtocol;
+
+TEST(DesktopProtocol, CliPathArgumentsAndResponsesPreserveUnicodeNativePaths) {
+    auto path = std::filesystem::path(u8"项目/é space/运行🦊/events.jsonl");
+    path.make_preferred();
+    const auto utf8 = path.u8string();
+    const std::string expected(utf8.begin(), utf8.end());
+    mint::infrastructure::desktop::MintCliCommandBuilder builder;
+    const auto arguments = builder.run({.root = path, .config = path, .question = "Inspect"}, path);
+    for (const auto* option : {"--root", "--config", "--cancel-file"}) {
+        const auto found = std::find(arguments.begin(), arguments.end(), option);
+        ASSERT_NE(found, arguments.end());
+        ASSERT_NE(found + 1, arguments.end());
+        EXPECT_EQ(*(found + 1), expected);
+    }
+
+    std::string error;
+    const auto status = MintCliProtocol::parse_status(
+        mint::Json{{"state_directory", expected}, {"tasks", mint::Json::array()}}.dump(), error);
+    ASSERT_TRUE(status.has_value()) << error;
+    EXPECT_EQ(status->state_directory.native(), path.native());
+    const mint::Json ready = {{"channel", "mint_interaction"},
+                              {"type", "task_ready"},
+                              {"data", {{"task_id", "task-1"}, {"events_path", expected}}}};
+    const auto interaction = MintCliProtocol::parse_interaction(ready.dump());
+    ASSERT_TRUE(interaction.has_value());
+    EXPECT_EQ(interaction->events_path.native(), path.native());
+}
 
 TEST(DesktopProtocol, NormalizesEventJsonIntoDesktopTypes) {
     const auto event = MintCliProtocol::parse_event(

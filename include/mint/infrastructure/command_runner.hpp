@@ -48,7 +48,7 @@ class CommandRunner {
     [[nodiscard]] Json run(const Json& arguments) const;
 
   private:
-    struct NativeSandboxState;
+    struct SandboxState;
 
     [[nodiscard]] Json run_command(const Json& arguments) const;
 
@@ -64,12 +64,7 @@ class CommandRunner {
     CommandResourceLimits resource_limits_{};
     std::shared_ptr<TaskControl> task_control_;
     CommandApproval approval_;
-    std::filesystem::path sandbox_executable_;
-    std::vector<std::string> sandbox_arguments_;
-    std::string sandbox_backend_ = "none";
-    bool sandbox_sets_working_directory_ = false;
-    bool sandbox_wraps_command_ = false;
-    std::unique_ptr<NativeSandboxState> native_sandbox_;
+    std::unique_ptr<SandboxState> sandbox_;
 };
 
 } // namespace mint

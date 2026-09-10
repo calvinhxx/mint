@@ -13,8 +13,9 @@ C++ 格式由 `.clang-format` 统一：4 空格缩进、100 列，控制流始�
 - application 依赖 ports，不直接依赖具体 provider、文件系统或进程实现。
 - 协议名、事件名等稳定标识集中定义，业务代码不重复写字符串常量。
 - 只有独立职责或独立依赖边界才值得增加 CMake target；不要创建整层 facade。
+- 跨平台通用行为通过 `mint::platform` 调用；特定模块的原生实现放在模块的 `native/` 目录，由 CMake 选择。业务代码和公共头文件不写平台条件编译，也不暴露系统 SDK 类型。
 
-目录和依赖规则由 `architecture_module_layout`、`architecture_application_boundary` 等契约测试检查。
+目录和依赖规则由 `architecture_module_layout`、`architecture_application_boundary`、`architecture_platform_boundary` 等契约测试检查。
 
 ## 注释
 

@@ -1,5 +1,6 @@
 #include "task_workspace_page.hpp"
 
+#include "support/qt_path.hpp"
 #include "ui/components/evidence_panel.hpp"
 #include "ui/components/run_conversation.hpp"
 #include "ui/components/settings_panel.hpp"
@@ -27,23 +28,6 @@
 
 namespace mint::ui {
 namespace {
-
-std::filesystem::path path_from_qstring(const QString& path) {
-#if defined(_WIN32)
-    return std::filesystem::path(path.toStdWString());
-#else
-    return std::filesystem::path(path.toUtf8().constData());
-#endif
-}
-
-QString qstring_from_path(const std::filesystem::path& path) {
-#if defined(_WIN32)
-    return QString::fromStdWString(path.wstring());
-#else
-    const auto value = path.native();
-    return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
-#endif
-}
 
 std::string string_from_qstring(const QString& value) {
     const auto bytes = value.toUtf8();
@@ -230,7 +214,7 @@ void TaskWorkspacePage::connect_actions() {
             &TaskWorkspacePage::choose_project);
     connect(sidebar_, &TaskSidebar::workspace_selected, this, [this](const QString& path) {
         pending_new_task_root_.reset();
-        const auto root = desktop::normalize_workspace_root(path_from_qstring(path));
+        const auto root = desktop::normalize_workspace_root(mint::gui::path_from_qstring(path));
         if (root == controller_.state().root) {
             sidebar_->render(controller_.state(), desktop::WorkspaceChange::tasks);
             return;
@@ -243,7 +227,7 @@ void TaskWorkspacePage::connect_actions() {
     });
     connect(sidebar_, &TaskSidebar::workspace_remove_requested, this, [this](const QString& path) {
         const auto previous_root = controller_.state().root;
-        if (!controller_.remove_root(path_from_qstring(path))) {
+        if (!controller_.remove_root(mint::gui::path_from_qstring(path))) {
             sidebar_->render(controller_.state(), desktop::WorkspaceChange::tasks);
             return;
         }
@@ -252,7 +236,7 @@ void TaskWorkspacePage::connect_actions() {
         }
     });
     connect(sidebar_, &TaskSidebar::new_task_requested, this, [this](const QString& path) {
-        const auto root = desktop::normalize_workspace_root(path_from_qstring(path));
+        const auto root = desktop::normalize_workspace_root(mint::gui::path_from_qstring(path));
         if (root == controller_.state().root) {
             sidebar_->render(controller_.state(), desktop::WorkspaceChange::tasks);
             controller_.create_task();
@@ -372,8 +356,8 @@ void TaskWorkspacePage::render_model_gate() {
 
 void TaskWorkspacePage::render(desktop::WorkspaceChange change) {
     const auto& state = controller_.state();
-    const auto next_draft_key =
-        qstring_from_path(state.root) + QChar(0x1f) + QString::fromStdString(state.task_id);
+    const auto next_draft_key = mint::gui::qstring_from_path(state.root) + QChar(0x1f) +
+                                QString::fromStdString(state.task_id);
     if (draft_key_ != next_draft_key) {
         if (!draft_key_.isEmpty()) {
             const auto draft = composer_->draft();
@@ -469,7 +453,7 @@ void TaskWorkspacePage::choose_project() {
     project_dialog_ = dialog;
     dialog->setObjectName(QStringLiteral("MintProjectDialog"));
     dialog->setWindowTitle(text(localization::Message::gui_project_pick_title));
-    dialog->setDirectory(qstring_from_path(controller_.state().root));
+    dialog->setDirectory(mint::gui::qstring_from_path(controller_.state().root));
     dialog->setFileMode(QFileDialog::Directory);
     dialog->setAcceptMode(QFileDialog::AcceptOpen);
     dialog->setOption(QFileDialog::ShowDirsOnly, true);
@@ -480,7 +464,7 @@ void TaskWorkspacePage::choose_project() {
         if (directories.isEmpty()) {
             return;
         }
-        const auto root = path_from_qstring(directories.front());
+        const auto root = mint::gui::path_from_qstring(directories.front());
         if (controller_.set_root(root)) {
             model_settings_.set_root(controller_.state().root);
         }

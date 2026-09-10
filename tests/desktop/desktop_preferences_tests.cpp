@@ -148,6 +148,33 @@ TEST(DesktopPreferences, QSettingsRepositoryPersistsWorkspaceCatalogOrder) {
     EXPECT_EQ(*restored, expected);
 }
 
+TEST(DesktopPreferences, WorkspaceCatalogPreservesUnicodeNativePaths) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const auto settings_path = directory.filePath(QStringLiteral("unicode-workspaces.ini"));
+    auto root = std::filesystem::path(u8"项目/é space/工作区🦊");
+    root.make_preferred();
+    const mint::desktop::WorkspaceCatalogState expected{
+        .roots = {root},
+        .task_counts = {{.root = root, .unarchived = 2, .archived = 1}},
+        .last_active_root = root};
+    {
+        mint::infrastructure::desktop::QSettingsWorkspaceCatalogRepository repository(
+            settings_path);
+        ASSERT_TRUE(repository.save(expected));
+    }
+    mint::infrastructure::desktop::QSettingsWorkspaceCatalogRepository repository(settings_path);
+    const auto restored = repository.load();
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_EQ(*restored, expected);
+    ASSERT_EQ(restored->roots.size(), 1U);
+    EXPECT_EQ(restored->roots.front().native(), root.native());
+
+    QSettings persisted(settings_path, QSettings::IniFormat);
+    EXPECT_EQ(persisted.value(QStringLiteral("workspaces/v1/last-active-root")).toString(),
+              QString::fromStdU16String(root.u16string()));
+}
+
 TEST(DesktopPreferences, LegacyWorkspaceCatalogHasNoFabricatedActiveRoot) {
     QTemporaryDir directory;
     ASSERT_TRUE(directory.isValid());

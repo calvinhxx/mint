@@ -16,25 +16,19 @@ class TaskControl;
 
 namespace command_detail {
 
-#if defined(_WIN32)
-class WindowsAppContainer;
-#endif
+class NativeProcessSandbox;
 
 struct ProcessRequest {
     std::filesystem::path executable;
     std::vector<std::string> argv;
     std::filesystem::path workspace_root;
     std::filesystem::path cwd;
-#if !defined(_WIN32)
-    std::vector<std::pair<std::string, std::string>> posix_environment_overrides;
-#endif
+    std::vector<std::pair<std::string, std::string>> environment_overrides;
     long timeout_seconds = 0;
     std::size_t max_output_bytes = 0;
     CommandResourceLimits resource_limits{};
     std::shared_ptr<TaskControl> task_control;
-#if defined(_WIN32)
-    std::shared_ptr<const WindowsAppContainer> windows_appcontainer;
-#endif
+    std::shared_ptr<const NativeProcessSandbox> native_sandbox;
 };
 
 struct ProcessResult {

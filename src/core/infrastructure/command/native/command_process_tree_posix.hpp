@@ -1,9 +1,5 @@
 #pragma once
 
-#if defined(_WIN32)
-#error "command_process_tree.hpp is only available on POSIX platforms"
-#endif
-
 #include <cstddef>
 #include <memory>
 

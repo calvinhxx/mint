@@ -1,11 +1,11 @@
 #include "model_settings_files.hpp"
 
+#include "mint/platform/file.hpp"
+
 #include "filesystem/output_path.hpp"
 #include "filesystem/private_path.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <iomanip>
@@ -13,17 +13,6 @@
 #include <random>
 #include <sstream>
 #include <thread>
-
-#if defined(_WIN32)
-#include <fcntl.h>
-#include <io.h>
-#include <windows.h>
-#else
-#include <fcntl.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
 
 namespace mint::model_settings_detail {
 namespace {
@@ -40,74 +29,27 @@ namespace {
 
 using File = std::unique_ptr<std::FILE, decltype(&std::fclose)>;
 
-std::FILE* open_file(const std::filesystem::path& path, bool write, bool exclusive) {
-#if defined(_WIN32)
-    const auto handle =
-        ::CreateFileW(path.c_str(), write ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ,
-                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                      exclusive ? CREATE_NEW
-                      : write   ? OPEN_ALWAYS
-                                : OPEN_EXISTING,
-                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) {
-        return nullptr;
-    }
-    BY_HANDLE_FILE_INFORMATION info{};
-    if (!GetFileInformationByHandle(handle, &info) || info.nNumberOfLinks != 1 ||
-        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
-        CloseHandle(handle);
+File open_file(const std::filesystem::path& path, platform::FileOpenMode mode) {
+    std::error_code error;
+    File stream(platform::open_regular_file(path, mode, error), &std::fclose);
+    if (!stream) {
         file_error();
     }
-    const int descriptor = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle),
-                                             _O_BINARY | (write ? _O_RDWR : _O_RDONLY));
-    if (descriptor < 0) {
-        CloseHandle(handle);
-        file_error();
-    }
-    auto* file = ::_fdopen(descriptor, write ? "w+b" : "rb");
-#else
-    int flags = (write ? O_RDWR | O_CREAT : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW;
-    if (exclusive) {
-        flags |= O_EXCL;
-    }
-    const int descriptor = ::open(path.c_str(), flags, S_IRUSR | S_IWUSR);
-    if (descriptor < 0) {
-        return nullptr;
-    }
-    auto* file = ::fdopen(descriptor, write ? "r+b" : "rb");
-#endif
-    if (file == nullptr) {
-#if defined(_WIN32)
-        ::_close(descriptor);
-#else
-        ::close(descriptor);
-#endif
-        file_error();
-    }
-    return file;
+    return stream;
 }
 
 void verify_file(std::FILE* stream, bool require_private) {
-#if defined(_WIN32)
-    const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(::_fileno(stream)));
-    BY_HANDLE_FILE_INFORMATION info{};
-    if (!GetFileInformationByHandle(handle, &info) || info.nNumberOfLinks != 1 ||
-        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+    std::error_code error;
+    if (!platform::verify_regular_file(stream, error)) {
         file_error();
     }
     if (require_private) {
-        // EN: The parent is private; this also removes inherited file grants.
-        // ZH-CN: 父目录为私有目录；这里同时移除文件继承的权限。
-        private_path::secure_open_file({}, stream);
+        try {
+            private_path::verify_open_file(stream);
+        } catch (...) {
+            file_error();
+        }
     }
-#else
-    struct stat info = {};
-    if (::fstat(::fileno(stream), &info) != 0 || !S_ISREG(info.st_mode) || info.st_nlink != 1 ||
-        (require_private &&
-         (info.st_uid != ::geteuid() || (info.st_mode & (S_IRWXG | S_IRWXO)) != 0))) {
-        file_error();
-    }
-#endif
 }
 
 std::filesystem::path checked_path(const std::filesystem::path& path) {
@@ -134,64 +76,28 @@ std::string revision_for(std::string_view text) {
 }
 
 bool lock_file(std::FILE* stream) {
-#if defined(_WIN32)
-    OVERLAPPED overlapped{};
-    const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(::_fileno(stream)));
-    if (::LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD,
-                     MAXDWORD, &overlapped)) {
+    std::error_code error;
+    if (platform::try_lock_file(stream, error)) {
         return true;
     }
-    if (GetLastError() != ERROR_LOCK_VIOLATION) {
+    if (error && error != std::errc::interrupted) {
         file_error();
     }
-#else
-    if (::flock(::fileno(stream), LOCK_EX | LOCK_NB) == 0) {
-        return true;
-    }
-    if (errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR) {
-        file_error();
-    }
-#endif
     return false;
 }
 
 void flush_file(std::FILE* stream) {
-    if (std::fflush(stream) != 0) {
+    std::error_code error;
+    if (!platform::sync_file(stream, error)) {
         file_error();
     }
-#if defined(_WIN32)
-    if (::_commit(::_fileno(stream)) != 0) {
-        file_error();
-    }
-#else
-    if (::fsync(::fileno(stream)) != 0) {
-        file_error();
-    }
-#endif
 }
 
 void write_private_file(std::FILE* stream, std::string_view text) {
-    // EN: Validate the private regular file before writing its native descriptor.
-    // ZH-CN: 向原生描述符写入前，校验目标是私有普通文件。
     verify_file(stream, true);
-    while (!text.empty()) {
-#if defined(_WIN32)
-        const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(::_fileno(stream)));
-        DWORD written = 0;
-        if (!::WriteFile(handle, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) ||
-            written == 0) {
-            file_error();
-        }
-#else
-        const auto written = ::write(::fileno(stream), text.data(), text.size());
-        if (written < 0 && errno == EINTR) {
-            continue;
-        }
-        if (written <= 0) {
-            file_error();
-        }
-#endif
-        text.remove_prefix(static_cast<std::size_t>(written));
+    std::error_code error;
+    if (!platform::write_file(stream, text, error)) {
+        file_error();
     }
 }
 
@@ -224,10 +130,7 @@ FileLock::FileLock(const std::filesystem::path& directory) {
     try {
         private_path::ensure_directory(directory, "model settings directory");
         const auto path = checked_path(directory / "model.lock");
-        File stream(open_file(path, true, false), &std::fclose);
-        if (!stream) {
-            file_error();
-        }
+        auto stream = open_file(path, platform::FileOpenMode::update_or_create);
         verify_file(stream.get(), true);
         private_path::secure_open_file(path, stream.get());
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -265,10 +168,7 @@ std::optional<Document> read_document(const std::filesystem::path& path, bool re
         file_error();
     }
     const auto checked = checked_path(path);
-    File stream(open_file(checked, false, false), &std::fclose);
-    if (!stream) {
-        file_error();
-    }
+    auto stream = open_file(checked, platform::FileOpenMode::read_existing);
     verify_file(stream.get(), require_private);
     if (std::setvbuf(stream.get(), nullptr, _IONBF, 0) != 0) {
         file_error();
@@ -338,10 +238,7 @@ void write_document(const std::filesystem::path& path, const Json& document) {
             }
         }
     } remove{temporary};
-    File stream(open_file(temporary, true, true), &std::fclose);
-    if (!stream) {
-        file_error();
-    }
+    auto stream = open_file(temporary, platform::FileOpenMode::create_new);
     remove.created = true;
     private_path::secure_open_file(temporary, stream.get());
     auto source = document.dump(2);
@@ -354,25 +251,10 @@ void write_document(const std::filesystem::path& path, const Json& document) {
     flush_file(stream.get());
     stream.reset();
     (void)checked_path(destination);
-#if defined(_WIN32)
-    if (::MoveFileExW(temporary.c_str(), destination.c_str(),
-                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
+    std::error_code error;
+    if (!platform::replace_file_durably(temporary, destination, error)) {
         file_error();
     }
-#else
-    if (::rename(temporary.c_str(), destination.c_str()) != 0) {
-        file_error();
-    }
-    const int directory = ::open(destination.parent_path().c_str(), O_RDONLY | O_DIRECTORY);
-    if (directory < 0) {
-        file_error();
-    }
-    const int synced = ::fsync(directory);
-    (void)::close(directory);
-    if (synced != 0) {
-        file_error();
-    }
-#endif
 }
 
 } // namespace mint::model_settings_detail

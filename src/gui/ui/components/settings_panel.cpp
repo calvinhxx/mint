@@ -1,5 +1,7 @@
 #include "settings_panel.hpp"
 
+#include "mint/platform/path.hpp"
+
 #include "ui/components/theme_choice_button.hpp"
 #include "ui/components/underline_free_input.hpp"
 #include "ui/support/localized_text.hpp"
@@ -20,11 +22,6 @@
 
 namespace mint::ui {
 namespace {
-
-std::string path_text(const std::filesystem::path& path) {
-    const auto utf8 = path.generic_u8string();
-    return {utf8.begin(), utf8.end()};
-}
 
 QString endpoint_for_provider(const desktop::ProviderDescriptor& provider) {
     if (!provider.endpoint.empty()) {
@@ -568,20 +565,21 @@ void SettingsPanel::render_model_state() {
         const auto& conflict = *model_state_.legacy_conflict;
         const auto summary = [](localization::Message id,
                                 const desktop::ProviderDescriptor& provider) {
-            return text(
-                id,
-                {localization::arg(localization::Placeholder::model, provider.model),
-                 localization::arg(localization::Placeholder::endpoint, provider.endpoint),
-                 localization::arg(localization::Placeholder::path, path_text(provider.config))});
+            return text(id,
+                        {localization::arg(localization::Placeholder::model, provider.model),
+                         localization::arg(localization::Placeholder::endpoint, provider.endpoint),
+                         localization::arg(localization::Placeholder::path,
+                                           platform::path_to_generic_utf8(provider.config))});
         };
         migration_shared_->setText(
             summary(localization::Message::gui_settings_legacy_shared, conflict.shared));
         migration_legacy_->setText(
             conflict.legacy
                 ? summary(localization::Message::gui_settings_legacy_previous, *conflict.legacy)
-                : text(localization::Message::gui_settings_legacy_unavailable,
-                       {localization::arg(localization::Placeholder::path,
-                                          path_text(conflict.legacy_config))}));
+                : text(
+                      localization::Message::gui_settings_legacy_unavailable,
+                      {localization::arg(localization::Placeholder::path,
+                                         platform::path_to_generic_utf8(conflict.legacy_config))}));
         migration_import_->setEnabled(!model_state_.loading && !model_state_.saving &&
                                       conflict.legacy.has_value());
         migration_keep_->setEnabled(!model_state_.loading && !model_state_.saving);

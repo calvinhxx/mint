@@ -1,5 +1,7 @@
 #include "gui_options.hpp"
 
+#include "support/qt_path.hpp"
+
 #include <QStringList>
 
 namespace mint::desktop {
@@ -18,14 +20,6 @@ std::optional<QSize> parse_window_size(const QString& value) {
         return std::nullopt;
     }
     return QSize(width, height);
-}
-
-std::filesystem::path path_from_qstring(const QString& path) {
-#if defined(_WIN32)
-    return std::filesystem::path(path.toStdWString());
-#else
-    return std::filesystem::path(path.toUtf8().constData());
-#endif
 }
 
 bool missing_path_argument(int index, int argc, char** argv) {
@@ -64,27 +58,30 @@ std::optional<GuiOptions> parse_gui_options(int argc, char** argv) {
             if (missing_path_argument(index, argc, argv)) {
                 return std::nullopt;
             }
-            options.root = path_from_qstring(QString::fromLocal8Bit(argv[++index]));
+            options.root = mint::gui::path_from_qstring(QString::fromLocal8Bit(argv[++index]));
         } else if (argument == QStringLiteral("--mint-cli") && index + 1 < argc) {
-            options.mint_cli = path_from_qstring(QString::fromLocal8Bit(argv[++index]));
+            options.mint_cli = mint::gui::path_from_qstring(QString::fromLocal8Bit(argv[++index]));
         } else if (argument == QStringLiteral("--state-dir")) {
             if (missing_path_argument(index, argc, argv)) {
                 return std::nullopt;
             }
-            options.state_root = path_from_qstring(QString::fromLocal8Bit(argv[++index]));
+            options.state_root =
+                mint::gui::path_from_qstring(QString::fromLocal8Bit(argv[++index]));
         } else if (argument == QStringLiteral("--config")) {
             if (missing_path_argument(index, argc, argv)) {
                 return std::nullopt;
             }
-            options.config = path_from_qstring(QString::fromLocal8Bit(argv[++index]));
+            options.config = mint::gui::path_from_qstring(QString::fromLocal8Bit(argv[++index]));
         } else if (argument == QStringLiteral("--lang") && index + 1 < argc) {
             options.language = argv[++index];
         } else if (argument == QStringLiteral("--theme") && index + 1 < argc) {
             options.theme = argv[++index];
         } else if (argument == QStringLiteral("--screenshot") && index + 1 < argc) {
-            options.screenshot = path_from_qstring(QString::fromLocal8Bit(argv[++index]));
+            options.screenshot =
+                mint::gui::path_from_qstring(QString::fromLocal8Bit(argv[++index]));
         } else if (argument == QStringLiteral("--quality-report") && index + 1 < argc) {
-            options.quality_report = path_from_qstring(QString::fromLocal8Bit(argv[++index]));
+            options.quality_report =
+                mint::gui::path_from_qstring(QString::fromLocal8Bit(argv[++index]));
         } else if (argument == QStringLiteral("--window-size") && index + 1 < argc) {
             options.window_size = parse_window_size(QString::fromLocal8Bit(argv[++index]));
         } else if (argument == QStringLiteral("--screenshot-panel") && index + 1 < argc) {

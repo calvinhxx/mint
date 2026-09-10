@@ -2,6 +2,7 @@
 
 #include "infrastructure/cli/mint_cli_protocol.hpp"
 #include "infrastructure/cli/task_history_reader.hpp"
+#include "support/qt_path.hpp"
 
 #include "mint/localization/localization.hpp"
 
@@ -20,22 +21,6 @@
 
 namespace mint::infrastructure::desktop {
 namespace {
-
-QString qstring_from_path(const std::filesystem::path& path) {
-#if defined(_WIN32)
-    return QString::fromStdWString(path.wstring());
-#else
-    return QString::fromUtf8(path.native());
-#endif
-}
-
-std::filesystem::path path_from_qstring(const QString& path) {
-#if defined(_WIN32)
-    return std::filesystem::path(path.toStdWString());
-#else
-    return std::filesystem::path(path.toUtf8().constData());
-#endif
-}
 
 QStringList qstring_arguments(const std::vector<std::string>& arguments) {
     QStringList result;
@@ -104,7 +89,7 @@ MintCliProcess::MintCliProcess(std::filesystem::path executable, std::filesystem
                 run_active_ = false;
                 pending_exit_.reset();
                 event_stream_.reset();
-                QFile::remove(qstring_from_path(cancel_file_));
+                QFile::remove(mint::gui::qstring_from_path(cancel_file_));
                 emit_error(mint::desktop::RuntimeOperation::task_run, run_process_.errorString());
             }
         },
@@ -171,9 +156,9 @@ void MintCliProcess::run_query(const std::filesystem::path& root,
         },
         Qt::QueuedConnection);
     if (!root.empty()) {
-        process->setWorkingDirectory(qstring_from_path(root));
+        process->setWorkingDirectory(mint::gui::qstring_from_path(root));
     }
-    process->start(qstring_from_path(executable_), qstring_arguments(arguments));
+    process->start(mint::gui::qstring_from_path(executable_), qstring_arguments(arguments));
 }
 
 void MintCliProcess::refresh_tasks(const std::filesystem::path& root, const std::string& language) {
@@ -264,7 +249,7 @@ void MintCliProcess::cancel() {
     if (run_process_.state() == QProcess::NotRunning) {
         return;
     }
-    QFile cancel_file(qstring_from_path(cancel_file_));
+    QFile cancel_file(mint::gui::qstring_from_path(cancel_file_));
     if (cancel_file.open(QIODevice::WriteOnly)) {
         cancel_file.close();
     }
@@ -291,19 +276,19 @@ void MintCliProcess::prepare_run() {
     standard_error_buffer_.clear();
     last_diagnostic_.clear();
     awaiting_approval_ = false;
-    cancel_file_ = path_from_qstring(
+    cancel_file_ = mint::gui::path_from_qstring(
         QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
             .filePath(QStringLiteral("mint-gui-%1.cancel")
                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces))));
-    QFile::remove(qstring_from_path(cancel_file_));
+    QFile::remove(mint::gui::qstring_from_path(cancel_file_));
 }
 
 void MintCliProcess::launch_run(const std::filesystem::path& root,
                                 const std::vector<std::string>& arguments) {
-    run_process_.setWorkingDirectory(qstring_from_path(root));
+    run_process_.setWorkingDirectory(mint::gui::qstring_from_path(root));
     run_process_.setProcessChannelMode(QProcess::SeparateChannels);
     run_process_.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
-    run_process_.start(qstring_from_path(executable_), qstring_arguments(arguments));
+    run_process_.start(mint::gui::qstring_from_path(executable_), qstring_arguments(arguments));
 }
 
 void MintCliProcess::consume_standard_output() {
@@ -381,7 +366,7 @@ void MintCliProcess::handle_run_finished(int exit_code, QProcess::ExitStatus exi
             return;
         }
     }
-    QFile::remove(qstring_from_path(cancel_file_));
+    QFile::remove(mint::gui::qstring_from_path(cancel_file_));
     awaiting_approval_ = false;
     pending_exit_ = ProcessExit{.code = exit_code, .status = exit_status};
     event_stream_.drain();

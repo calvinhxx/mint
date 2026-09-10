@@ -8,6 +8,7 @@
 #include "infrastructure/settings/qsettings_task_organization_repository.hpp"
 #include "infrastructure/settings/qsettings_workspace_catalog_repository.hpp"
 #include "infrastructure/settings/shared_model_settings_runtime.hpp"
+#include "support/qt_path.hpp"
 #include "ui/components/conversation_transcript.hpp"
 #include "ui/shell/mint_window.hpp"
 #include "ui/support/gui_resources.hpp"
@@ -38,26 +39,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace {
-
-std::filesystem::path path_from_qstring(const QString& path) {
-#if defined(_WIN32)
-    return std::filesystem::path(path.toStdWString());
-#else
-    return std::filesystem::path(path.toUtf8().constData());
-#endif
-}
-
-QString qstring_from_path(const std::filesystem::path& path) {
-#if defined(_WIN32)
-    return QString::fromStdWString(path.wstring());
-#else
-    return QString::fromUtf8(path.native());
-#endif
-}
-
-} // namespace
 
 int main(int argc, char** argv) {
     auto parsed_options = mint::desktop::parse_gui_options(argc, argv);
@@ -99,7 +80,7 @@ int main(int argc, char** argv) {
         const auto settings_root = options.state_root / "gui-settings";
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                           qstring_from_path(settings_root));
+                           mint::gui::qstring_from_path(settings_root));
     }
     mint::infrastructure::desktop::QSettingsPreferencesRepository preferences_repository;
     mint::infrastructure::desktop::QSettingsTaskOrganizationRepository task_organization_repository;
@@ -115,7 +96,7 @@ int main(int argc, char** argv) {
     if (options.mint_cli.empty()) {
         const auto sibling = QFileInfo(
             QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("mint")));
-        options.mint_cli = path_from_qstring(sibling.absoluteFilePath());
+        options.mint_cli = mint::gui::path_from_qstring(sibling.absoluteFilePath());
     }
 
     mint::infrastructure::desktop::MintCliProcess process(std::move(options.mint_cli),
@@ -157,7 +138,7 @@ int main(int argc, char** argv) {
         QTimer::singleShot(2100, &window, [&window, report_path = options.quality_report] {
             const auto report = QJsonDocument(fluent::diagnostics::Inspector::report(&window));
             const auto bytes = report.toJson();
-            QSaveFile file(qstring_from_path(report_path));
+            QSaveFile file(mint::gui::qstring_from_path(report_path));
             if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() ||
                 !file.commit()) {
                 qWarning("Mint: could not save the GUI quality report");
@@ -197,7 +178,7 @@ int main(int argc, char** argv) {
             }
         });
         QTimer::singleShot(2200, &window, [&application, &window, screenshot] {
-            const auto saved = window.grab().save(qstring_from_path(screenshot));
+            const auto saved = window.grab().save(mint::gui::qstring_from_path(screenshot));
             application.exit(saved ? 0 : 2);
         });
     }

@@ -4,6 +4,7 @@
 #include "provider/provider_command.hpp"
 #include "support/console.hpp"
 #include "support/diagnostic_logging.hpp"
+#include "support/entrypoint.hpp"
 
 #include "mint/domain/model.hpp"
 #include "mint/infrastructure/diagnostic_log.hpp"
@@ -12,25 +13,19 @@
 #include "mint/version.hpp"
 
 #include <exception>
-#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
-#if defined(_WIN32)
-#include <windows.h>
-#endif
-
-namespace {
+namespace mint::cli {
 
 namespace localization = mint::localization;
 using localization::Message;
 using localization::Placeholder;
 
-int run(int argc, char** argv) {
+int run_cli(int argc, char** argv) {
     const bool error_as_json = mint::cli::requested_json_output(argc, argv);
     const bool interaction_requested = mint::cli::requested_interaction_output(argc, argv);
     std::optional<mint::ManagedTaskPaths> managed_task;
@@ -116,62 +111,4 @@ int run(int argc, char** argv) {
     }
 }
 
-#if defined(_WIN32)
-std::string to_utf8(std::wstring_view argument) {
-    if (argument.empty()) {
-        return {};
-    }
-    if (argument.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-        throw std::runtime_error(
-            mint::localization::message(Message::cli_windows_argument_too_long));
-    }
-
-    const auto input_size = static_cast<int>(argument.size());
-    const auto output_size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argument.data(),
-                                                 input_size, nullptr, 0, nullptr, nullptr);
-    if (output_size <= 0) {
-        throw std::runtime_error(
-            mint::localization::message(Message::cli_windows_utf8_conversion_failed));
-    }
-
-    std::string result(static_cast<std::size_t>(output_size), '\0');
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argument.data(), input_size,
-                            result.data(), output_size, nullptr, nullptr) != output_size) {
-        throw std::runtime_error(
-            mint::localization::message(Message::cli_windows_utf8_conversion_failed));
-    }
-    return result;
-}
-#endif
-
-} // namespace
-
-#if defined(_WIN32)
-int wmain(int argc, wchar_t** argv) {
-    try {
-        std::vector<std::string> storage;
-        storage.reserve(static_cast<std::size_t>(argc));
-        for (int index = 0; index < argc; ++index) {
-            storage.push_back(to_utf8(argv[index]));
-        }
-
-        std::vector<char*> arguments;
-        arguments.reserve(storage.size());
-        for (auto& argument : storage) {
-            arguments.push_back(argument.data());
-        }
-        return run(argc, arguments.data());
-    } catch (const std::exception& error) {
-        auto console = mint::cli::system_console();
-        console.write_error_line(mint::localization::message(
-            Message::cli_output_error,
-            {mint::localization::arg(Placeholder::message,
-                                     mint::escape_terminal_field(error.what()))}));
-        return 1;
-    }
-}
-#else
-int main(int argc, char** argv) {
-    return run(argc, argv);
-}
-#endif
+} // namespace mint::cli

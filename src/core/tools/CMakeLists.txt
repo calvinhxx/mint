@@ -31,4 +31,5 @@ target_link_libraries(mint_tools
         mint::localization
         mint::logging
         mint::persistence
+        mint::platform
 )

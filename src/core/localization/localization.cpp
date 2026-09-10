@@ -1,4 +1,5 @@
 #include "mint/localization/localization.hpp"
+#include "mint/platform/system.hpp"
 
 #include "catalogs.hpp"
 
@@ -12,10 +13,6 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
-
-#if defined(_WIN32)
-#include <windows.h>
-#endif
 
 namespace mint::localization {
 namespace {
@@ -76,11 +73,9 @@ Language environment_language() noexcept {
             }
         }
     }
-#if defined(_WIN32)
-    if (PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE) {
-        return Language::simplified_chinese;
+    if (const auto language = parse_language(platform::user_interface_language())) {
+        return *language;
     }
-#endif
     return Language::english;
 }
 

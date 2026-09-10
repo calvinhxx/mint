@@ -357,7 +357,6 @@
     "command.invalid_root": "命令工作目录不存在或不是目录。",
     "command.invalid_timeout_config": "命令超时配置必须为正数，且默认值不能超过最大值。",
     "command.macos.invalid_sandbox_arguments": "内部 macOS 沙箱参数无效。",
-    "command.native_sandbox_unavailable": "当前平台未实现声明的原生进程沙箱。",
     "command.process.invalid_environment": "内部命令环境变量覆盖无效。",
     "command.process.missing_argv": "内部命令请求缺少 argv。",
     "command.process.pipe_configure_failed": "无法配置命令输出管道：{error}。",

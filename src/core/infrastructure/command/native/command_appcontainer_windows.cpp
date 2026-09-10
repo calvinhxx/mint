@@ -295,20 +295,20 @@ void restore_path(const std::filesystem::path& path,
 
 } // namespace
 
-std::shared_ptr<WindowsAppContainer>
-WindowsAppContainer::create(const std::filesystem::path& workspace,
-                            std::vector<std::filesystem::path> allowed_executables,
-                            std::vector<std::filesystem::path> read_only_paths,
-                            std::vector<std::filesystem::path> denied_paths) {
-    return std::shared_ptr<WindowsAppContainer>(
-        new WindowsAppContainer(workspace, std::move(allowed_executables),
-                                std::move(read_only_paths), std::move(denied_paths)));
+std::shared_ptr<NativeProcessSandbox>
+NativeProcessSandbox::create(const std::filesystem::path& workspace,
+                             std::vector<std::filesystem::path> allowed_executables,
+                             std::vector<std::filesystem::path> read_only_paths,
+                             std::vector<std::filesystem::path> denied_paths) {
+    return std::shared_ptr<NativeProcessSandbox>(
+        new NativeProcessSandbox(workspace, std::move(allowed_executables),
+                                 std::move(read_only_paths), std::move(denied_paths)));
 }
 
-WindowsAppContainer::WindowsAppContainer(const std::filesystem::path& workspace,
-                                         std::vector<std::filesystem::path> allowed_executables,
-                                         std::vector<std::filesystem::path> read_only_paths,
-                                         std::vector<std::filesystem::path> denied_paths) {
+NativeProcessSandbox::NativeProcessSandbox(const std::filesystem::path& workspace,
+                                           std::vector<std::filesystem::path> allowed_executables,
+                                           std::vector<std::filesystem::path> read_only_paths,
+                                           std::vector<std::filesystem::path> denied_paths) {
     try {
         initialize(workspace, std::move(allowed_executables), std::move(read_only_paths),
                    std::move(denied_paths));
@@ -318,26 +318,26 @@ WindowsAppContainer::WindowsAppContainer(const std::filesystem::path& workspace,
     }
 }
 
-WindowsAppContainer::~WindowsAppContainer() {
+NativeProcessSandbox::~NativeProcessSandbox() {
     cleanup();
 }
 
-PSID WindowsAppContainer::sid() const noexcept {
+PSID NativeProcessSandbox::sid() const noexcept {
     return sid_;
 }
 
-const std::filesystem::path& WindowsAppContainer::profile_directory() const noexcept {
+const std::filesystem::path& NativeProcessSandbox::profile_directory() const noexcept {
     return profile_directory_;
 }
 
-const std::filesystem::path& WindowsAppContainer::temp_directory() const noexcept {
+const std::filesystem::path& NativeProcessSandbox::temp_directory() const noexcept {
     return temp_directory_;
 }
 
-void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
-                                     std::vector<std::filesystem::path> allowed_executables,
-                                     std::vector<std::filesystem::path> read_only_paths,
-                                     std::vector<std::filesystem::path> denied_paths) {
+void NativeProcessSandbox::initialize(const std::filesystem::path& workspace,
+                                      std::vector<std::filesystem::path> allowed_executables,
+                                      std::vector<std::filesystem::path> read_only_paths,
+                                      std::vector<std::filesystem::path> denied_paths) {
     const auto resolved_workspace =
         canonical_existing_path(workspace, message(Message::label_command_workspace));
     if (!path_is_directory(resolved_workspace)) {
@@ -438,7 +438,7 @@ void WindowsAppContainer::initialize(const std::filesystem::path& workspace,
     }
 }
 
-void WindowsAppContainer::cleanup() noexcept {
+void NativeProcessSandbox::cleanup() noexcept {
     if (sid_ != nullptr) {
         for (auto path = acl_paths_.rbegin(); path != acl_paths_.rend(); ++path) {
             try {

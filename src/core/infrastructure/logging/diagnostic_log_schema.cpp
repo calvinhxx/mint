@@ -1,4 +1,5 @@
 #include "diagnostic_log_internal.hpp"
+#include "mint/platform/system.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,12 +13,6 @@
 #include <string>
 #include <thread>
 #include <utility>
-
-#if defined(_WIN32)
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
 
 namespace mint::diagnostics::detail {
 namespace {
@@ -144,23 +139,13 @@ const EventRule* find_event(std::string_view name) noexcept {
     return found == event_rules.end() ? nullptr : &*found;
 }
 
-std::tm utc_time(std::time_t value) noexcept {
-    std::tm result{};
-#if defined(_WIN32)
-    gmtime_s(&result, &value);
-#else
-    gmtime_r(&value, &result);
-#endif
-    return result;
-}
-
 std::string timestamp(std::string_view format, bool milliseconds_before_utc) {
     const auto now = std::chrono::system_clock::now();
     const auto milliseconds =
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() %
         1000;
     const auto seconds = std::chrono::system_clock::to_time_t(now);
-    const auto utc = utc_time(seconds);
+    const auto utc = platform::utc_time(seconds).value_or(std::tm{});
     std::ostringstream output;
     output << std::put_time(&utc, format.data());
     if (milliseconds_before_utc) {
@@ -272,11 +257,7 @@ Json sanitize_value(FieldKind kind, std::string_view key, const Json& value) {
 } // namespace
 
 long process_id() noexcept {
-#if defined(_WIN32)
-    return static_cast<long>(_getpid());
-#else
-    return static_cast<long>(getpid());
-#endif
+    return platform::process_id();
 }
 
 std::string file_stamp() {

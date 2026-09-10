@@ -6,10 +6,10 @@
 #endif
 #include <windows.h>
 
+#include "../command_process.hpp"
 #include "command_appcontainer_windows.hpp"
-#include "command_process.hpp"
 
-#include "command_resource_monitor.hpp"
+#include "../command_resource_monitor.hpp"
 
 #include "mint/localization/localization.hpp"
 #include "mint/runtime/task_control.hpp"
@@ -237,7 +237,7 @@ std::wstring uppercase(std::wstring value) {
 }
 
 std::vector<wchar_t>
-filtered_environment(const std::shared_ptr<const WindowsAppContainer>& appcontainer) {
+filtered_environment(const std::shared_ptr<const NativeProcessSandbox>& appcontainer) {
     static const std::unordered_set<std::wstring> allowed_names = {L"PATH",
                                                                    L"PATHEXT",
                                                                    L"SYSTEMROOT",
@@ -505,11 +505,11 @@ ProcessResult execute_process(ProcessRequest request) {
 
     const std::array inherited_handles = {input.get(), output_write.get()};
     const auto appcontainer_sid =
-        request.windows_appcontainer == nullptr ? nullptr : request.windows_appcontainer->sid();
+        request.native_sandbox == nullptr ? nullptr : request.native_sandbox->sid();
     AttributeList attributes(inherited_handles, appcontainer_sid);
     auto job = create_job(request.resource_limits);
     auto arguments = command_line(request.argv);
-    auto environment = filtered_environment(request.windows_appcontainer);
+    auto environment = filtered_environment(request.native_sandbox);
     const auto executable = request.executable.wstring();
     const auto working_directory = request.cwd.wstring();
 

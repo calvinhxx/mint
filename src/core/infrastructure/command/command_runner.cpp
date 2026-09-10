@@ -7,12 +7,7 @@
 #include "command_process.hpp"
 #include "command_sandbox.hpp"
 
-#if defined(_WIN32)
-#include "command_appcontainer_windows.hpp"
-#endif
-
 #include <algorithm>
-#include <exception>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -230,19 +225,19 @@ Json process_result_json(const CommandInvocation& invocation, command_detail::Pr
     return result;
 }
 
-command_detail::ProcessRequest
-process_request(const CommandInvocation& invocation, const std::filesystem::path& workspace_root,
-                bool wraps_command, const std::filesystem::path& sandbox_executable,
-                const std::vector<std::string>& sandbox_arguments,
-                bool sandbox_sets_working_directory, std::size_t max_output_bytes,
-                const std::shared_ptr<TaskControl>& task_control) {
+command_detail::ProcessRequest process_request(const CommandInvocation& invocation,
+                                               const std::filesystem::path& workspace_root,
+                                               const command_detail::SandboxConfig& sandbox,
+                                               std::size_t max_output_bytes,
+                                               const std::shared_ptr<TaskControl>& task_control) {
+    const bool wraps_command = !sandbox.executable.empty();
     command_detail::ProcessRequest request;
-    request.executable = wraps_command ? sandbox_executable : invocation.executable;
+    request.executable = wraps_command ? sandbox.executable : invocation.executable;
     request.workspace_root = workspace_root;
-    request.argv.reserve(invocation.arguments.size() + sandbox_arguments.size() + 4);
+    request.argv.reserve(invocation.arguments.size() + sandbox.arguments.size() + 4);
     if (wraps_command) {
-        request.argv = sandbox_arguments;
-        if (sandbox_sets_working_directory) {
+        request.argv = sandbox.arguments;
+        if (sandbox.sets_working_directory) {
             request.argv.insert(request.argv.end(),
                                 {"--chdir", invocation.cwd.generic_string(), "--"});
         }
@@ -257,81 +252,9 @@ process_request(const CommandInvocation& invocation, const std::filesystem::path
     request.max_output_bytes = max_output_bytes;
     request.resource_limits = invocation.resource_limits;
     request.task_control = task_control;
+    request.native_sandbox = sandbox.native_sandbox;
     return request;
 }
-
-#if defined(__APPLE__)
-std::string command_exception_message(const std::exception_ptr& error) {
-    try {
-        std::rethrow_exception(error);
-    } catch (const std::exception& exception) {
-        return exception.what();
-    } catch (...) {
-        return localization::message(Message::common_unknown_exception);
-    }
-}
-
-command_detail::ProcessResult
-execute_macos_sandboxed_process(command_detail::ProcessRequest request,
-                                const std::filesystem::path& workspace_root,
-                                const std::vector<std::string>& sandbox_arguments) {
-    if (sandbox_arguments.size() != 3 || sandbox_arguments[0] != "sandbox-exec" ||
-        sandbox_arguments[1] != "-p") {
-        throw std::logic_error(
-            localization::message(Message::command_macos_invalid_sandbox_arguments));
-    }
-
-    const auto cleanup_executable = request.executable;
-    command_detail::CommandScratchDirectory scratch(workspace_root);
-    std::optional<command_detail::ProcessResult> result;
-    std::exception_ptr execution_error;
-    try {
-        const auto scratch_path = scratch.path().generic_string();
-        request.posix_environment_overrides = {
-            {"TMPDIR", scratch_path}, {"TMP", scratch_path}, {"TEMP", scratch_path}};
-        result.emplace(command_detail::execute_process(std::move(request)));
-    } catch (...) {
-        execution_error = std::current_exception();
-    }
-
-    try {
-        scratch.verify_cleanup_target();
-        command_detail::ProcessRequest cleanup_request;
-        cleanup_request.executable = cleanup_executable;
-        cleanup_request.argv = sandbox_arguments;
-        cleanup_request.argv.insert(cleanup_request.argv.end(),
-                                    {"/bin/rm", "-rf", "--", scratch.path().generic_string()});
-        cleanup_request.workspace_root = workspace_root;
-        cleanup_request.cwd = workspace_root;
-        cleanup_request.timeout_seconds = 5;
-        cleanup_request.max_output_bytes = 4 * 1024;
-        const auto cleanup = command_detail::execute_process(std::move(cleanup_request));
-        if (cleanup.status != "exited" || cleanup.exit_code.value_or(-1) != 0) {
-            auto message = localization::message(Message::command_scratch_cleanup_process_failed,
-                                                 {arg(Placeholder::status, cleanup.status)});
-            if (!cleanup.output.empty()) {
-                message = localization::message(
-                    Message::command_scratch_cleanup_with_output,
-                    {arg(Placeholder::message, message), arg(Placeholder::output, cleanup.output)});
-            }
-            throw std::runtime_error(std::move(message));
-        }
-        scratch.confirm_cleanup();
-    } catch (const std::exception& cleanup_error) {
-        if (execution_error != nullptr) {
-            throw std::runtime_error(localization::message(
-                Message::command_scratch_execution_and_cleanup_failed,
-                {arg(Placeholder::execution_error, command_exception_message(execution_error)),
-                 arg(Placeholder::cleanup_error, cleanup_error.what())}));
-        }
-        throw;
-    }
-    if (execution_error != nullptr) {
-        std::rethrow_exception(execution_error);
-    }
-    return std::move(*result);
-}
-#endif
 
 struct CommandCatalog {
     std::vector<std::string> allowed_programs;
@@ -375,10 +298,8 @@ CommandCatalog build_command_catalog(CommandRunnerOptions& options, long max_tim
 
 } // namespace
 
-struct CommandRunner::NativeSandboxState {
-#if defined(_WIN32)
-    std::shared_ptr<const command_detail::WindowsAppContainer> windows_appcontainer;
-#endif
+struct CommandRunner::SandboxState {
+    command_detail::SandboxConfig config;
 };
 
 CommandRunner::CommandRunner(CommandRunnerOptions options)
@@ -414,24 +335,9 @@ CommandRunner::CommandRunner(CommandRunnerOptions options)
     recipe_indices_ = std::move(catalog.recipe_indices);
     recipe_names_ = std::move(catalog.recipe_names);
 
-    auto sandbox = command_detail::build_sandbox_config(
+    sandbox_ = std::make_unique<SandboxState>(command_detail::build_sandbox_config(
         options.require_os_sandbox, root_, resolved_programs_, std::move(options.read_only_paths),
-        std::move(options.denied_read_paths));
-    sandbox_executable_ = std::move(sandbox.executable);
-    sandbox_arguments_ = std::move(sandbox.arguments);
-    sandbox_backend_ = std::move(sandbox.backend);
-    sandbox_sets_working_directory_ = sandbox.sets_working_directory;
-    sandbox_wraps_command_ = !sandbox_executable_.empty();
-    if (sandbox.uses_native_process_sandbox) {
-#if defined(_WIN32)
-        native_sandbox_ = std::make_unique<NativeSandboxState>();
-        native_sandbox_->windows_appcontainer = command_detail::WindowsAppContainer::create(
-            root_, std::move(sandbox.allowed_executables), std::move(sandbox.read_only_paths),
-            std::move(sandbox.denied_paths));
-#else
-        throw std::logic_error(localization::message(Message::command_native_sandbox_unavailable));
-#endif
-    }
+        std::move(options.denied_read_paths)));
 }
 
 CommandRunner::~CommandRunner() = default;
@@ -453,11 +359,11 @@ bool CommandRunner::requires_approval() const noexcept {
 }
 
 bool CommandRunner::is_os_sandboxed() const noexcept {
-    return sandbox_backend_ != "none";
+    return sandbox_->config.backend != "none";
 }
 
 const std::string& CommandRunner::sandbox_backend() const noexcept {
-    return sandbox_backend_;
+    return sandbox_->config.backend;
 }
 
 Json CommandRunner::definition() const {
@@ -561,9 +467,9 @@ Json CommandRunner::run_command(const Json& arguments) const {
          {"argument_count", invocation.arguments.size()},
          {"timeout_seconds", invocation.timeout_seconds},
          {"resource_limits", command_resource_limits_to_json(invocation.resource_limits)},
-         {"sandbox", sandbox_backend_}});
-    if (const auto stopped =
-            stopped_result(invocation, task_control_, is_os_sandboxed(), sandbox_backend_)) {
+         {"sandbox", sandbox_->config.backend}});
+    if (const auto stopped = stopped_result(invocation, task_control_, is_os_sandboxed(),
+                                            sandbox_->config.backend)) {
         return *stopped;
     }
 
@@ -577,37 +483,26 @@ Json CommandRunner::run_command(const Json& arguments) const {
             if (decision.cancels_run() && task_control_ != nullptr) {
                 task_control_->request_cancel();
             }
-            return approval_result(invocation, decision, is_os_sandboxed(), sandbox_backend_);
+            return approval_result(invocation, decision, is_os_sandboxed(),
+                                   sandbox_->config.backend);
         }
     }
-    if (const auto stopped =
-            stopped_result(invocation, task_control_, is_os_sandboxed(), sandbox_backend_)) {
+    if (const auto stopped = stopped_result(invocation, task_control_, is_os_sandboxed(),
+                                            sandbox_->config.backend)) {
         return *stopped;
     }
 
-    auto request = process_request(invocation, root_, sandbox_wraps_command_, sandbox_executable_,
-                                   sandbox_arguments_, sandbox_sets_working_directory_,
-                                   max_output_bytes_, task_control_);
-#if defined(_WIN32)
-    if (native_sandbox_ != nullptr) {
-        request.windows_appcontainer = native_sandbox_->windows_appcontainer;
-    }
-#endif
-#if defined(__APPLE__)
-    auto process =
-        sandbox_backend_ == "macos-seatbelt"
-            ? execute_macos_sandboxed_process(std::move(request), root_, sandbox_arguments_)
-            : command_detail::execute_process(std::move(request));
-#else
-    auto process = command_detail::execute_process(std::move(request));
-#endif
+    auto request =
+        process_request(invocation, root_, sandbox_->config, max_output_bytes_, task_control_);
+    auto process = command_detail::execute_sandboxed_process(std::move(request), sandbox_->config);
     diagnostics::emit(diagnostics::Level::debug, "command.completed",
                       {{"program", invocation.program},
                        {"status", process.status},
                        {"exit_code", process.exit_code.value_or(-1)},
                        {"duration_ms", process.duration_ms},
                        {"output_truncated", process.output_truncated}});
-    return process_result_json(invocation, std::move(process), is_os_sandboxed(), sandbox_backend_);
+    return process_result_json(invocation, std::move(process), is_os_sandboxed(),
+                               sandbox_->config.backend);
 }
 
 } // namespace mint

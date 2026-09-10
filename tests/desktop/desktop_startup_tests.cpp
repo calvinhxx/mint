@@ -1,5 +1,6 @@
 #include "app/gui_options.hpp"
 #include "application/workspaces/workspace_catalog.hpp"
+#include "support/qt_path.hpp"
 
 #include "mint/infrastructure/model_config_service.hpp"
 
@@ -40,6 +41,18 @@ TEST(DesktopStartup, RequiredPathOptionsRejectMissingEmptyAndFlagValues) {
     EXPECT_EQ(specified->root, std::filesystem::path("./project"));
     EXPECT_EQ(specified->state_root, std::filesystem::path("./private-state"));
     EXPECT_EQ(specified->config, std::filesystem::path("./profile.json"));
+}
+
+TEST(DesktopStartup, QtPathBridgePreservesUnicodeAndNativeSpelling) {
+    auto native = std::filesystem::path(u8"项目/é space/任务🦊.json");
+    native.make_preferred();
+    for (const auto& path :
+         {std::filesystem::path{}, native, std::filesystem::path(u8"./项目/../草稿/"),
+          std::filesystem::path(u8"项目\\草稿\\任务.json")}) {
+        const auto expected = QString::fromStdU16String(path.u16string());
+        EXPECT_EQ(mint::gui::qstring_from_path(path), expected);
+        EXPECT_EQ(mint::gui::path_from_qstring(expected).native(), path.native());
+    }
 }
 
 TEST(DesktopStartup, ResolvesSymlinkParentsBeforeCollapsingDotDotForWorkspaceAndState) {

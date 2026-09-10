@@ -39,4 +39,7 @@ target_link_libraries(mint_gui_ui
         Qt6::Gui
         Qt6::Svg
         Qt6::Widgets
+    PRIVATE
+        mint::gui_support
+        mint::platform
 )

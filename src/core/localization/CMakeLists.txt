@@ -27,4 +27,4 @@ target_include_directories(mint_localization
     PUBLIC "${localization_include_dir}"
     PRIVATE "${CMAKE_CURRENT_BINARY_DIR}"
 )
-target_link_libraries(mint_localization PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(mint_localization PRIVATE mint::platform nlohmann_json::nlohmann_json)

@@ -1,6 +1,7 @@
 #include "mint/infrastructure/event_log.hpp"
 
 #include "mint/localization/localization.hpp"
+#include "mint/platform/system.hpp"
 
 #include "filesystem/output_path.hpp"
 
@@ -29,12 +30,7 @@ std::string utc_timestamp() {
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() %
         1000;
 
-    std::tm utc{};
-#if defined(_WIN32)
-    gmtime_s(&utc, &seconds);
-#else
-    gmtime_r(&seconds, &utc);
-#endif
+    const auto utc = platform::utc_time(seconds).value_or(std::tm{});
     std::ostringstream output;
     output << std::put_time(&utc, "%Y-%m-%dT%H:%M:%S") << '.' << std::setw(3) << std::setfill('0')
            << milliseconds << 'Z';

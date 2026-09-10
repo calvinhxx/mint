@@ -1,9 +1,9 @@
-#include "command_process.hpp"
+#include "../command_process.hpp"
 
 #include "mint/localization/localization.hpp"
 
-#include "command_process_tree.hpp"
-#include "command_resource_monitor.hpp"
+#include "../command_resource_monitor.hpp"
+#include "command_process_tree_posix.hpp"
 
 #include "mint/runtime/task_control.hpp"
 
@@ -237,6 +237,64 @@ std::optional<std::size_t> resident_memory_bytes(pid_t process) noexcept {
 #endif
 }
 
+class ProcessCleanup final {
+  public:
+    ProcessCleanup(pid_t process, int output_descriptor, bool& root_exited,
+                   std::optional<ProcessTreeMonitor>& process_tree) noexcept
+        : process_(process), output_descriptor_(output_descriptor), root_exited_(root_exited),
+          process_tree_(process_tree) {}
+
+    ~ProcessCleanup() {
+        if (output_descriptor_ < 0) {
+            return;
+        }
+        // EN: Monitoring and output collection can throw after fork. Keep the original error
+        //     while terminating the command before closing its output pipe.
+        // ZH-CN: fork 后的监控和输出收集仍可能抛错；保留原异常，并先终止命令，再关闭输出管道。
+        (void)::kill(-process_, SIGKILL);
+        if (process_tree_.has_value()) {
+            try {
+                process_tree_->signal_all(SIGKILL);
+            } catch (...) {
+            }
+        }
+        if (!root_exited_) {
+            (void)::kill(process_, SIGKILL);
+            while (::waitpid(process_, nullptr, 0) < 0 && errno == EINTR) {
+            }
+        }
+        if (process_tree_.has_value()) {
+            try {
+                const auto deadline =
+                    std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+                while (process_tree_->refresh() != 0 &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    process_tree_->signal_all(SIGKILL);
+                    (void)::poll(nullptr, 0, 10);
+                }
+            } catch (...) {
+            }
+        }
+        complete();
+    }
+
+    ProcessCleanup(const ProcessCleanup&) = delete;
+    ProcessCleanup& operator=(const ProcessCleanup&) = delete;
+
+    void complete() noexcept {
+        if (output_descriptor_ >= 0) {
+            (void)::close(output_descriptor_);
+            output_descriptor_ = -1;
+        }
+    }
+
+  private:
+    pid_t process_;
+    int output_descriptor_;
+    bool& root_exited_;
+    std::optional<ProcessTreeMonitor>& process_tree_;
+};
+
 } // namespace
 
 void validate_process_resource_support(const CommandResourceLimits& limits) {
@@ -249,7 +307,7 @@ ProcessResult execute_process(ProcessRequest request) {
     }
 
     auto argv = mutable_pointers(request.argv);
-    auto environment_storage = filtered_environment(request.posix_environment_overrides);
+    auto environment_storage = filtered_environment(request.environment_overrides);
     auto environment = mutable_pointers(environment_storage);
 
     const auto started_at = std::chrono::steady_clock::now();
@@ -328,11 +386,13 @@ ProcessResult execute_process(ProcessRequest request) {
     ::close(output_pipe[1]);
     (void)::setpgid(process, process);
 
+    bool root_exited = false;
+    std::optional<ProcessTreeMonitor> process_tree;
+    ProcessCleanup cleanup(process, output_pipe[0], root_exited, process_tree);
     ProcessResult result;
     result.output.reserve(std::min<std::size_t>(request.max_output_bytes, 16 * 1024));
-    bool root_exited = false;
     int wait_status = 0;
-    ProcessTreeMonitor process_tree(process);
+    process_tree.emplace(process);
     auto next_workspace_check = started_at + std::chrono::milliseconds(100);
 
     const auto drain_output = [&]() {
@@ -352,7 +412,7 @@ ProcessResult execute_process(ProcessRequest request) {
     };
 
     const auto terminate_process = [&]() {
-        process_tree.signal_all(SIGTERM);
+        process_tree->signal_all(SIGTERM);
         const auto grace_deadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
         while (std::chrono::steady_clock::now() < grace_deadline) {
@@ -363,13 +423,13 @@ ProcessResult execute_process(ProcessRequest request) {
                     root_exited = true;
                 }
             }
-            if (root_exited && process_tree.refresh() == 0) {
+            if (root_exited && process_tree->refresh() == 0) {
                 return;
             }
             pollfd descriptor{output_pipe[0], POLLIN | POLLHUP, 0};
             (void)::poll(&descriptor, 1, 10);
         }
-        process_tree.signal_all(SIGKILL);
+        process_tree->signal_all(SIGKILL);
         if (!root_exited) {
             while (::waitpid(process, &wait_status, 0) < 0 && errno == EINTR) {
             }
@@ -377,8 +437,8 @@ ProcessResult execute_process(ProcessRequest request) {
         }
         const auto kill_deadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
-        while (process_tree.refresh() != 0 && std::chrono::steady_clock::now() < kill_deadline) {
-            process_tree.signal_all(SIGKILL);
+        while (process_tree->refresh() != 0 && std::chrono::steady_clock::now() < kill_deadline) {
+            process_tree->signal_all(SIGKILL);
             pollfd descriptor{output_pipe[0], POLLIN | POLLHUP, 0};
             (void)::poll(&descriptor, 1, 10);
         }
@@ -393,15 +453,12 @@ ProcessResult execute_process(ProcessRequest request) {
                 root_exited = true;
             } else if (waited < 0 && errno != EINTR) {
                 const auto message = std::string(std::strerror(errno));
-                process_tree.signal_all(SIGKILL);
-                (void)::waitpid(process, &wait_status, 0);
-                ::close(output_pipe[0]);
                 throw std::runtime_error(localization::message(Message::command_process_wait_failed,
                                                                {arg(Placeholder::error, message)}));
             }
         }
 
-        const auto live_processes = process_tree.refresh();
+        const auto live_processes = process_tree->refresh();
         if (root_exited && live_processes == 0) {
             break;
         }
@@ -455,7 +512,7 @@ ProcessResult execute_process(ProcessRequest request) {
     }
 
     drain_output();
-    ::close(output_pipe[0]);
+    cleanup.complete();
     result.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                              std::chrono::steady_clock::now() - started_at)
                              .count();

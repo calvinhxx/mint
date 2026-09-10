@@ -1,9 +1,5 @@
 #pragma once
 
-#if !defined(_WIN32)
-#error "command_appcontainer_windows.hpp is only available on Windows"
-#endif
-
 #include <windows.h>
 
 #include <cstddef>
@@ -14,18 +10,18 @@
 
 namespace mint::command_detail {
 
-class WindowsAppContainer final {
+class NativeProcessSandbox final {
   public:
-    static std::shared_ptr<WindowsAppContainer>
+    static std::shared_ptr<NativeProcessSandbox>
     create(const std::filesystem::path& workspace,
            std::vector<std::filesystem::path> allowed_executables,
            std::vector<std::filesystem::path> read_only_paths,
            std::vector<std::filesystem::path> denied_paths);
 
-    ~WindowsAppContainer();
+    ~NativeProcessSandbox();
 
-    WindowsAppContainer(const WindowsAppContainer&) = delete;
-    WindowsAppContainer& operator=(const WindowsAppContainer&) = delete;
+    NativeProcessSandbox(const NativeProcessSandbox&) = delete;
+    NativeProcessSandbox& operator=(const NativeProcessSandbox&) = delete;
 
     [[nodiscard]] PSID sid() const noexcept;
     [[nodiscard]] const std::filesystem::path& profile_directory() const noexcept;
@@ -39,10 +35,10 @@ class WindowsAppContainer final {
         bool applied = false;
     };
 
-    WindowsAppContainer(const std::filesystem::path& workspace,
-                        std::vector<std::filesystem::path> allowed_executables,
-                        std::vector<std::filesystem::path> read_only_paths,
-                        std::vector<std::filesystem::path> denied_paths);
+    NativeProcessSandbox(const std::filesystem::path& workspace,
+                         std::vector<std::filesystem::path> allowed_executables,
+                         std::vector<std::filesystem::path> read_only_paths,
+                         std::vector<std::filesystem::path> denied_paths);
 
     void initialize(const std::filesystem::path& workspace,
                     std::vector<std::filesystem::path> allowed_executables,

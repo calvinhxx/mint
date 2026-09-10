@@ -1,4 +1,11 @@
+if(WIN32)
+    set(mint_private_path_source filesystem/native/private_path_windows.cpp)
+else()
+    set(mint_private_path_source filesystem/native/private_path_posix.cpp)
+endif()
+
 add_library(mint_filesystem STATIC
+    ${mint_private_path_source}
     filesystem/output_path.cpp
     filesystem/private_path.cpp
 )
@@ -23,25 +30,35 @@ target_link_libraries(mint_logging
         mint::domain
     PRIVATE
         mint::filesystem
+        mint::platform
         mint::localization
         mint::runtime
         spdlog::spdlog
 )
 
 if(WIN32)
-    set(mint_command_process_sources
-        command/command_appcontainer_windows.cpp
-        command/command_process_windows.cpp
+    set(mint_command_native_sources
+        command/native/command_appcontainer_windows.cpp
+        command/native/command_process_windows.cpp
+        command/native/command_sandbox_windows.cpp
     )
 else()
-    set(mint_command_process_sources
-        command/command_process.cpp
-        command/command_process_tree.cpp
+    set(mint_command_native_sources
+        command/native/command_process_posix.cpp
+        command/native/command_process_tree_posix.cpp
+        command/native/command_sandbox_posix.cpp
     )
+    if(APPLE)
+        list(APPEND mint_command_native_sources command/native/command_sandbox_macos.cpp)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        list(APPEND mint_command_native_sources command/native/command_sandbox_linux.cpp)
+    else()
+        list(APPEND mint_command_native_sources command/native/command_sandbox_unsupported.cpp)
+    endif()
 endif()
 
 add_library(mint_command STATIC
-    ${mint_command_process_sources}
+    ${mint_command_native_sources}
     command/command_runner.cpp
     command/command_resource_monitor.cpp
     command/command_sandbox.cpp
@@ -103,6 +120,7 @@ target_link_libraries(mint_persistence
     PRIVATE
         mint::filesystem
         mint::localization
+        mint::platform
         mint::runtime
 )
 
@@ -118,5 +136,5 @@ mint_configure_target(mint_model_settings)
 target_include_directories(mint_model_settings PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(mint_model_settings
     PUBLIC mint::model
-    PRIVATE mint::filesystem mint::persistence
+    PRIVATE mint::filesystem mint::persistence mint::platform
 )

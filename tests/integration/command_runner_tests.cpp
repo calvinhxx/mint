@@ -1,10 +1,12 @@
 #include "mint/domain/task_policy.hpp"
+#include "mint/infrastructure/command_runner.hpp"
 #include "mint/runtime/task_control.hpp"
 #include "mint/tools/tool_registry.hpp"
 
 #include "test_executable.hpp"
 #include "test_workspace.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -13,6 +15,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -38,10 +41,13 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
+#include <cerrno>
+#include <csignal>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -860,6 +866,136 @@ TEST(CommandRunnerTest, EnforcesRuntimeControls) {
                     timed_out.at("task_timed_out").get<bool>(),
                 "total task budget has a distinct command outcome");
     MINT_EXPECT(elapsed < 1500, "total task budget terminates the running process group promptly");
+}
+
+TEST(CommandRunnerTest, MonitoringFailureReapsTheChildAndClosesItsOutputPipe) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "POSIX process and pipe cleanup regression";
+#else
+    TemporaryDirectory temporary;
+    const auto workspace = temporary.path() / "workspace";
+    const auto moved_workspace = temporary.path() / "moved-workspace";
+    const auto marker = temporary.path() / "process.txt";
+    std::filesystem::create_directories(workspace);
+    const auto program = mint_test_executable_path().generic_string();
+    mint::CommandRunner runner({.root = workspace,
+                                .allowed_programs = {program},
+                                .resource_limits = {.workspace_disk_bytes = 1024 * 1024}});
+
+    const auto open_pipe_descriptors = [] {
+        std::vector<int> descriptors;
+        for (const auto& entry : std::filesystem::directory_iterator("/dev/fd")) {
+            const auto descriptor = std::stoi(entry.path().filename().string());
+            struct stat metadata = {};
+            if (::fstat(descriptor, &metadata) == 0 && S_ISFIFO(metadata.st_mode)) {
+                descriptors.push_back(descriptor);
+            }
+        }
+        std::sort(descriptors.begin(), descriptors.end());
+        return descriptors;
+    };
+    const auto pipes_before = open_pipe_descriptors();
+    std::string failure;
+    try {
+        (void)runner.run({{"program", program},
+                          {"args", mint::Json::array({"--command-helper", "move-workspace-and-wait",
+                                                      workspace.generic_string(),
+                                                      moved_workspace.generic_string(),
+                                                      marker.generic_string()})},
+                          {"timeout_seconds", 5}});
+    } catch (const std::runtime_error& error) {
+        failure = error.what();
+    }
+    EXPECT_EQ(failure, "无法统计命令工作区磁盘用量。");
+    ASSERT_TRUE(std::filesystem::exists(marker));
+    ASSERT_TRUE(std::filesystem::is_directory(moved_workspace));
+
+    pid_t child = 0;
+    std::istringstream identity(read_text(marker));
+    ASSERT_TRUE(identity >> child);
+    ASSERT_GT(child, 0);
+    errno = 0;
+    const auto waited = ::waitpid(child, nullptr, WNOHANG);
+    const auto wait_error = errno;
+    if (waited == 0) {
+        (void)::kill(-child, SIGKILL);
+        (void)::kill(child, SIGKILL);
+        while (::waitpid(child, nullptr, 0) < 0 && errno == EINTR) {
+        }
+    }
+    EXPECT_EQ(waited, -1) << "monitoring failure left the child alive or unreaped";
+    EXPECT_EQ(wait_error, ECHILD);
+    EXPECT_EQ(open_pipe_descriptors(), pipes_before) << "command output pipe leaked";
+#endif
+}
+
+TEST(CommandRunnerTest, KeepsSandboxedAndDirectCommandLaunchesIndependent) {
+#if defined(_WIN32)
+    TemporaryDirectory temporary;
+#else
+    TemporaryDirectory temporary(std::filesystem::path{"/var/tmp"});
+#endif
+    const auto direct_workspace = temporary.path() / "direct workspace";
+    const auto sandbox_workspace = temporary.path() / "sandbox workspace";
+    const auto subdirectory = "build with spaces";
+    std::filesystem::create_directories(direct_workspace / subdirectory);
+    std::filesystem::create_directories(sandbox_workspace / subdirectory);
+    const auto program = mint_test_executable_path().generic_string();
+    mint::ToolRegistry direct_tools(direct_workspace,
+                                    mint::ToolRegistryOptions{.allowed_programs = {program}});
+    mint::ToolRegistry sandbox_tools(
+        sandbox_workspace,
+        mint::ToolRegistryOptions{.allowed_programs = {program}, .require_command_sandbox = true});
+
+    for (auto* tools : {&direct_tools, &sandbox_tools, &direct_tools}) {
+        const bool sandboxed = tools == &sandbox_tools;
+        const auto& workspace = sandboxed ? sandbox_workspace : direct_workspace;
+        const auto result = mint::Json::parse(
+            tools->execute({"separate-launch",
+                            "run_command",
+                            {{"program", program},
+                             {"args", mint::Json::array({"--command-helper", "echo", "with spaces",
+                                                         R"(quote"inside)", R"(trailing\)"})},
+                             {"cwd", subdirectory}}}));
+        ASSERT_TRUE(result.contains("exit_code")) << result.dump(2);
+        ASSERT_EQ(result.at("exit_code"), 0) << result.dump(2);
+        EXPECT_EQ(result.at("sandboxed"), sandboxed);
+        EXPECT_EQ(result.at("sandbox_backend"), tools->command_sandbox_backend());
+        EXPECT_EQ(result.at("cwd"), subdirectory);
+        const auto output = result.at("output").get<std::string>();
+        const auto expected_cwd = std::filesystem::canonical(workspace / subdirectory);
+        EXPECT_NE(output.find("cwd=" + expected_cwd.generic_string()), std::string::npos);
+        EXPECT_NE(output.find("arg=with spaces"), std::string::npos);
+        EXPECT_NE(output.find("arg=quote\"inside"), std::string::npos);
+        EXPECT_NE(output.find("arg=trailing\\"), std::string::npos);
+    }
+
+    EXPECT_FALSE(direct_tools.commands_are_os_sandboxed());
+    EXPECT_EQ(direct_tools.command_sandbox_backend(), "none");
+    EXPECT_TRUE(sandbox_tools.commands_are_os_sandboxed());
+#if defined(__APPLE__)
+    EXPECT_FALSE(has_command_temp_residue(sandbox_workspace));
+    EXPECT_FALSE(has_command_temp_residue(direct_workspace));
+#endif
+}
+
+TEST(CommandRunnerTest, RejectsScriptFilesDuringAuthorization) {
+#if defined(_WIN32)
+    TemporaryDirectory temporary;
+    const auto workspace = temporary.path() / "workspace";
+    std::filesystem::create_directories(workspace);
+    for (const auto extension : {".bat", ".CmD", ".PS1", ".vbs", ".js", ".wsf", ".hta", ".lnk"}) {
+        const auto script = temporary.path() / (std::string("fixture") + extension);
+        write_text(script, "synthetic script; must never be launched\n");
+        EXPECT_THROW((void)mint::ToolRegistry(
+                         workspace,
+                         mint::ToolRegistryOptions{.allowed_programs = {script.generic_string()}}),
+                     std::invalid_argument)
+            << extension;
+    }
+#else
+    GTEST_SKIP() << "Windows script authorization policy";
+#endif
 }
 
 TEST(CommandRunnerTest, EnforcesOperatingSystemSandbox) {

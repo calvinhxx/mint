@@ -1,6 +1,7 @@
 #include "shared_model_settings_runtime.hpp"
 
 #include "shared_model_settings_operations.hpp"
+#include "support/qt_path.hpp"
 
 #include <QFileInfo>
 #include <QFutureWatcher>
@@ -8,17 +9,6 @@
 #include <QtConcurrentRun>
 
 namespace mint::infrastructure::desktop {
-namespace {
-
-QString qstring_from_path(const std::filesystem::path& path) {
-#if defined(_WIN32)
-    return QString::fromStdWString(path.wstring());
-#else
-    return QString::fromUtf8(path.native());
-#endif
-}
-
-} // namespace
 
 SharedModelSettingsRuntime::SharedModelSettingsRuntime(std::filesystem::path state_directory,
                                                        std::filesystem::path legacy_config,
@@ -169,7 +159,7 @@ void SharedModelSettingsRuntime::complete_operation(ModelSettingsOperationResult
 void SharedModelSettingsRuntime::watch_directory(const std::filesystem::path& config_path) {
     // EN: Watch the shared directory; overrides are read-only invocation inputs.
     // ZH-CN: 监视共享目录，覆盖配置仅为本次调用的只读输入。
-    const auto requested_directory = qstring_from_path(config_path.parent_path());
+    const auto requested_directory = mint::gui::qstring_from_path(config_path.parent_path());
     // EN: Watch the physical directory so macOS /var aliases use the same native subscription.
     // ZH-CN: 监视物理目录，让 macOS 的 /var 别名指向同一个原生订阅。
     const auto canonical_directory = QFileInfo(requested_directory).canonicalFilePath();

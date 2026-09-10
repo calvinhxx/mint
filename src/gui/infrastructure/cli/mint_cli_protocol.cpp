@@ -1,6 +1,7 @@
 #include "mint_cli_protocol.hpp"
 
 #include "mint/domain/model.hpp"
+#include "mint/platform/path.hpp"
 
 #include <utility>
 
@@ -23,14 +24,6 @@ std::size_t size_field(const Json& value, const char* key) {
     return value.contains(key) && value.at(key).is_number_unsigned()
                ? value.at(key).get<std::size_t>()
                : std::size_t{0};
-}
-
-std::filesystem::path path_from_utf8(const std::string& value) {
-#if defined(_WIN32)
-    return std::filesystem::path(std::u8string(value.begin(), value.end()));
-#else
-    return std::filesystem::path(value);
-#endif
 }
 
 RunEventKind event_kind(std::string_view type) {
@@ -111,7 +104,8 @@ std::optional<StatusResponse> MintCliProtocol::parse_status(std::string_view pay
     try {
         const auto document = Json::parse(payload.begin(), payload.end());
         StatusResponse response;
-        response.state_directory = path_from_utf8(string_field(document, "state_directory"));
+        response.state_directory =
+            platform::path_from_utf8(string_field(document, "state_directory"));
         for (const auto& item : document.value("tasks", Json::array())) {
             response.tasks.push_back(
                 {.id = string_field(item, "id"),
@@ -195,10 +189,10 @@ std::optional<InteractionMessage> MintCliProtocol::parse_interaction(std::string
         const auto type = string_field(document, "type");
         const auto data = document.value("data", Json::object());
         if (type == "task_ready") {
-            return InteractionMessage{.kind = InteractionKind::task_ready,
-                                      .task_id = string_field(data, "task_id"),
-                                      .events_path =
-                                          path_from_utf8(string_field(data, "events_path"))};
+            return InteractionMessage{
+                .kind = InteractionKind::task_ready,
+                .task_id = string_field(data, "task_id"),
+                .events_path = platform::path_from_utf8(string_field(data, "events_path"))};
         }
         if (type == "command_approval" || type == "changeset_approval") {
             return InteractionMessage{.kind = InteractionKind::approval,

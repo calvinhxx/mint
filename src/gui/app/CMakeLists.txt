@@ -26,6 +26,7 @@ target_link_libraries(mint_gui PRIVATE
     mint::gui_ui
     FluentQt::FluentQt
     Qt6::Widgets
+    mint::gui_support
 )
 if(TARGET mint)
     add_dependencies(mint_gui mint)

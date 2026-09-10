@@ -17,6 +17,8 @@ target_link_libraries(mint_gui_cli_adapter
         Qt6::Concurrent
         Qt6::Core
     PRIVATE
+        mint::gui_support
+        mint::platform
         nlohmann_json::nlohmann_json
 )
 
@@ -40,5 +42,6 @@ target_link_libraries(mint_gui_settings
         Qt6::Core
         Qt6::Concurrent
     PRIVATE
+        mint::gui_support
         nlohmann_json::nlohmann_json
 )

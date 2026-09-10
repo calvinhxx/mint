@@ -352,6 +352,26 @@ int run_command_helper(int argc, char** argv) {
         return 19;
     }
 #else
+    if (mode == "move-workspace-and-wait") {
+        if (argc != 6) {
+            return 65;
+        }
+        {
+            std::ofstream marker(argv[5], std::ios::binary);
+            marker << ::getpid() << '\n';
+            marker.close();
+            if (!marker) {
+                return 12;
+            }
+        }
+        std::error_code error;
+        std::filesystem::rename(argv[3], argv[4], error);
+        if (error) {
+            return 13;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+        return 0;
+    }
     if (mode == "spawn") {
         const auto child = ::fork();
         if (child < 0) {

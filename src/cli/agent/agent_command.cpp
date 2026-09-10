@@ -148,9 +148,7 @@ int run_agent_command(CommandLine command_line, std::optional<ManagedTaskPaths>&
 
     interrupt_requested = 0;
     std::signal(SIGINT, handle_interrupt);
-#if defined(SIGTERM)
     std::signal(SIGTERM, handle_interrupt);
-#endif
     const auto total_budget = command_line.max_seconds == 0
                                   ? std::chrono::milliseconds::zero()
                                   : std::chrono::duration_cast<std::chrono::milliseconds>(

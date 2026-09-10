@@ -45,10 +45,12 @@ src/core/
 ├── tools/           工具注册、工作区访问和变更事务
 ├── infrastructure/  模型、命令、存储、日志和文件系统实现
 ├── localization/    类型化中英文消息目录
+├── platform/        路径编码、时间、系统目录和底层文件操作
 └── runtime/         路径、取消、审批和终端规则
 
 include/mint/
-└── ports/           模型、工具、会话、事件和取消接口
+├── ports/           模型、工具、会话、事件和取消接口
+└── platform/        只使用标准库类型的平台能力入口
 
 src/cli/
 ├── agent/       任务运行与事件路由
@@ -56,6 +58,7 @@ src/cli/
 ├── project/     init、resume、status 的项目状态
 ├── provider/    配置检查与真实握手
 ├── support/     终端与诊断日志适配
+├── platform/    原生进程入口与 Windows 参数编码
 ├── command_line.*
 └── main.cpp
 
@@ -63,6 +66,7 @@ src/gui/
 ├── application/     不依赖 Qt 的桌面状态、用例、偏好与模型设置端口
 ├── infrastructure/  CLI 进程、JSON 协议、QSettings 和共享配置异步适配
 ├── ui/              FluentQt 页面、组件、模型和主题
+├── support/         Qt 与标准路径类型的转换
 └── app/             只负责组装依赖和启动窗口
 ```
 
@@ -85,7 +89,9 @@ flowchart LR
 
 工作区、主题等界面偏好保存在 QSettings，与模型配置和密钥分开。GUI 启动优先采用显式 `--root`，否则恢复有效的历史选择；没有有效目录时显示空导航。
 
-`tests/cmake` 中的架构契约会检查依赖方向、终端输出边界和模块目录，防止实现重新堆回聚合文件夹。
+平台差异按能力收敛：通用操作调用 `mint::platform`，命令启动和私有目录权限分别由 `command/native`、`filesystem/native` 实现。CMake 选择各系统的后端；业务代码和公共头文件不包含平台条件编译或系统 SDK 类型。`platform` 不依赖领域模型、Qt 或本地化，权限决策和用户错误仍由调用模块负责。
+
+`tests/cmake` 中的架构契约会检查依赖方向、平台边界、终端输出和模块目录。
 
 ## 模型适配
 

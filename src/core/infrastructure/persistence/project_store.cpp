@@ -4,6 +4,7 @@
 #include "mint/domain/task_policy.hpp"
 #include "mint/infrastructure/session_store.hpp"
 #include "mint/localization/localization.hpp"
+#include "mint/platform/system.hpp"
 #include "mint/runtime/path.hpp"
 #include "mint/version.hpp"
 
@@ -62,39 +63,27 @@ std::uint64_t fnv1a(std::string_view value) {
 
 std::string utc_timestamp(std::chrono::system_clock::time_point point) {
     const auto time = std::chrono::system_clock::to_time_t(point);
-    std::tm utc{};
-#if defined(_WIN32)
-    if (::gmtime_s(&utc, &time) != 0) {
+    const auto utc = platform::utc_time(time);
+    if (!utc) {
         throw std::runtime_error(message(Message::persistence_project_timestamp_failed));
     }
-#else
-    if (::gmtime_r(&time, &utc) == nullptr) {
-        throw std::runtime_error(message(Message::persistence_project_timestamp_failed));
-    }
-#endif
     std::ostringstream output;
-    output << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+    output << std::put_time(&*utc, "%Y-%m-%dT%H:%M:%SZ");
     return output.str();
 }
 
 std::string task_id(const std::string& question) {
     const auto now = std::chrono::system_clock::now();
     const auto time = std::chrono::system_clock::to_time_t(now);
-    std::tm utc{};
-#if defined(_WIN32)
-    if (::gmtime_s(&utc, &time) != 0) {
+    const auto utc = platform::utc_time(time);
+    if (!utc) {
         throw std::runtime_error(message(Message::persistence_project_task_id_failed));
     }
-#else
-    if (::gmtime_r(&time, &utc) == nullptr) {
-        throw std::runtime_error(message(Message::persistence_project_task_id_failed));
-    }
-#endif
     std::ostringstream prefix;
     const auto microseconds =
         std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count() %
         1000000;
-    prefix << std::put_time(&utc, "%Y%m%d-%H%M%S") << '-' << std::setfill('0') << std::setw(6)
+    prefix << std::put_time(&*utc, "%Y%m%d-%H%M%S") << '-' << std::setfill('0') << std::setw(6)
            << microseconds;
     const auto sequence = task_sequence.fetch_add(1);
     const auto entropy =
@@ -291,29 +280,10 @@ std::string_view managed_task_mode_name(ManagedTaskMode mode) noexcept {
 }
 
 std::filesystem::path default_mint_state_directory() {
-#if defined(_WIN32)
-    const char* base = std::getenv("LOCALAPPDATA");
-    if (base == nullptr || std::string_view(base).empty()) {
-        throw std::runtime_error(message(Message::persistence_project_state_directory_unknown));
+    if (const auto base = platform::state_directory_base()) {
+        return *base / "mint";
     }
-    return std::filesystem::path(base) / "mint";
-#elif defined(__APPLE__)
-    const char* home = std::getenv("HOME");
-    if (home == nullptr || std::string_view(home).empty()) {
-        throw std::runtime_error(message(Message::persistence_project_state_directory_unknown));
-    }
-    return std::filesystem::path(home) / "Library" / "Application Support" / "mint";
-#else
-    if (const char* xdg = std::getenv("XDG_STATE_HOME");
-        xdg != nullptr && !std::string_view(xdg).empty()) {
-        return std::filesystem::path(xdg) / "mint";
-    }
-    const char* home = std::getenv("HOME");
-    if (home == nullptr || std::string_view(home).empty()) {
-        throw std::runtime_error(message(Message::persistence_project_state_directory_unknown));
-    }
-    return std::filesystem::path(home) / ".local" / "state" / "mint";
-#endif
+    throw std::runtime_error(message(Message::persistence_project_state_directory_unknown));
 }
 
 std::filesystem::path mint_model_credentials_file(std::filesystem::path state_directory) {

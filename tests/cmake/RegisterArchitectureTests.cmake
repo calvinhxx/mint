@@ -15,6 +15,14 @@ add_test(
 set_tests_properties(architecture_application_boundary PROPERTIES LABELS "architecture;contract")
 
 add_test(
+    NAME architecture_platform_boundary
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+        -P "${CMAKE_CURRENT_LIST_DIR}/VerifyPlatformBoundary.cmake"
+)
+set_tests_properties(architecture_platform_boundary PROPERTIES LABELS "architecture;contract")
+
+add_test(
     NAME architecture_module_layout
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${PROJECT_SOURCE_DIR}

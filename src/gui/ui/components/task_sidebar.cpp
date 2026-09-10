@@ -1,5 +1,6 @@
 #include "task_sidebar.hpp"
 
+#include "support/qt_path.hpp"
 #include "ui/delegates/task_item_delegate.hpp"
 #include "ui/models/task_list_model.hpp"
 #include "ui/support/localized_text.hpp"
@@ -48,23 +49,6 @@ bool changes_current_item(int key) {
     default:
         return false;
     }
-}
-
-QString qstring_from_path(const std::filesystem::path& path) {
-#if defined(_WIN32)
-    return QString::fromStdWString(path.wstring());
-#else
-    const auto value = path.native();
-    return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
-#endif
-}
-
-std::filesystem::path path_from_qstring(const QString& path) {
-#if defined(_WIN32)
-    return std::filesystem::path(path.toStdWString());
-#else
-    return std::filesystem::path(path.toUtf8().constData());
-#endif
 }
 
 } // namespace
@@ -249,7 +233,8 @@ void TaskSidebar::activate_row(int row) {
         const auto was_expanded = current.data(TaskListModel::ExpandedWorkspaceRole).toBool();
         emit workspace_selected(root);
         task_delegate_->animate_disclosure(
-            task_model_->index(task_model_->row_for_workspace(path_from_qstring(root)), 0),
+            task_model_->index(task_model_->row_for_workspace(mint::gui::path_from_qstring(root)),
+                               0),
             was_expanded);
         return;
     }
@@ -316,14 +301,14 @@ bool TaskSidebar::eventFilter(QObject* watched, QEvent* event) {
                 task_model_->row_kind(index.row()) == TaskListModel::RowKind::workspace;
             if (!workspace && key->key() == Qt::Key_Left) {
                 const auto root = index.data(TaskListModel::WorkspaceRootRole).toString();
-                task_view_->setCurrentIndex(
-                    task_model_->index(task_model_->row_for_workspace(path_from_qstring(root)), 0));
+                task_view_->setCurrentIndex(task_model_->index(
+                    task_model_->row_for_workspace(mint::gui::path_from_qstring(root)), 0));
             } else if (workspace) {
                 const auto expanded = index.data(TaskListModel::ExpandedWorkspaceRole).toBool();
                 if ((key->key() == Qt::Key_Left && expanded) ||
                     (key->key() == Qt::Key_Right && !expanded)) {
-                    const auto root =
-                        path_from_qstring(index.data(TaskListModel::WorkspaceRootRole).toString());
+                    const auto root = mint::gui::path_from_qstring(
+                        index.data(TaskListModel::WorkspaceRootRole).toString());
                     activate_row(index.row());
                     task_view_->setCurrentIndex(
                         task_model_->index(task_model_->row_for_workspace(root), 0));
@@ -371,7 +356,7 @@ void TaskSidebar::render(const desktop::TaskWorkspaceState& state,
     // and accessibility state.
     // ZH-CN: 只抑制本组件的意图回传，保留 Qt 视图和无障碍状态所需的选择通知。
     const QScopedValueRollback rendering(rendering_, true);
-    const auto active_root = qstring_from_path(state.root.lexically_normal());
+    const auto active_root = mint::gui::qstring_from_path(state.root.lexically_normal());
     const auto workspace_changed = active_workspace_root_ != active_root;
     if (workspace_changed) {
         if (!active_workspace_root_.isEmpty()) {
@@ -453,8 +438,9 @@ void TaskSidebar::render(const desktop::TaskWorkspaceState& state,
             pending_scroll_root_.clear();
         } else if (!selection_changed && top_index.isValid()) {
             const auto anchor_row =
-                top_is_workspace ? task_model_->row_for_workspace(path_from_qstring(top_root))
-                                 : task_model_->row_for_task_id(top_id.toStdString());
+                top_is_workspace
+                    ? task_model_->row_for_workspace(mint::gui::path_from_qstring(top_root))
+                    : task_model_->row_for_task_id(top_id.toStdString());
             if (anchor_row >= 0) {
                 const auto anchor = task_model_->index(anchor_row, 0);
                 const auto anchor_top =

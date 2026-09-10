@@ -357,7 +357,6 @@
     "command.invalid_root": "The command workspace does not exist or is not a directory.",
     "command.invalid_timeout_config": "Command timeouts must be positive and the default cannot exceed the maximum.",
     "command.macos.invalid_sandbox_arguments": "Internal macOS sandbox arguments are invalid.",
-    "command.native_sandbox_unavailable": "The current platform does not implement the declared native process sandbox.",
     "command.process.invalid_environment": "Internal command environment override is invalid.",
     "command.process.missing_argv": "Internal command request is missing argv.",
     "command.process.pipe_configure_failed": "Unable to configure the command output pipe: {error}.",

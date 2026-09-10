@@ -1,5 +1,6 @@
 #include "task_list_model.hpp"
 
+#include "support/qt_path.hpp"
 #include "ui/support/status_text.hpp"
 
 #include <algorithm>
@@ -73,14 +74,8 @@ QVariant TaskListModel::data(const QModelIndex& index, int role) const {
         return row.archived;
     case RowKindRole:
         return static_cast<int>(row.kind);
-    case WorkspaceRootRole: {
-#if defined(_WIN32)
-        return QString::fromStdWString(row.workspace_root.wstring());
-#else
-        const auto value = row.workspace_root.native();
-        return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
-#endif
-    }
+    case WorkspaceRootRole:
+        return mint::gui::qstring_from_path(row.workspace_root);
     case WorkspaceNameRole: {
         const auto path = QDir::cleanPath(data(index, WorkspaceRootRole).toString());
         const auto name = QFileInfo(path).fileName();
