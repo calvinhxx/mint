@@ -72,6 +72,10 @@ src/gui/
 
 目录边界也是 CMake target 和自动化测试边界。
 
+Agent 的运行接口是 `ModelClient`、`AgentTools`、`SessionRepository`、`AgentEventSink` 和 `StopToken`。`core/application/agent` 不直接链接模型客户端或工具实现；CLI 负责组装，`mint::core` 则为嵌入者聚合各功能库。
+
+`domain` 目前包含策略加载，`project_service` 也会读取项目标识文件，部分领域代码仍涉及 I/O。
+
 ```mermaid
 flowchart LR
     cli["src/cli"] --> core["src/core"]
@@ -124,3 +128,18 @@ ModelConfigService → ProviderProfile → protocol adapter → HTTP/SSE → Mod
 | `logs/mint-*.jsonl` | 不含正文的运行诊断 |
 
 托管任务状态位于工作区之外。安全边界和恢复规则见[安全与恢复](../guides/safety-and-recovery.md)。
+
+## 读码顺序
+
+| 顺序 | 文件 | 先看什么 |
+|---|---|---|
+| 1 | [CLI main](../../src/cli/main.cpp) → [agent_command](../../src/cli/agent/agent_command.cpp) | 参数如何变成一次任务 |
+| 2 | [Agent 公共接口](../../include/mint/application/agent.hpp) → [agent_loop](../../src/core/application/agent/agent_loop.cpp) | 何时请求模型、执行工具和结束运行 |
+| 3 | [ports](../../include/mint/ports) → [agent_cycle](../../src/core/application/agent/agent_cycle.cpp) | Agent 怎样调用模型、工具和状态存储接口 |
+| 4 | [tool_registry](../../src/core/tools/registry/tool_registry.cpp) → [workspace 工具](../../src/core/tools/workspace) | 工具请求怎样校验和执行 |
+| 5 | [model_client](../../src/core/infrastructure/model/model_client.cpp) → [协议分发](../../src/core/infrastructure/model/model_protocol.cpp) | 模型接口怎样转换各协议的请求与响应 |
+| 6 | [model_config_service](../../src/core/infrastructure/settings/model_config_service.cpp) | GUI / CLI 怎样共享设置和密钥 |
+| 7 | [gui_main](../../src/gui/app/gui_main.cpp) → [任务页面](../../src/gui/ui/pages/task_workspace_page.cpp) → [控制器](../../src/gui/application/task_workspace_controller.cpp) | 窗口、状态与后台任务怎样连接 |
+| 8 | [platform 文件入口](../../include/mint/platform/file.hpp) → [命令 native 后端](../../src/core/infrastructure/command/native) | 系统差异的公共接口和各平台实现 |
+
+完整的目录与文件说明见[源码导读](../guide/README.md)。

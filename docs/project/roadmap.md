@@ -1,42 +1,30 @@
-# 当前状态
+# 项目进度
 
 [← 返回文档树](../../README.md)
 
-源码基线是 `v1.0.0`。CLI 主流程已经完成，正式 Release 还缺跨平台与真实模型证据。
+当前处于 v1.0.0 发布前收尾。版本号已设为 `1.0.0`，[Changelog](../../CHANGELOG.md) 仍为 `Unreleased`。以下状态按 2026-09-11 的本地源码核对；未核验远端发布和 CI 报告。
 
 | 范围 | 状态 |
 |---|---|
-| Agent Loop、文件工具、固定命令、验证门禁 | 已完成 |
-| checkpoint、changeset 事务、任务恢复 | 已完成 |
-| 中英文 CLI、JSONL 日志、机器输出 | 已完成 |
-| Chat Completions、Responses、Anthropic Messages | 离线测试完成 |
-| Windows、macOS、Linux 的 x64 / ARM64 CI 矩阵 | 已完成 |
-| 本机构建、测试和发布包验收 | 已完成 |
-| FluentQt 桌面源码预览 | macOS 构建、原生渲染与离线任务链路已通过 |
-| 一个真实 provider 的正式握手与修复 fixture | 待完成 |
-| 六平台正式 Release 证据 | 待完成 |
+| 单任务运行 | 文件工具、固定命令、审批、验证、检查点和事务恢复已有实现与回归测试 |
+| 模型接入 | 三种协议适配器及离线测试已实现；GUI / CLI 共用模型配置和密钥存储 |
+| 桌面客户端 | 源码预览，运行任务时可浏览其他会话；尚未纳入发布包 |
+| 自动化检查 | 已配置六平台 CLI 测试与打包，以及 Linux x64 GUI 离屏测试；需核对候选提交的运行结果 |
+| 发布证据 | 本地尚无 `release/evidence/` 归档，真实 provider 和六平台候选版本验收仍需收齐 |
 
-## v1.0.0 收尾
+## 发布前剩余
 
-1. 在同一提交上通过本地全量检查；
-2. 选择一个 provider，完成一次受控握手和一次修复 fixture；
-3. 生成六平台测试与发布包证据；
-4. 更新 Changelog，创建 `v1.0.0` tag 和 GitHub Release。
+1. 对同一候选源码完成本地检查、六平台 CLI 测试和包验收。
+2. 选择一个 provider，生成对应的真实握手和修复 fixture 报告，并归档脱敏证据。
+3. 核对版本、更新发布文案，再创建 tag 和 Release。
 
-具体命令见[发布](../development/releasing.md)。
+操作步骤只在[发布](../development/releasing.md)中维护；测试范围见[测试](../development/testing.md)。
 
-## 已知边界
+## 后续重点
 
-- macOS 和 Linux 的命令沙箱不提供完整宿主读取白名单；
-- Windows 没有单文件大小硬限制；
-- POSIX 资源限制和工作区磁盘限制不是文件系统原生 quota；
-- Windows 和 macOS 包尚未签名，macOS 尚未 notarize；
-- Linux 预编译包以 Ubuntu 24.04 为兼容基线；
-- provider 模板与离线协议测试不等于线上服务验证；
-- 桌面界面尚未完成 Windows、Linux 原生视觉验收，也未进入发布包；
+- 先处理实际任务中暴露的中断、恢复、模型兼容和界面交互问题。
+- 完成 Windows、Linux 桌面原生交互验收后，再推进 GUI 打包和正式分发签名。当前 Windows、macOS 包未签名，macOS 未 notarize；Linux 包以 Ubuntu 24.04 为兼容基线。
 
-持续聊天和多 Agent 编排不在当前产品范围。桌面预览只呈现现有任务、审批和证据语义，不扩展 Agent 能力。
+当前聚焦单任务 Agent，持续聊天和多 Agent 编排不在计划内。附件输入、MCP 客户端和长期语义记忆尚未提供。沙箱与资源限制见[安全与恢复](../guides/safety-and-recovery.md#边界)。
 
-## v1.0.0 之后
-
-先根据真实用户和回归结果修复可靠性问题。桌面界面完成跨平台原生验收后再考虑打包；没有使用证据前，不扩展多 Agent 或更多工作流抽象。
+[源码导读](../guide/README.md)

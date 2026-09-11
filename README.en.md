@@ -58,11 +58,12 @@ Detailed guides are currently written in Simplified Chinese.
   - [Safety and recovery](docs/guides/safety-and-recovery.md): file boundaries, command sandboxes, and task recovery.
 - Understand mint
   - [Architecture](docs/concepts/architecture.md): execution flow, modules, and dependency direction.
+  - [Source guide](docs/guide/README.md): directories and file responsibilities by module.
 - Develop
   - [Code style](docs/development/code-style.md): naming, bilingual comments, and automated checks.
   - [Testing](docs/development/testing.md): local checks and the platform matrix.
   - [Releasing](docs/development/releasing.md): packages, live model evidence, and release gates.
 - Project
-  - [Current status](docs/project/roadmap.md): completion, known limits, and next steps.
+  - [Project status](docs/project/roadmap.md): current stage, release gaps, and next steps.
   - [Changelog](CHANGELOG.md)
   - [Security reporting](SECURITY.md)

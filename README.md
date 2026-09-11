@@ -56,11 +56,12 @@ macOS 可用 `cmake --build build/gui --target mint_gui_app --parallel 4` 生成
   - [安全与恢复](docs/guides/safety-and-recovery.md)：文件边界、命令沙箱和任务恢复。
 - 理解
   - [架构](docs/concepts/architecture.md)：执行流程、模块和依赖方向。
+  - [源码导读](docs/guide/README.md)：按模块查目录与文件用途。
 - 开发
   - [代码风格](docs/development/code-style.md)：命名、双语注释和自动检查。
   - [测试](docs/development/testing.md)：本地检查和平台矩阵。
   - [发布](docs/development/releasing.md)：打包、真实模型证据和发布门禁。
 - 项目
-  - [当前状态](docs/project/roadmap.md)：完成度、已知边界和下一步。
+  - [项目进度](docs/project/roadmap.md)：当前阶段、发布缺口和下一步。
   - [更新记录](CHANGELOG.md)
   - [安全漏洞报告](SECURITY.md)
