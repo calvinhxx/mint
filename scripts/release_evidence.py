@@ -1,4 +1,4 @@
-"""Validate the sanitized live evidence required by a mint release."""
+"""Write and validate the sanitized live evidence required by a mint release."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -189,6 +190,22 @@ ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 
 class EvidenceError(ValueError):
     pass
+
+
+def write_report(path: Path | None, report: Mapping[str, object]) -> None:
+    content = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+    if path is None:
+        sys.stdout.write(content)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as output:
+            output.write(content)
+    except FileExistsError as error:
+        raise EvidenceError(f"refusing to replace existing evidence file: {path}") from error
+    except OSError as error:
+        path.unlink(missing_ok=True)
+        raise EvidenceError(f"cannot write evidence file: {path}") from error
 
 
 def _require(condition: bool, message: str) -> None:

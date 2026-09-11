@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Mapping, Sequence
 
+import release_evidence
 from provider_matrix import ProviderMatrixError, load_provider_matrix, profile_by_config
 from release_evidence import EvidenceError, release_source_digest, require_release_source_tree
 
@@ -738,21 +739,10 @@ def independent_verification(project: Path, build: Path) -> dict:
 
 
 def write_report(path: Path | None, report: Mapping[str, object]) -> None:
-    content = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
-    if path is None:
-        sys.stdout.write(content)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with path.open("x", encoding="utf-8") as output:
-            output.write(content)
-    except FileExistsError as error:
-        raise FixtureRegressionError(
-            "evidence", f"refusing to replace evidence file: {path}"
-        ) from error
-    except OSError as error:
-        path.unlink(missing_ok=True)
-        raise FixtureRegressionError("evidence", f"cannot write evidence file: {path}") from error
+        release_evidence.write_report(path, report)
+    except EvidenceError as error:
+        raise FixtureRegressionError("evidence", str(error)) from error
 
 
 def base_report(

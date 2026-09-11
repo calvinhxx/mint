@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
+import release_evidence
 from provider_matrix import (
     ProviderMatrixError,
     ProviderProfile,
@@ -182,19 +183,10 @@ def missing_credentials(
 
 
 def write_report(path: Path | None, report: Mapping[str, object]) -> None:
-    content = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
-    if path is None:
-        sys.stdout.write(content)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with path.open("x", encoding="utf-8") as output:
-            output.write(content)
-    except FileExistsError as error:
-        raise RegressionError(f"refusing to replace existing evidence file: {path}") from error
-    except OSError as error:
-        path.unlink(missing_ok=True)
-        raise RegressionError(f"cannot write evidence file: {path}") from error
+        release_evidence.write_report(path, report)
+    except EvidenceError as error:
+        raise RegressionError(str(error)) from error
 
 
 def execute(args: argparse.Namespace) -> int:
